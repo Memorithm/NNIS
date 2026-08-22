@@ -89,12 +89,14 @@ Takeover run (2026-08-22):
   0.623600 ms median, 0.683651 ms p95, 0.708187 ms p99, 0.615296-0.710816 ms
   range, 215.230 GB/s derived median throughput. Result validation passed;
   report provenance is commit `85420bd` with `git_dirty=false`.
-- Wave 7 working-tree baseline on Thor: cold CUBIN compile 10.113 ms median,
-  cache lookup 0.001370 ms, module load 0.023-0.024 ms, 4 MiB allocation
-  0.070-0.072 ms, free 0.042-0.043 ms, empty event pair 0.001088-0.001120 ms,
-  one-element kernel 0.004256-0.004576 ms, and 16,777,216-element scale
-  0.613-0.636 ms median. Transfer medians were about 0.646 ms H2D, 0.624 ms
-  D2H, and 0.607 ms D2D for 64 MiB.
+- Wave 7 clean run at `6dd485f` (`git_dirty=false`): NVRTC library load
+  5.793 ms; cold CUBIN compile 10.211 ms median; cache lookup 0.001371 ms;
+  module load/unload 0.023477/0.001551 ms; 4 MiB allocation/free
+  0.069487/0.042208 ms; inline argument packing 0.000121 ms; host launch
+  submission 0.002120 ms; empty event pair 0.001088 ms; one-element kernel
+  0.004576 ms; and 16,777,216-element scale 0.615392 ms (218.101 GB/s).
+  The 64 MiB transfer medians were 0.621296 ms H2D, 0.611408 ms D2H, and
+  0.599744 ms D2D; every data path passed validation.
 - Optimization A/B: boxed argument packing was 0.000166 ms median and total
   host submission 0.002148-0.002194 ms. Inline aligned storage measured
   0.000120-0.000121 ms packing and 0.002084-0.002130 ms total submission across
@@ -110,8 +112,8 @@ Takeover run (2026-08-22):
 
 ## Recent changes
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
-Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, and facade /
-end-to-end `75ca7d6`.
+Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
+end-to-end `75ca7d6`, and Wave 7 performance work `6dd485f`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
