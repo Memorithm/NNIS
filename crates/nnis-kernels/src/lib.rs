@@ -6,6 +6,7 @@
 
 use nnis_jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
+    OccupancyRecommendation,
 };
 use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
 use std::sync::Arc;
@@ -54,6 +55,22 @@ extern "C" __global__ void nnis_affine_f32(
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
 
+/// Occupancy recommendations for each kernel in [`F32Elementwise`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct F32ElementwiseOccupancy {
+    pub vector_add: OccupancyRecommendation,
+    pub scale: OccupancyRecommendation,
+    pub affine: OccupancyRecommendation,
+}
+
+/// Active blocks per multiprocessor for this kernel set's configured width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct F32ElementwiseActiveBlocks {
+    pub vector_add: u32,
+    pub scale: u32,
+    pub affine: u32,
+}
+
 /// Context-bound `f32` elementwise kernels compiled for the active GPU.
 #[derive(Debug)]
 pub struct F32Elementwise {
@@ -66,20 +83,66 @@ pub struct F32Elementwise {
 impl F32Elementwise {
     /// Compile (or reuse cached CUBIN) and load the elementwise kernel module.
     pub fn load(context: &Arc<Context>, compiler: &JitCompiler) -> Result<Self> {
+        Self::load_with_block_size(context, compiler, DEFAULT_BLOCK_SIZE)
+    }
+
+    /// Load the kernel family with one explicitly selected thread-block width.
+    ///
+    /// This constructor supports reproducible tuning while keeping launch
+    /// details behind the operation API. The width is checked against every
+    /// function's compiled CUDA limit before the kernel set is returned.
+    pub fn load_with_block_size(
+        context: &Arc<Context>,
+        compiler: &JitCompiler,
+        block_size: u32,
+    ) -> Result<Self> {
+        if block_size == 0 {
+            return Err(NnisError::invalid_input("elementwise block size is zero"));
+        }
         let options = CompileOptions::for_device(context);
         let code = compiler.compile_cubin(ELEMENTWISE_SOURCE, &options)?;
         let module = Module::load(context, &code)?;
+        let vector_add = module.get_function("nnis_vector_add_f32")?;
+        let scale = module.get_function("nnis_scale_f32")?;
+        let affine = module.get_function("nnis_affine_f32")?;
+        validate_block_size("vector_add", &vector_add, block_size)?;
+        validate_block_size("scale", &scale, block_size)?;
+        validate_block_size("affine", &affine, block_size)?;
         Ok(Self {
-            vector_add: module.get_function("nnis_vector_add_f32")?,
-            scale: module.get_function("nnis_scale_f32")?,
-            affine: module.get_function("nnis_affine_f32")?,
-            block_size: DEFAULT_BLOCK_SIZE,
+            vector_add,
+            scale,
+            affine,
+            block_size,
         })
     }
 
     /// CUDA thread-block width used by this kernel family.
     pub fn block_size(&self) -> u32 {
         self.block_size
+    }
+
+    /// CUDA's occupancy-based launch recommendation for every operation.
+    pub fn occupancy(&self) -> Result<F32ElementwiseOccupancy> {
+        Ok(F32ElementwiseOccupancy {
+            vector_add: self.vector_add.recommend_occupancy(0, None)?,
+            scale: self.scale.recommend_occupancy(0, None)?,
+            affine: self.affine.recommend_occupancy(0, None)?,
+        })
+    }
+
+    /// Resource-limited active blocks per SM at the configured block width.
+    pub fn active_blocks_per_multiprocessor(&self) -> Result<F32ElementwiseActiveBlocks> {
+        Ok(F32ElementwiseActiveBlocks {
+            vector_add: self
+                .vector_add
+                .max_active_blocks_per_multiprocessor(self.block_size, 0)?,
+            scale: self
+                .scale
+                .max_active_blocks_per_multiprocessor(self.block_size, 0)?,
+            affine: self
+                .affine
+                .max_active_blocks_per_multiprocessor(self.block_size, 0)?,
+        })
     }
 
     /// Add two equal-length buffers and wait for completion.
@@ -231,6 +294,21 @@ impl F32Elementwise {
     }
 }
 
+fn validate_block_size(operation: &str, kernel: &Kernel, block_size: u32) -> Result<()> {
+    if block_size == 0 {
+        return Err(NnisError::invalid_input(format!(
+            "{operation} block size is zero"
+        )));
+    }
+    let maximum = kernel.attributes()?.max_threads_per_block;
+    if block_size > maximum {
+        return Err(NnisError::invalid_input(format!(
+            "{operation} block size {block_size} exceeds function limit {maximum}"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_lengths(operation: &str, buffers: &[(&str, usize)]) -> Result<()> {
     let expected = buffers.first().map_or(0, |(_, length)| *length);
     if let Some((name, actual)) = buffers
@@ -271,6 +349,16 @@ mod tests {
         };
         let compiler = JitCompiler::new();
         let kernels = F32Elementwise::load(&context, &compiler).unwrap();
+        let occupancy = kernels.occupancy().unwrap();
+        for recommendation in [occupancy.vector_add, occupancy.scale, occupancy.affine] {
+            assert!(recommendation.block_size > 0);
+            assert!(recommendation.minimum_grid_size > 0);
+            assert!(recommendation.active_blocks_per_multiprocessor > 0);
+        }
+        let active_blocks = kernels.active_blocks_per_multiprocessor().unwrap();
+        assert!(active_blocks.vector_add > 0);
+        assert!(active_blocks.scale > 0);
+        assert!(active_blocks.affine > 0);
         let stream = Stream::new(&context).unwrap();
 
         for &size in TEST_SIZES {
@@ -322,6 +410,13 @@ mod tests {
             return;
         };
         let compiler = JitCompiler::new();
+        assert!(F32Elementwise::load_with_block_size(&context, &compiler, 0).is_err());
+        assert!(F32Elementwise::load_with_block_size(
+            &context,
+            &compiler,
+            context.props().max_threads_per_block + 1,
+        )
+        .is_err());
         let kernels = F32Elementwise::load(&context, &compiler).unwrap();
         let stream = Stream::new(&context).unwrap();
         let short = DeviceBuffer::<f32>::new(&context, 3).unwrap();

@@ -24,14 +24,14 @@ pub mod jit {
 
 /// Reusable NNIS native kernel families.
 pub mod kernels {
-    pub use nnis_kernels::F32Elementwise;
+    pub use nnis_kernels::{F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy};
 }
 
 pub use jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelAttributes, KernelLaunch, LaunchConfig,
     Module, OccupancyRecommendation,
 };
-pub use kernels::F32Elementwise;
+pub use kernels::{F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy};
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
     PinnedBuffer, Result, Stream,

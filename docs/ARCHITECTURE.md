@@ -30,6 +30,8 @@ nnis facade -> nnis-kernels  |
   immutable results, owns loaded modules, retains modules through function
   handles, and validates launch shape/context relationships.
 - `nnis-kernels` packages tested kernel source behind operation-level APIs.
+  Its explicit block-size constructor and operation-level occupancy reports
+  form a tuning boundary without exposing the underlying CUDA functions.
 - `nnis-bench` is a separate measurement layer so the application facade does
   not acquire serialization or benchmarking dependencies.
 - `nnis` re-exports the intended application surface without exposing raw

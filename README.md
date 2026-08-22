@@ -140,6 +140,17 @@ Run the broader native-cost investigation with:
 cargo run --release -p nnis-bench --example performance_breakdown
 ```
 
+Sweep the real kernel library across explicit thread-block widths with:
+
+```bash
+NNIS_BENCH_BLOCK_SIZES=128,256,512,768,1024 \
+NNIS_BENCH_ELEMENTS=16777216 \
+cargo run --release -p nnis-bench --example block_size_sweep
+```
+
+Each result records both the configured width and its active blocks per SM,
+alongside CUDA's independent occupancy recommendation.
+
 For reference, a clean Thor run at commit `85420bd` measured the 16,777,216
 element `f32` scale kernel at 0.623600 ms median and 215.230 decimal GB/s over
 100 iterations. A later clean run at `6dd485f` measured 0.615392 ms and 218.101

@@ -43,6 +43,9 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - JIT kernel introspection exposes cached typed function attributes, maximum
   active blocks per SM, and occupancy-based launch recommendations. Launch
   validation now applies function-specific thread/dynamic-shared-memory limits.
+- Kernel tuning infrastructure can load the real `F32Elementwise` family with
+  a validated explicit width, report per-operation occupancy, and sweep widths
+  through the existing CUDA-event benchmark harness with result validation.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
@@ -76,8 +79,8 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   lifetime obligation. `DevicePod` gates bytewise host representations.
 
 ## Next task
-Benchmark the elementwise kernels at 128/256/512/768/1024 threads on Thor and
-compare against CUDA's occupancy recommendation before changing dispatch.
+Commit/push the block-size sweep, then run clean 16,777,216-element forward and
+reverse-order measurements on Thor before changing the 256-thread default.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -111,6 +114,13 @@ Takeover run (2026-08-22):
 - Introspection milestone: workspace fmt/check/clippy/doc passed, followed by
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (26 tests, including
   real attribute/occupancy queries and a launch using the recommended width).
+- Dirty-tree smoke run: `NNIS_BENCH_ELEMENTS=1048576 NNIS_BENCH_WARMUPS=3
+  NNIS_BENCH_ITERATIONS=10 cargo run --release -p nnis-bench --example
+  block_size_sweep` tested 128/256/512/768/1024-thread launches and validated
+  every result. It is functional evidence only, not a retained performance
+  result; clean full-size measurements are the exact next task.
+- Sweep-infrastructure milestone: workspace fmt/check/clippy/doc and
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` passed (26 tests).
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
