@@ -95,6 +95,10 @@ dependencies = [
 [[package]]
 name = "nnis-kernels"
 version = "0.1.0"
+dependencies = [
+ "nnis-jit",
+ "nnis-rt",
+]
 
 [[package]]
 name = "nnis-rt"

@@ -15,9 +15,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   cache keys, and a process-local compiled-code cache.
 - Wave 2: owned CUDA modules/functions plus validated grid/block/shared-memory,
   context, buffer, and typed argument packing for `cuLaunchKernel`.
+- Wave 3: `F32Elementwise` runtime-specialized CUBIN kernels for vector add,
+  scale, and fused affine, with safe synchronizing and unsafe enqueue APIs.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
-  are exercised. Workspace total: 15 tests passed with GPU required.
+  are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 17 tests
+  passed with GPU required.
 
 ## Architectural decisions
 - nnis-sys: dynamic dlopen CUDA + NVRTC, no link-time dep
@@ -31,11 +35,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   entries directly.
 - JIT cache entries are immutable and keyed by source, ordered options,
   architecture, and output kind. Compilation occurs outside the cache mutex.
+- Safe high-level kernel calls synchronize before returning; enqueue variants
+  remain `unsafe` until device-buffer ownership can cover asynchronous work.
 
 ## Next task
-Wave 3: turn `nnis-kernels` into a reusable runtime-specialized kernel library,
-starting with vector add and fused affine across zero/boundary/non-multiple
-sizes with CPU oracles and explicit floating-point tolerances.
+Wave 4: implement a CUDA-event benchmark harness with warmups, distribution
+summaries, machine-readable output, GPU/build metadata, and a real elementwise
+kernel benchmark.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -44,6 +50,8 @@ Takeover run (2026-08-22):
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (15 passed)
 - `git diff --check`
+- `NNIS_REQUIRE_GPU=1 cargo test -p nnis-kernels --all-targets -- --nocapture`
+  (2 new GPU tests passed; workspace total now 17)
 
 ## Measured benchmarks
 - None yet; benchmark infrastructure is Wave 4.
@@ -53,8 +61,9 @@ Takeover run (2026-08-22):
   run with direct hardware access.
 
 ## Recent changes
-Protected baseline `d086ec2` and pushed bootstrap `f7b39c6` remain intact.
+Protected baseline `d086ec2`, pushed bootstrap `f7b39c6`, and completed JIT
+milestone `34c8168` remain intact.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
-`cargo test -p nnis-kernels --lib -- --nocapture` after implementing Wave 3.
+`cargo check -p nnis-bench --all-targets` after implementing the event harness.
