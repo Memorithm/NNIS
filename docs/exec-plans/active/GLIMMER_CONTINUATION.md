@@ -21,10 +21,15 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   min/median/mean/p95/p99/max/stddev, derived throughput, JSON reports, and
   git/GPU/driver/NVRTC metadata. A release elementwise benchmark validates its
   output after timing.
+- Wave 5: top-level `nnis` facade with deliberate runtime/JIT/kernel modules,
+  common root exports, a prelude, and a ready-to-use `Session`.
+- Wave 6: explicit custom-CUDA end-to-end example covering Device -> Context
+  -> buffers -> NVRTC CUBIN -> Module -> Kernel -> launch -> events -> CPU
+  validation.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
-  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 20 tests
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 21 tests
   passed with GPU required.
 
 ## Architectural decisions
@@ -44,10 +49,12 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - Benchmarks record start/end events on the operation stream, synchronize the
   end event, and derive latency from `cuEventElapsedTime`; host enqueue time is
   never reported as GPU latency.
+- The facade does not expose `nnis-sys`; raw FFI remains an implementation
+  layer while custom-kernel users receive the validated JIT launch surface.
 
 ## Next task
-Wave 5: expose a deliberate top-level `nnis` facade over runtime, JIT, and
-kernels, then add the Wave 6 end-to-end example using event timing.
+Wave 7: measure JIT cold/cache-hit latency, module load, launch, allocation,
+transfer, and event overhead; pursue only optimizations supported by results.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -63,6 +70,8 @@ Takeover run (2026-08-22):
 - `NNIS_BENCH_ELEMENTS=16777216 NNIS_BENCH_WARMUPS=20
   NNIS_BENCH_ITERATIONS=100 cargo run --release -p nnis-bench --example
   elementwise` (clean commit `85420bd`, output validation passed)
+- `cargo run --release -p nnis --example end_to_end` (1,000,003 results
+  validated on Thor; initial working-tree run: 44.646 ms JIT, 0.020288 ms GPU)
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -77,8 +86,8 @@ Takeover run (2026-08-22):
 
 ## Recent changes
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
-Wave 3 `00f9d20`, and Wave 4 `85420bd`.
+Wave 3 `00f9d20`, Wave 4 `85420bd`, and benchmark record `1282912`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
-`cargo check -p nnis --all-targets` after implementing the facade.
+add a reproducible performance-breakdown example in `nnis-bench`.
