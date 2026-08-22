@@ -37,6 +37,9 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - CUDA 13.0 header audit: driver/NVRTC/module/launch/copy/event/occupancy
   signatures match except the corrected `cuMemsetD8Async` fill argument
   (`unsigned char`, not `unsigned int`). An odd-byte GPU zero test covers it.
+- Project-level usage and architecture documentation now covers the facade,
+  custom JIT path, ownership graph, blocking/async lifetime contract,
+  `DevicePod`, validation, and reproducible CUDA-event benchmark commands.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
@@ -70,8 +73,8 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   lifetime obligation. `DevicePod` gates bytewise host representations.
 
 ## Next task
-Add project-level usage and architecture documentation, including the safe vs
-async lifetime contract and reproducible Thor benchmark commands.
+Expose safe CUDA function attributes and occupancy guidance through `nnis-jit`,
+then test and use the result to justify the standard kernel block-size choice.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -95,6 +98,9 @@ Takeover run (2026-08-22):
   synchronous-safe / explicit-async memory hardening)
 - `NNIS_REQUIRE_GPU=1 cargo test -p nnis-sys -p nnis-rt --all-targets`
   (14 passed, including corrected D8 ABI execution; workspace total 26)
+- Documentation milestone: `cargo doc --workspace --no-deps`, full workspace
+  check/clippy/fmt/diff checks, and `NNIS_REQUIRE_GPU=1 cargo test --workspace
+  --all-targets` all passed (26 tests on the Thor).
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -126,8 +132,12 @@ Takeover run (2026-08-22):
 ## Recent changes
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
 Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
-end-to-end `75ca7d6`, Wave 7 `6dd485f`, and performance record `8413eb0`.
+end-to-end `75ca7d6`, Wave 7 `6dd485f`, performance record `8413eb0`, memory
+safety hardening `bee938f`, and CUDA ABI audit `ef04ffb`.
+The root guide and architecture/safety contract are the current documentation
+milestone.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
-values. The validated typed launcher fixes that root cause. Next task: document
-the public facade, custom JIT path, safety contracts, and benchmark workflow.
+values. The validated typed launcher fixes that root cause. Next task: make
+the already-bound CUDA function/occupancy queries available through safe JIT
+introspection and validate the current kernel dispatch choice.
