@@ -184,12 +184,10 @@ impl Device {
         if rc != 0 {
             return Err(NnisError::driver("cuDeviceGetName", rc).with("ordinal", self.ordinal));
         }
-        let bytes: Vec<u8> = buf
-            .iter()
-            .take_while(|&&c| c != 0)
-            .map(|&c| c as u8)
-            .collect();
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        // SAFETY: `cuDeviceGetName` writes a NUL-terminated string when the
+        // supplied buffer has non-zero length.
+        let name = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
+        Ok(name.to_string_lossy().into_owned())
     }
 
     /// Device UUID (v2 layout when the driver exposes it).

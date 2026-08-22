@@ -57,10 +57,6 @@ impl Context {
         &self.props
     }
 
-    pub(crate) fn raw(&self) -> CUcontext {
-        self.raw
-    }
-
     /// Make this context current on the calling thread.
     pub fn set_current(&self) -> Result<()> {
         let api = driver::api()?;

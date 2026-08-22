@@ -9,7 +9,6 @@ use std::sync::OnceLock;
 
 type CInt = core::ffi::c_int;
 type CChar = core::ffi::c_char;
-type CVoid = core::ffi::c_void;
 type CSizeT = usize;
 
 /// Raw `nvrtcResult`.
@@ -27,7 +26,7 @@ pub struct NvrtcApi {
         *const *const CChar,
         *const *const CChar,
     ) -> NvrtcResult,
-    pub nvrtcDestroyProgram: unsafe extern "C" fn(crate::nvrtcProgram) -> NvrtcResult,
+    pub nvrtcDestroyProgram: unsafe extern "C" fn(*mut crate::nvrtcProgram) -> NvrtcResult,
     pub nvrtcCompileProgram:
         unsafe extern "C" fn(crate::nvrtcProgram, CInt, *const *const CChar) -> NvrtcResult,
     pub nvrtcGetPTXSize: unsafe extern "C" fn(crate::nvrtcProgram, *mut CSizeT) -> NvrtcResult,
@@ -41,6 +40,10 @@ pub struct NvrtcApi {
         unsafe extern "C" fn(crate::nvrtcProgram, *const CChar) -> NvrtcResult,
     pub nvrtcGetLoweredName:
         unsafe extern "C" fn(crate::nvrtcProgram, *const CChar, *mut *const CChar) -> NvrtcResult,
+
+    // NVRTC function pointers become invalid after `dlclose`. The API is
+    // cached process-wide, so it must own the loaded library for that lifetime.
+    _library: Library,
 }
 
 /// Soname candidates for NVRTC, newest first.
@@ -51,44 +54,50 @@ pub const NVRTC_CANDIDATES: &[&str] = &[
     "libnvrtc.so",
 ];
 
-unsafe fn resolve<T: Copy>(
-    lib: &Library,
-    candidates: &'static [&'static str],
-) -> Result<T, LibraryError> {
+unsafe fn resolve<T: Copy>(lib: &Library, candidates: &[&str]) -> Result<T, LibraryError> {
+    let mut detail = String::from("no symbol candidate was provided");
     for sym in candidates {
-        if let Ok(f) = lib.get::<T>(sym.as_bytes()) {
-            return Ok(*f);
+        match lib.get::<T>(sym.as_bytes()) {
+            Ok(f) => return Ok(*f),
+            Err(error) => detail = error.to_string(),
+        }
+    }
+    Err(LibraryError {
+        library: "libnvrtc",
+        candidates: candidates
+            .iter()
+            .map(|candidate| candidate.to_string())
+            .collect(),
+        detail,
+    })
+}
+
+fn open_library() -> Result<Library, LibraryError> {
+    let mut candidates = Vec::new();
+    let mut detail = String::from("no library could be opened");
+    if let Ok(p) = std::env::var("NNIS_NVRTC_PATH") {
+        if !p.is_empty() {
+            candidates.push(p.clone());
+            unsafe {
+                match Library::new(&p) {
+                    Ok(library) => return Ok(library),
+                    Err(error) => detail = error.to_string(),
+                }
+            }
+        }
+    }
+    for candidate in NVRTC_CANDIDATES {
+        candidates.push((*candidate).to_string());
+        unsafe {
+            match Library::new(candidate) {
+                Ok(library) => return Ok(library),
+                Err(error) => detail = error.to_string(),
+            }
         }
     }
     Err(LibraryError {
         library: "libnvrtc",
         candidates,
-        detail: format!("symbol {} not found", candidates[0]),
-    })
-}
-
-fn open_library() -> Result<Library, LibraryError> {
-    let mut detail = String::from("no library could be opened");
-    if let Ok(p) = std::env::var("NNIS_NVRTC_PATH") {
-        if !p.is_empty() {
-            unsafe {
-                if let Ok(l) = Library::new(&p) {
-                    return Ok(l);
-                }
-            }
-            detail = format!("NNIS_NVRTC_PATH={p} could not be opened");
-        }
-    }
-    for c in NVRTC_CANDIDATES {
-        unsafe {
-            if let Ok(l) = Library::new(c) {
-                return Ok(l);
-            }
-        }
-    }
-    Err(LibraryError {
-        library: "libnvrtc",
-        candidates: NVRTC_CANDIDATES,
         detail,
     })
 }
@@ -101,19 +110,20 @@ pub fn api() -> Result<&'static NvrtcApi, LibraryError> {
         let lib = open_library()?;
         unsafe {
             Ok(NvrtcApi {
-                nvrtcVersion: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetErrorString: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcCreateProgram: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcDestroyProgram: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcCompileProgram: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetPTXSize: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetPTX: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetCUBINSize: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetCUBIN: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetProgramLogSize: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetProgramLog: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcAddNameExpression: resolve(&lib, NVRTC_CANDIDATES)?,
-                nvrtcGetLoweredName: resolve(&lib, NVRTC_CANDIDATES)?,
+                nvrtcVersion: resolve(&lib, &["nvrtcVersion"])?,
+                nvrtcGetErrorString: resolve(&lib, &["nvrtcGetErrorString"])?,
+                nvrtcCreateProgram: resolve(&lib, &["nvrtcCreateProgram"])?,
+                nvrtcDestroyProgram: resolve(&lib, &["nvrtcDestroyProgram"])?,
+                nvrtcCompileProgram: resolve(&lib, &["nvrtcCompileProgram"])?,
+                nvrtcGetPTXSize: resolve(&lib, &["nvrtcGetPTXSize"])?,
+                nvrtcGetPTX: resolve(&lib, &["nvrtcGetPTX"])?,
+                nvrtcGetCUBINSize: resolve(&lib, &["nvrtcGetCUBINSize"])?,
+                nvrtcGetCUBIN: resolve(&lib, &["nvrtcGetCUBIN"])?,
+                nvrtcGetProgramLogSize: resolve(&lib, &["nvrtcGetProgramLogSize"])?,
+                nvrtcGetProgramLog: resolve(&lib, &["nvrtcGetProgramLog"])?,
+                nvrtcAddNameExpression: resolve(&lib, &["nvrtcAddNameExpression"])?,
+                nvrtcGetLoweredName: resolve(&lib, &["nvrtcGetLoweredName"])?,
+                _library: lib,
             })
         }
     })
@@ -146,5 +156,17 @@ pub fn version() -> Option<(i32, i32)> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn nvrtc_is_loadable_when_gpu_is_required() {
+        if std::env::var("NNIS_REQUIRE_GPU").as_deref() != Ok("1") {
+            return;
+        }
+        let version = super::version().expect("NNIS_REQUIRE_GPU=1 requires a usable NVRTC");
+        assert!(version.0 >= 11, "unexpected NVRTC version {version:?}");
     }
 }

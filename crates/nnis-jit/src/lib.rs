@@ -1,84 +1,107 @@
-//! Just-in-time CUDA compilation via NVRTC and driver module load.
+//! Runtime CUDA compilation, module ownership, and validated kernel launch.
 
-pub mod error;
-pub mod program;
-pub mod module;
-pub mod launch;
+mod cache;
+mod launch;
+mod module;
+mod program;
 
-pub use program::{CompileOptions, JitProgram, ProgramCacheKey};
-pub use module::Module;
-pub use launch::{Dim3, KernelLaunch};
+pub use cache::{CompiledCode, JitCompiler};
+pub use launch::{Dim3, KernelArgs, KernelLaunch, KernelParameter, LaunchConfig};
+pub use module::{Kernel, Module};
+pub use program::{CodeKind, CompileOptions, JitProgram, ProgramCacheKey};
 
 #[cfg(test)]
 mod tests {
-    use crate::program::{CompileOptions, JitProgram};
-    use nnis_rt::{gpu_context, DeviceBuffer, Stream, Context};
+    use super::*;
+    use nnis_rt::{gpu_context, DeviceBuffer, ErrorKind, Stream};
     use std::sync::Arc;
 
+    const VECTOR_ADD: &str = r#"
+        extern "C" __global__ void vector_add(
+            const float* left,
+            const float* right,
+            float* output,
+            int elements
+        ) {
+            int index = blockIdx.x * blockDim.x + threadIdx.x;
+            if (index < elements) {
+                output[index] = left[index] + right[index];
+            }
+        }
+    "#;
+
     #[test]
-    fn jit_vector_add_roundtrip() {
-        let ctx = match nnis_rt::gpu_context() {
-            Some(c) => c,
-            None => {
-                eprintln!("skipped: no CUDA device");
-                return;
-            }
+    fn jit_vector_add_roundtrip_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
         };
-        let stream = Stream::new(&ctx).unwrap();
-        let n = 1024usize;
-        let kernel_src = r#"
-            extern "C" __global__ void vec_add(const float* a, const float* b, float* c, int n) {
-                int i = blockIdx.x * blockDim.x + threadIdx.x;
-                if (i < n) {
-                    c[i] = a[i] + b[i];
-                }
-            }
-        "#;
-        let opts = CompileOptions::for_device(&ctx);
-        let prog = JitProgram::compile(kernel_src, opts).expect("compile");
-        let ptx = prog.get_ptx().expect("ptx");
-        let module = crate::Module::load_from_ptx(&ctx, &ptx).expect("load module");
-        let func = module.get_function("vec_add").expect("get func");
+        let stream = Stream::new(&context).unwrap();
+        let options = CompileOptions::for_device(&context);
+        let compiler = JitCompiler::new();
 
-        // allocate buffers
-        let a_host: Vec<f32> = (0..n as u32).map(|i| i as f32).collect();
-        let b_host: Vec<f32> = (0..n as u32).map(|i| (i as f32) * 2.0).collect();
-        let a_buf = DeviceBuffer::<f32>::from_host(&ctx, &stream, &a_host).unwrap();
-        let b_buf = DeviceBuffer::<f32>::from_host(&ctx, &stream, &b_host).unwrap();
-        let mut c_buf = DeviceBuffer::<f32>::new(&ctx, n).unwrap();
+        let ptx = compiler.compile_ptx(VECTOR_ADD, &options).unwrap();
+        assert!(!ptx.bytes().is_empty());
+        let cached = compiler.compile_ptx(VECTOR_ADD, &options).unwrap();
+        assert!(Arc::ptr_eq(&ptx, &cached), "second compile must hit cache");
 
-        // launch
-        let n_i32 = n as i32;
-        // args pointers must live for duration of launch
-        let mut args: Vec<*mut std::ffi::c_void> = vec![
-            a_buf.device_ptr() as *mut _,
-            b_buf.device_ptr() as *mut _,
-            c_buf.device_ptr() as *mut _,
-            &n_i32 as *const _ as *mut _,
-        ];
-        let grid = crate::launch::Dim3 { x: ((n as u32 + 255)/256), y:1, z:1 };
-        let block = crate::launch::Dim3 { x:256, y:1, z:1 };
-        // Use raw launch
-        use nnis_sys::driver as drv;
-        ctx.set_current().unwrap();
-        let api = drv::api().unwrap();
-        unsafe {
-            let rc = (api.cuLaunchKernel)(
-                func.handle,
-                grid.x, grid.y, grid.z,
-                block.x, block.y, block.z,
-                0,
-                stream.raw(),
-                args.as_mut_ptr(),
-                std::ptr::null_mut(),
-            );
-            assert_eq!(rc, 0, "launch failed");
-        }
+        let cubin = compiler.compile_cubin(VECTOR_ADD, &options).unwrap();
+        assert!(cubin.bytes().starts_with(b"\x7fELF"));
+        assert_eq!(compiler.len(), 2);
+
+        let module = Module::load(&context, &ptx).unwrap();
+        let kernel = module.get_function("vector_add").unwrap();
+        assert!(module.get_function("missing_kernel").is_err());
+
+        let elements = 1_025usize;
+        let left_host = (0..elements)
+            .map(|index| index as f32 * 0.25 - 10.0)
+            .collect::<Vec<_>>();
+        let right_host = (0..elements)
+            .map(|index| index as f32 * -0.5 + 3.0)
+            .collect::<Vec<_>>();
+        let left = DeviceBuffer::from_host(&context, &stream, &left_host).unwrap();
+        let right = DeviceBuffer::from_host(&context, &stream, &right_host).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, elements).unwrap();
+
+        let mut arguments = KernelArgs::new();
+        arguments
+            .push_buffer(&left)
+            .push_buffer(&right)
+            .push_buffer(&output)
+            .push(elements as i32);
+        let config = LaunchConfig::for_num_elements(elements, 256).unwrap();
+        let launch = KernelLaunch::new(&kernel, &stream, config);
+        // SAFETY: argument order/types match VECTOR_ADD; all referenced
+        // objects remain alive through the synchronization below.
+        unsafe { launch.launch(&mut arguments) }.unwrap();
         stream.synchronize().unwrap();
-        let c_host = c_buf.to_vec(&stream).unwrap();
-        for i in 0..n {
-            let expected = a_host[i] + b_host[i];
-            assert!((c_host[i] - expected).abs() < 1e-5, "mismatch at {}: {} vs {}", i, c_host[i], expected);
+
+        let actual = output.to_vec(&stream).unwrap();
+        for (index, ((left, right), actual)) in
+            left_host.iter().zip(&right_host).zip(&actual).enumerate()
+        {
+            let expected = left + right;
+            assert_eq!(*actual, expected, "mismatch at element {index}");
         }
+    }
+
+    #[test]
+    fn compilation_failure_preserves_nvrtc_log() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let error = match JitProgram::compile(
+            "extern \"C\" __global__ void broken( {",
+            CompileOptions::for_device(&context),
+        ) {
+            Ok(_) => panic!("invalid CUDA source unexpectedly compiled"),
+            Err(error) => error,
+        };
+        assert!(matches!(error.kind(), ErrorKind::Compile { .. }));
+        let rendered = error.to_string();
+        assert!(rendered.contains("compiler log"), "{rendered}");
+        assert!(rendered.contains("error"), "{rendered}");
     }
 }

@@ -56,7 +56,7 @@ pub struct LibraryError {
     /// Which library failed (`"libcuda.so.1"` / `"libnvrtc"`).
     pub library: &'static str,
     /// Candidate sonames that were attempted.
-    pub candidates: &'static [&'static str],
+    pub candidates: Vec<String>,
     /// Underlying `dlerror`-style message of the last attempt.
     pub detail: String,
 }

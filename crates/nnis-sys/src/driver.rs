@@ -109,6 +109,11 @@ pub struct DriverApi {
         CSizeT,
         CInt,
     ) -> CUresult,
+
+    // Function pointers obtained from `libloading` are valid only while the
+    // library remains loaded. `DriverApi` is process-global, so retaining the
+    // handle here gives every cached pointer the same process lifetime.
+    _library: Library,
 }
 
 unsafe fn resolve<T: Copy>(
@@ -116,21 +121,29 @@ unsafe fn resolve<T: Copy>(
     library: &'static str,
     candidates: &[&str],
 ) -> Result<T, LibraryError> {
+    let mut detail = String::from("no symbol candidate was provided");
     for sym in candidates {
-        if let Ok(f) = lib.get::<T>(sym.as_bytes()) {
-            return Ok(*f);
+        match lib.get::<T>(sym.as_bytes()) {
+            Ok(f) => return Ok(*f),
+            Err(error) => detail = error.to_string(),
         }
     }
     Err(LibraryError {
         library,
-        candidates: unsafe { std::mem::transmute::<&[&str], &'static [&'static str]>(candidates) },
-        detail: format!("symbol {} not found", candidates[0]),
+        candidates: candidates
+            .iter()
+            .map(|candidate| candidate.to_string())
+            .collect(),
+        detail,
     })
 }
 
 macro_rules! load {
     ($lib:expr, $($field:ident : [$($sym:literal),+ $(,)?]),+ $(,)?) => {{
-        Ok(DriverApi { $($field: resolve(&$lib, LIB, &[$($sym),+])?,)+ })
+        Ok(DriverApi {
+            $($field: resolve(&$lib, LIB, &[$($sym),+])?,)+
+            _library: $lib,
+        })
     }};
 }
 
@@ -138,30 +151,31 @@ macro_rules! load {
 pub const LIB: &str = "libcuda.so.1";
 
 fn open_library() -> Result<Library, LibraryError> {
-    let mut candidates: Vec<&str> = Vec::new();
+    let mut candidates = Vec::new();
     let mut detail = String::from("no library could be opened");
     if let Ok(p) = std::env::var("NNIS_CUDA_DRIVER_PATH") {
         if !p.is_empty() {
+            candidates.push(p.clone());
             unsafe {
-                if let Ok(l) = Library::new(&p) {
-                    return Ok(l);
+                match Library::new(&p) {
+                    Ok(library) => return Ok(library),
+                    Err(error) => detail = error.to_string(),
                 }
             }
-            detail = format!("NNIS_CUDA_DRIVER_PATH={p} could not be opened");
         }
     }
-    candidates.push("libcuda.so.1");
-    candidates.push("libcuda.so");
-    for c in &candidates {
+    for candidate in ["libcuda.so.1", "libcuda.so"] {
+        candidates.push(candidate.to_string());
         unsafe {
-            if let Ok(l) = Library::new(c) {
-                return Ok(l);
+            match Library::new(candidate) {
+                Ok(library) => return Ok(library),
+                Err(error) => detail = error.to_string(),
             }
         }
     }
     Err(LibraryError {
         library: "libcuda.so.1",
-        candidates: Box::leak(candidates.into_boxed_slice()),
+        candidates,
         detail,
     })
 }

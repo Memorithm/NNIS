@@ -94,9 +94,6 @@ impl Stream {
     }
 }
 
-#[derive(Debug)]
-struct StreamDropGuard;
-
 impl Drop for StreamInner {
     fn drop(&mut self) {
         if let Ok(api) = driver::api() {
