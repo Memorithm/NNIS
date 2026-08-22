@@ -60,22 +60,24 @@ Takeover run (2026-08-22):
   (2 new GPU tests passed; workspace total now 17)
 - `NNIS_REQUIRE_GPU=1 cargo test -p nnis-bench --all-targets -- --nocapture`
   (3 benchmark tests passed, including real event-timed GPU execution)
+- `NNIS_BENCH_ELEMENTS=16777216 NNIS_BENCH_WARMUPS=20
+  NNIS_BENCH_ITERATIONS=100 cargo run --release -p nnis-bench --example
+  elementwise` (clean commit `85420bd`, output validation passed)
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
   elements (134,217,728 read+write bytes), 20 warmups, 100 iterations:
-  0.642272 ms median, 0.711525 ms p95, 0.728031 ms p99, 0.627520-0.731072 ms
-  range, 208.973 GB/s derived median throughput. Result validation passed.
-  This first run identified commit `00f9d20` with `git_dirty=true` because the
-  benchmark harness itself was the uncommitted change; rerun after its commit.
+  0.623600 ms median, 0.683651 ms p95, 0.708187 ms p99, 0.615296-0.710816 ms
+  range, 215.230 GB/s derived median throughput. Result validation passed;
+  report provenance is commit `85420bd` with `git_dirty=false`.
 
 ## Blockers
 - No implementation blocker. Sandbox device isolation requires GPU commands to
   run with direct hardware access.
 
 ## Recent changes
-Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`, and
-Wave 3 kernel commit `00f9d20`.
+Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
+Wave 3 `00f9d20`, and Wave 4 `85420bd`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
