@@ -17,10 +17,14 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   context, buffer, and typed argument packing for `cuLaunchKernel`.
 - Wave 3: `F32Elementwise` runtime-specialized CUBIN kernels for vector add,
   scale, and fused affine, with safe synchronizing and unsafe enqueue APIs.
+- Wave 4: CUDA-event benchmark harness with warmups, full samples,
+  min/median/mean/p95/p99/max/stddev, derived throughput, JSON reports, and
+  git/GPU/driver/NVRTC metadata. A release elementwise benchmark validates its
+  output after timing.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
-  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 17 tests
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 20 tests
   passed with GPU required.
 
 ## Architectural decisions
@@ -37,11 +41,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   architecture, and output kind. Compilation occurs outside the cache mutex.
 - Safe high-level kernel calls synchronize before returning; enqueue variants
   remain `unsafe` until device-buffer ownership can cover asynchronous work.
+- Benchmarks record start/end events on the operation stream, synchronize the
+  end event, and derive latency from `cuEventElapsedTime`; host enqueue time is
+  never reported as GPU latency.
 
 ## Next task
-Wave 4: implement a CUDA-event benchmark harness with warmups, distribution
-summaries, machine-readable output, GPU/build metadata, and a real elementwise
-kernel benchmark.
+Wave 5: expose a deliberate top-level `nnis` facade over runtime, JIT, and
+kernels, then add the Wave 6 end-to-end example using event timing.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -52,18 +58,25 @@ Takeover run (2026-08-22):
 - `git diff --check`
 - `NNIS_REQUIRE_GPU=1 cargo test -p nnis-kernels --all-targets -- --nocapture`
   (2 new GPU tests passed; workspace total now 17)
+- `NNIS_REQUIRE_GPU=1 cargo test -p nnis-bench --all-targets -- --nocapture`
+  (3 benchmark tests passed, including real event-timed GPU execution)
 
 ## Measured benchmarks
-- None yet; benchmark infrastructure is Wave 4.
+- Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
+  elements (134,217,728 read+write bytes), 20 warmups, 100 iterations:
+  0.642272 ms median, 0.711525 ms p95, 0.728031 ms p99, 0.627520-0.731072 ms
+  range, 208.973 GB/s derived median throughput. Result validation passed.
+  This first run identified commit `00f9d20` with `git_dirty=true` because the
+  benchmark harness itself was the uncommitted change; rerun after its commit.
 
 ## Blockers
 - No implementation blocker. Sandbox device isolation requires GPU commands to
   run with direct hardware access.
 
 ## Recent changes
-Protected baseline `d086ec2`, pushed bootstrap `f7b39c6`, and completed JIT
-milestone `34c8168` remain intact.
+Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`, and
+Wave 3 kernel commit `00f9d20`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
-`cargo check -p nnis-bench --all-targets` after implementing the event harness.
+`cargo check -p nnis --all-targets` after implementing the facade.

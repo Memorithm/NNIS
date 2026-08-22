@@ -62,6 +62,11 @@ impl Stream {
     /// Make this stream wait until `event` has completed (non-blocking on the
     /// host). The event must have been recorded.
     pub fn wait_event(&self, event: &Event) -> Result<()> {
+        if !Arc::ptr_eq(&self.inner.ctx, &event.inner.ctx) {
+            return Err(NnisError::invalid_input(
+                "stream and event belong to different contexts",
+            ));
+        }
         self.inner.ctx.set_current()?;
         let api = driver::api()?;
         // SAFETY: valid handles; context is current.
@@ -145,7 +150,11 @@ impl Event {
 
     /// Record the event on `stream` at its current tail position.
     pub fn record(&self, stream: &Stream) -> Result<()> {
-        debug_assert!(Arc::ptr_eq(&self.inner.ctx, stream.ctx()));
+        if !Arc::ptr_eq(&self.inner.ctx, stream.ctx()) {
+            return Err(NnisError::invalid_input(
+                "event and stream belong to different contexts",
+            ));
+        }
         self.inner.ctx.set_current()?;
         let api = driver::api()?;
         // SAFETY: valid handles; same context asserted above.
@@ -184,6 +193,12 @@ impl Event {
     /// Milliseconds of GPU time between `start` completing and `self`
     /// completing. Both events must have been recorded and synchronized.
     pub fn elapsed_ms(&self, start: &Event) -> Result<f64> {
+        if !Arc::ptr_eq(&self.inner.ctx, &start.inner.ctx) {
+            return Err(NnisError::invalid_input(
+                "elapsed-time events belong to different contexts",
+            ));
+        }
+        self.inner.ctx.set_current()?;
         let api = driver::api()?;
         let mut ms: f32 = 0.0;
         // SAFETY: both events are valid handles owned by this process.
@@ -202,6 +217,7 @@ impl Event {
 impl Drop for EventInner {
     fn drop(&mut self) {
         if let Ok(api) = driver::api() {
+            let _ = self.ctx.set_current();
             // SAFETY: we own one creation reference.
             unsafe {
                 (api.cuEventDestroy)(self.raw);

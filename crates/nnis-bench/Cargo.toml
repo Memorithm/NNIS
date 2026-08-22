@@ -6,3 +6,11 @@ license.workspace = true
 description = "NVIDIA Native Inference Stack"
 
 [dependencies]
+nnis-rt = { workspace = true }
+nnis-sys = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+nnis-jit = { workspace = true }
+nnis-kernels = { workspace = true }
