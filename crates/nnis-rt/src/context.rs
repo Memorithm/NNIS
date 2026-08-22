@@ -28,6 +28,9 @@ unsafe impl Sync for Context {}
 impl Context {
     /// Retain the primary context of `device` and make it current.
     pub fn new(device: &Device) -> Result<Arc<Self>> {
+        // Query fallible metadata before taking a primary-context retain so an
+        // attribute failure cannot leak the retain count.
+        let props = device.props()?;
         let api = driver::api()?;
         let mut ctx: CUcontext = std::ptr::null_mut();
         // SAFETY: out-pointer valid; retain is refcounted by the driver.
@@ -37,7 +40,6 @@ impl Context {
                 NnisError::driver("cuDevicePrimaryCtxRetain", rc).with("ordinal", device.ordinal())
             );
         }
-        let props = device.props()?;
         let ctx = Arc::new(Context {
             raw: ctx,
             ordinal: device.ordinal(),

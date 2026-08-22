@@ -34,10 +34,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   borrows through stream synchronization; explicitly unsafe `_async` variants
   preserve native overlap. Host transfers require `DevicePod`, and pinned
   allocations are initialized with valid empty/ZST slice handling.
+- CUDA 13.0 header audit: driver/NVRTC/module/launch/copy/event/occupancy
+  signatures match except the corrected `cuMemsetD8Async` fill argument
+  (`unsigned char`, not `unsigned int`). An odd-byte GPU zero test covers it.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
-  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 25 tests
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 26 tests
   passed with GPU required.
 
 ## Architectural decisions
@@ -67,9 +70,8 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   lifetime obligation. `DevicePod` gates bytewise host representations.
 
 ## Next task
-Audit the hand-written CUDA/NVRTC signatures against the installed CUDA 13.0
-headers, add tests for any corrected ABI boundaries, then improve project-level
-usage and architecture documentation.
+Add project-level usage and architecture documentation, including the safe vs
+async lifetime contract and reproducible Thor benchmark commands.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -91,6 +93,8 @@ Takeover run (2026-08-22):
   (all transfer/kernel outputs validated; JSON report emitted)
 - `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (25 passed after
   synchronous-safe / explicit-async memory hardening)
+- `NNIS_REQUIRE_GPU=1 cargo test -p nnis-sys -p nnis-rt --all-targets`
+  (14 passed, including corrected D8 ABI execution; workspace total 26)
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -125,5 +129,5 @@ Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
 end-to-end `75ca7d6`, Wave 7 `6dd485f`, and performance record `8413eb0`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
-values. The validated typed launcher fixes that root cause. Next command:
-compare `DriverApi` signatures with `/usr/local/cuda/include/cuda.h`.
+values. The validated typed launcher fixes that root cause. Next task: document
+the public facade, custom JIT path, safety contracts, and benchmark workflow.

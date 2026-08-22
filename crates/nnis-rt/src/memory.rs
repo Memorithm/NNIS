@@ -495,6 +495,20 @@ mod tests {
     }
 
     #[test]
+    fn odd_byte_zero_uses_d8_abi_on_gpu() {
+        use crate::{gpu_context, DeviceBuffer, Stream};
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&ctx).unwrap();
+        let source = vec![0xa5_u8; 257];
+        let buffer = DeviceBuffer::from_host(&ctx, &stream, &source).unwrap();
+        buffer.zero(&stream).unwrap();
+        assert_eq!(buffer.to_vec(&stream).unwrap(), vec![0_u8; 257]);
+    }
+
+    #[test]
     fn size_mismatch_is_rejected() {
         use crate::{gpu_context, DeviceBuffer, Stream};
         let Some(ctx) = gpu_context() else {

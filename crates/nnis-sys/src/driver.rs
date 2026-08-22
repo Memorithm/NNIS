@@ -12,6 +12,7 @@ use std::sync::OnceLock;
 
 type CInt = core::ffi::c_int;
 type CUInt = core::ffi::c_uint;
+type CUChar = core::ffi::c_uchar;
 type CChar = core::ffi::c_char;
 type CVoid = core::ffi::c_void;
 type CSizeT = usize;
@@ -48,7 +49,7 @@ pub struct DriverApi {
     pub cuMemFreeHost: unsafe extern "C" fn(*mut CVoid) -> CUresult,
     /// NOTE: the trailing count is in **elements** (u32 words / bytes).
     pub cuMemsetD32Async: unsafe extern "C" fn(CUdeviceptr, CUInt, CSizeT, CUstream) -> CUresult,
-    pub cuMemsetD8Async: unsafe extern "C" fn(CUdeviceptr, CUInt, CSizeT, CUstream) -> CUresult,
+    pub cuMemsetD8Async: unsafe extern "C" fn(CUdeviceptr, CUChar, CSizeT, CUstream) -> CUresult,
 
     pub cuMemcpyHtoDAsync:
         unsafe extern "C" fn(CUdeviceptr, *const CVoid, CSizeT, CUstream) -> CUresult,
