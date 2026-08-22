@@ -13,7 +13,7 @@ pub mod stream_event;
 pub use context::{gpu_context, Context};
 pub use device::{Device, DeviceProps};
 pub use error::{ErrorKind, NnisError, Result};
-pub use memory::{DeviceBuffer, PinnedBuffer};
+pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use stream_event::{Event, Stream};
 
 #[cfg(test)]

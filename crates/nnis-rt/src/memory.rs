@@ -21,6 +21,32 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::sync::Arc;
 
+/// Plain data that can safely cross the CUDA byte-copy boundary.
+///
+/// # Safety
+///
+/// Implementors must be `Copy`, contain no uninitialized padding, and accept
+/// every possible bit pattern as a valid value. This ensures that both reading
+/// host object bytes and overwriting them with arbitrary device bytes are
+/// valid Rust operations.
+pub unsafe trait DevicePod: Copy + 'static {}
+
+macro_rules! device_pod {
+    ($($ty:ty),+ $(,)?) => {
+        $(
+            // SAFETY: primitive integers and IEEE floats have no padding and
+            // every bit pattern is a valid value.
+            unsafe impl DevicePod for $ty {}
+        )+
+    };
+}
+
+device_pod!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, f32, f64);
+
+// SAFETY: arrays are contiguous repetitions with no inter-element padding;
+// validity follows from the element's `DevicePod` contract.
+unsafe impl<T: DevicePod, const N: usize> DevicePod for [T; N] {}
+
 /// Owned allocation of `T` on the device.
 #[derive(Debug)]
 pub struct DeviceBuffer<T> {
@@ -61,15 +87,18 @@ impl<T> DeviceBuffer<T> {
         })
     }
 
-    /// Allocate `len` elements and fill with zero bytes.
+    /// Allocate `len` elements, fill with zero bytes, and wait for completion.
     pub fn new_zeroed(ctx: &Arc<Context>, len: usize, stream: &Stream) -> Result<Self> {
         let buf = Self::new(ctx, len)?;
         buf.zero(stream)?;
         Ok(buf)
     }
 
-    /// Allocate from host data (asynchronous H2D copy on `stream`).
-    pub fn from_host(ctx: &Arc<Context>, stream: &Stream, src: &[T]) -> Result<Self> {
+    /// Allocate from host data and wait for the H2D copy to complete.
+    pub fn from_host(ctx: &Arc<Context>, stream: &Stream, src: &[T]) -> Result<Self>
+    where
+        T: DevicePod,
+    {
         let buf = Self::new(ctx, src.len())?;
         buf.copy_from_host(stream, src)?;
         Ok(buf)
@@ -98,8 +127,24 @@ impl<T> DeviceBuffer<T> {
         &self.ctx
     }
 
-    /// Zero-fill via `cuMemsetD8Async`/`cuMemsetD32Async`.
+    /// Zero-fill and wait for the operation to complete.
     pub fn zero(&self, stream: &Stream) -> Result<()> {
+        // SAFETY: this method retains the buffer borrow until synchronization.
+        unsafe { self.zero_async(stream)? };
+        if self.ptr != 0 {
+            stream.synchronize()?;
+        }
+        Ok(())
+    }
+
+    /// Enqueue a zero-fill without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// This buffer and the stream must remain alive and otherwise untouched
+    /// until the stream has completed this operation.
+    pub unsafe fn zero_async(&self, stream: &Stream) -> Result<()> {
+        self.ensure_stream_context(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -119,10 +164,29 @@ impl<T> DeviceBuffer<T> {
         Ok(())
     }
 
-    /// Asynchronous copy from host memory. The host slice must stay valid
-    /// until the stream reaches this copy (call `stream.synchronize()` before
-    /// dropping/moving the source unless it lives long enough).
-    pub fn copy_from_host(&self, stream: &Stream, src: &[T]) -> Result<()> {
+    /// Copy from host memory and wait for completion.
+    pub fn copy_from_host(&self, stream: &Stream, src: &[T]) -> Result<()>
+    where
+        T: DevicePod,
+    {
+        // SAFETY: both borrows remain live until synchronization below.
+        unsafe { self.copy_from_host_async(stream, src)? };
+        if self.ptr != 0 {
+            stream.synchronize()?;
+        }
+        Ok(())
+    }
+
+    /// Enqueue an H2D copy without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// `src`, this buffer, and the stream must remain alive and unmodified
+    /// until the stream has completed this operation.
+    pub unsafe fn copy_from_host_async(&self, stream: &Stream, src: &[T]) -> Result<()>
+    where
+        T: DevicePod,
+    {
         if src.len() != self.len {
             return Err(NnisError::invalid_input(format!(
                 "host slice length {} does not match device buffer length {}",
@@ -130,6 +194,7 @@ impl<T> DeviceBuffer<T> {
                 self.len
             )));
         }
+        self.ensure_stream_context(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -146,9 +211,29 @@ impl<T> DeviceBuffer<T> {
         Ok(())
     }
 
-    /// Asynchronous copy into host memory. Synchronize `stream` before
-    /// reading the destination.
-    pub fn copy_to_host(&self, stream: &Stream, dst: &mut [T]) -> Result<()> {
+    /// Copy into host memory and wait for completion.
+    pub fn copy_to_host(&self, stream: &Stream, dst: &mut [T]) -> Result<()>
+    where
+        T: DevicePod,
+    {
+        // SAFETY: both borrows remain exclusive/live until synchronization.
+        unsafe { self.copy_to_host_async(stream, dst)? };
+        if self.ptr != 0 {
+            stream.synchronize()?;
+        }
+        Ok(())
+    }
+
+    /// Enqueue a D2H copy without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// `dst` must remain exclusively borrowed, and this buffer and the stream
+    /// must remain alive, until the stream has completed this operation.
+    pub unsafe fn copy_to_host_async(&self, stream: &Stream, dst: &mut [T]) -> Result<()>
+    where
+        T: DevicePod,
+    {
         if dst.len() != self.len {
             return Err(NnisError::invalid_input(format!(
                 "host slice length {} does not match device buffer length {}",
@@ -156,6 +241,7 @@ impl<T> DeviceBuffer<T> {
                 self.len
             )));
         }
+        self.ensure_stream_context(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -176,26 +262,49 @@ impl<T> DeviceBuffer<T> {
     /// Blocking device-to-host copy returning a fresh `Vec`.
     pub fn to_vec(&self, stream: &Stream) -> Result<Vec<T>>
     where
-        T: Default + Clone,
+        T: DevicePod + Default,
     {
         let mut v = vec![T::default(); self.len];
         self.copy_to_host(stream, &mut v)?;
-        stream.synchronize()?;
         Ok(v)
     }
 
-    /// Asynchronous device-to-device copy between two buffers of equal length.
+    /// Copy between two equal-length device buffers and wait for completion.
     pub fn copy_from_buffer(&self, stream: &Stream, src: &DeviceBuffer<T>) -> Result<()> {
+        // SAFETY: both buffer borrows remain live until synchronization below.
+        unsafe { self.copy_from_buffer_async(stream, src)? };
+        if self.ptr != 0 && src.ptr != 0 {
+            stream.synchronize()?;
+        }
+        Ok(())
+    }
+
+    /// Enqueue a device-to-device copy without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// Both buffers and the stream must remain alive and otherwise untouched
+    /// until the stream has completed this operation.
+    pub unsafe fn copy_from_buffer_async(
+        &self,
+        stream: &Stream,
+        src: &DeviceBuffer<T>,
+    ) -> Result<()> {
         if src.len != self.len {
             return Err(NnisError::invalid_input(format!(
                 "source length {} does not match destination length {}",
                 src.len, self.len
             )));
         }
+        self.ensure_stream_context(stream)?;
+        if !Arc::ptr_eq(&self.ctx, &src.ctx) {
+            return Err(NnisError::invalid_input(
+                "source and destination buffers belong to different contexts",
+            ));
+        }
         if self.ptr == 0 || src.ptr == 0 {
             return Ok(());
         }
-        debug_assert!(Arc::ptr_eq(&self.ctx, stream.ctx()));
         stream.ctx().set_current()?;
         let api = driver::api()?;
         let bytes = self.size_bytes();
@@ -205,6 +314,15 @@ impl<T> DeviceBuffer<T> {
         let rc = unsafe { (api.cuMemcpyAsync)(self.ptr, src.ptr, bytes, stream.raw()) };
         if rc != 0 {
             return Err(NnisError::driver("cuMemcpyAsync", rc).with("bytes", bytes));
+        }
+        Ok(())
+    }
+
+    fn ensure_stream_context(&self, stream: &Stream) -> Result<()> {
+        if !Arc::ptr_eq(&self.ctx, stream.ctx()) {
+            return Err(NnisError::invalid_input(
+                "device buffer and stream belong to different contexts",
+            ));
         }
         Ok(())
     }
@@ -236,8 +354,11 @@ unsafe impl<T: Send> Send for PinnedBuffer<T> {}
 unsafe impl<T: Sync> Sync for PinnedBuffer<T> {}
 
 impl<T> PinnedBuffer<T> {
-    /// Allocate `len` pinned host elements.
-    pub fn new(ctx: &Arc<Context>, len: usize) -> Result<Self> {
+    /// Allocate `len` pinned host elements initialized to zero bytes.
+    pub fn new(ctx: &Arc<Context>, len: usize) -> Result<Self>
+    where
+        T: DevicePod,
+    {
         let bytes = len
             .checked_mul(size_of::<T>())
             .ok_or_else(|| NnisError::invalid_input("allocation size overflows usize"))?;
@@ -252,6 +373,9 @@ impl<T> PinnedBuffer<T> {
                     .with("bytes", bytes)
                     .with("len", len));
             }
+            // SAFETY: `raw` covers `bytes` writable bytes and all-zero is a
+            // valid initialized representation under the `DevicePod` contract.
+            unsafe { std::ptr::write_bytes(raw.cast::<u8>(), 0, bytes) };
         }
         Ok(PinnedBuffer {
             ptr: raw.cast::<T>(),
@@ -269,13 +393,25 @@ impl<T> PinnedBuffer<T> {
     }
 
     pub fn as_slice(&self) -> &[T] {
-        // SAFETY: allocation is live for `len` elements; no concurrent mut.
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+        let ptr = if self.ptr.is_null() {
+            std::ptr::NonNull::<T>::dangling().as_ptr()
+        } else {
+            self.ptr
+        };
+        // SAFETY: allocation is live and initialized for `len` elements; a
+        // valid aligned dangling pointer is used for an empty/ZST allocation.
+        unsafe { std::slice::from_raw_parts(ptr, self.len) }
     }
 
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        // SAFETY: allocation is live for `len` elements; exclusive access.
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+        let ptr = if self.ptr.is_null() {
+            std::ptr::NonNull::<T>::dangling().as_ptr()
+        } else {
+            self.ptr
+        };
+        // SAFETY: allocation is live and initialized for `len` elements;
+        // exclusive access is held and empty/ZST uses an aligned dangling ptr.
+        unsafe { std::slice::from_raw_parts_mut(ptr, self.len) }
     }
 
     pub fn ctx(&self) -> &Arc<Context> {
@@ -387,5 +523,75 @@ mod tests {
         assert_eq!(buf.device_ptr(), 0);
         buf.zero(&stream).unwrap();
         assert_eq!(buf.to_vec(&stream).unwrap(), Vec::<f32>::new());
+    }
+
+    #[test]
+    fn blocking_copy_operations_complete_before_return() {
+        use crate::{gpu_context, DeviceBuffer, Stream};
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&ctx).unwrap();
+        let source = (0..8_192).map(|index| index as u32).collect::<Vec<_>>();
+        let buffer = DeviceBuffer::<u32>::new(&ctx, source.len()).unwrap();
+
+        buffer.copy_from_host(&stream, &source).unwrap();
+        assert!(stream.query().unwrap());
+        let mut destination = vec![0_u32; source.len()];
+        buffer.copy_to_host(&stream, &mut destination).unwrap();
+        assert!(stream.query().unwrap());
+        assert_eq!(destination, source);
+
+        buffer.zero(&stream).unwrap();
+        assert!(stream.query().unwrap());
+        assert!(buffer
+            .to_vec(&stream)
+            .unwrap()
+            .iter()
+            .all(|value| *value == 0));
+    }
+
+    #[test]
+    fn explicit_async_copy_path_roundtrips_on_gpu() {
+        use crate::{gpu_context, DeviceBuffer, Stream};
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&ctx).unwrap();
+        let source = (0..4_096)
+            .map(|index| index as f32 * -0.125)
+            .collect::<Vec<_>>();
+        let mut destination = vec![0.0_f32; source.len()];
+        let buffer = DeviceBuffer::<f32>::new(&ctx, source.len()).unwrap();
+
+        // SAFETY: all buffers/slices remain live and unmodified until the
+        // explicit synchronization after each asynchronous transfer.
+        unsafe { buffer.copy_from_host_async(&stream, &source) }.unwrap();
+        stream.synchronize().unwrap();
+        // SAFETY: destination remains exclusively borrowed in this scope until
+        // the explicit synchronization completes.
+        unsafe { buffer.copy_to_host_async(&stream, &mut destination) }.unwrap();
+        stream.synchronize().unwrap();
+        assert_eq!(destination, source);
+    }
+
+    #[test]
+    fn pinned_buffers_are_initialized_and_empty_slices_are_valid() {
+        use crate::{gpu_context, PinnedBuffer};
+        let Some(ctx) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let mut pinned = PinnedBuffer::<u32>::new(&ctx, 32).unwrap();
+        assert!(pinned.iter().all(|value| *value == 0));
+        pinned[7] = 42;
+        assert_eq!(pinned[7], 42);
+
+        let empty = PinnedBuffer::<f32>::new(&ctx, 0).unwrap();
+        assert!(empty.as_slice().is_empty());
+        let zst = PinnedBuffer::<[u8; 0]>::new(&ctx, 4).unwrap();
+        assert_eq!(zst.as_slice().len(), 4);
     }
 }

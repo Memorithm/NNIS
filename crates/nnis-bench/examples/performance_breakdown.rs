@@ -274,7 +274,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &stream,
         transfer_case("h2d"),
         BenchConfig::new(5, 30),
-        || large_input.copy_from_host(&stream, &large_host),
+        || {
+            // SAFETY: the harness waits on an end event after every copy, and
+            // all captured storage outlives the complete benchmark.
+            unsafe { large_input.copy_from_host_async(&stream, &large_host) }
+        },
     )?
     .into();
     let d2h_gpu = benchmark_gpu(
@@ -282,7 +286,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &stream,
         transfer_case("d2h"),
         BenchConfig::new(5, 30),
-        || large_input.copy_to_host(&stream, &mut host_output),
+        || {
+            // SAFETY: the harness preserves exclusive destination access and
+            // waits on an end event after every copy.
+            unsafe { large_input.copy_to_host_async(&stream, &mut host_output) }
+        },
     )?
     .into();
     if host_output != large_host {
@@ -294,7 +302,11 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &stream,
         transfer_case("d2d"),
         BenchConfig::new(5, 30),
-        || large_output.copy_from_buffer(&stream, &large_input),
+        || {
+            // SAFETY: both buffers outlive the harness, which waits on an end
+            // event after every copy.
+            unsafe { large_output.copy_from_buffer_async(&stream, &large_input) }
+        },
     )?
     .into();
     if large_output.to_vec(&stream)? != large_host {

@@ -8,8 +8,8 @@ use std::sync::Arc;
 /// Safe CUDA device, context, stream, event, and allocation APIs.
 pub mod runtime {
     pub use nnis_rt::{
-        gpu_context, Context, Device, DeviceBuffer, DeviceProps, ErrorKind, Event, NnisError,
-        PinnedBuffer, Result, Stream,
+        gpu_context, Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event,
+        NnisError, PinnedBuffer, Result, Stream,
     };
 }
 
@@ -31,15 +31,16 @@ pub use jit::{
 };
 pub use kernels::F32Elementwise;
 pub use runtime::{
-    Context, Device, DeviceBuffer, DeviceProps, ErrorKind, Event, NnisError, PinnedBuffer, Result,
-    Stream,
+    Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
+    PinnedBuffer, Result, Stream,
 };
 
 /// Imports for the typical NNIS execution path.
 pub mod prelude {
     pub use crate::{
-        CompileOptions, Context, Device, DeviceBuffer, Event, F32Elementwise, JitCompiler,
-        KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError, Result, Session, Stream,
+        CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise,
+        JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError, Result, Session,
+        Stream,
     };
 }
 

@@ -30,10 +30,14 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   module load/unload, allocation/free, argument packing, host launch submission,
   event overhead, kernels, and H2D/D2H/D2D transfers. Inline aligned launch
   arguments replace one heap allocation and dynamic dispatch per parameter.
+- Post-wave safety hardening: ordinary zero/H2D/D2H/D2D methods now retain all
+  borrows through stream synchronization; explicitly unsafe `_async` variants
+  preserve native overlap. Host transfers require `DevicePod`, and pinned
+  allocations are initialized with valid empty/ZST slice handling.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
-  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 22 tests
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 25 tests
   passed with GPU required.
 
 ## Architectural decisions
@@ -58,11 +62,14 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - Kernel arguments use one aligned contiguous store. The A/B baseline showed
   fewer allocations improve packing materially, while total launch submission
   remains driver-dominated; no deeper launch micro-optimization is justified.
+- Safe borrowed-memory APIs never return with DMA still entitled to access the
+  borrow. Async copies/zero/D2D are `unsafe` and document the completion-time
+  lifetime obligation. `DevicePod` gates bytewise host representations.
 
 ## Next task
-Audit and harden asynchronous buffer-copy safety: ordinary host slices cannot
-soundly back safe async H2D/D2H APIs after the call returns. Preserve explicit
-unsafe async paths and make the ordinary safe paths lifetime-correct.
+Audit the hand-written CUDA/NVRTC signatures against the installed CUDA 13.0
+headers, add tests for any corrected ABI boundaries, then improve project-level
+usage and architecture documentation.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -82,6 +89,8 @@ Takeover run (2026-08-22):
   validated on clean commit `75ca7d6`: 21.591 ms JIT, 0.020736 ms GPU)
 - `cargo run --release -p nnis-bench --example performance_breakdown`
   (all transfer/kernel outputs validated; JSON report emitted)
+- `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (25 passed after
+  synchronous-safe / explicit-async memory hardening)
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -113,8 +122,8 @@ Takeover run (2026-08-22):
 ## Recent changes
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
 Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
-end-to-end `75ca7d6`, and Wave 7 performance work `6dd485f`.
+end-to-end `75ca7d6`, Wave 7 `6dd485f`, and performance record `8413eb0`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
-review `DeviceBuffer::{from_host,copy_from_host,copy_to_host}` lifetime safety.
+compare `DriverApi` signatures with `/usr/local/cuda/include/cuda.h`.
