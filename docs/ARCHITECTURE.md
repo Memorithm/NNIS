@@ -148,6 +148,11 @@ inside that closure because their synchronization would distort the event
 interval; benchmark code uses the corresponding unsafe enqueue method and
 keeps every captured object alive through the harness.
 
+Occupancy recommendations describe active-warp resource limits, not observed
+latency or bandwidth. Dispatch changes require clean correctness-preserving
+benchmarks; the Thor elementwise sweep retained 256 threads after the driver's
+768-thread recommendation measured slower in both candidate orders.
+
 ## Failure behavior
 
 CUDA and NVRTC return codes become structured `NnisError` values with operation

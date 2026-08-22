@@ -77,10 +77,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - Safe borrowed-memory APIs never return with DMA still entitled to access the
   borrow. Async copies/zero/D2D are `unsafe` and document the completion-time
   lifetime obligation. `DevicePod` gates bytewise host representations.
+- Occupancy is treated as a candidate generator, not a performance oracle. The
+  256-thread elementwise default stays because the clean ordered sweeps did not
+  show a repeatable improvement from any alternative.
 
 ## Next task
-Commit/push the block-size sweep, then run clean 16,777,216-element forward and
-reverse-order measurements on Thor before changing the 256-thread default.
+Add an arbitrary-length `f32` sum reduction with a CPU oracle, multi-pass native
+CUDA execution, boundary-size GPU tests, and CUDA-event benchmark coverage.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -121,6 +124,11 @@ Takeover run (2026-08-22):
   result; clean full-size measurements are the exact next task.
 - Sweep-infrastructure milestone: workspace fmt/check/clippy/doc and
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` passed (26 tests).
+- Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
+  width in forward and reverse order; all 1,000 measured kernel outputs were
+  validated. The command was `NNIS_BENCH_ELEMENTS=16777216
+  NNIS_BENCH_WARMUPS=20 NNIS_BENCH_ITERATIONS=100 cargo run --release -p
+  nnis-bench --example block_size_sweep` with the two explicit candidate orders.
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -144,6 +152,13 @@ Takeover run (2026-08-22):
   the process-local compilation cache. Allocation pooling is the next measured
   optimization opportunity; it is deferred until stream-ordered ownership can
   be designed safely.
+- Block-size investigation at clean `50e6d96`, 16,777,216 elements, 20 warmups,
+  100 iterations per width, `git_dirty=false` (forward / reverse medians):
+  128 threads (12 active blocks/SM) 0.627552 / 0.630720 ms; 256 (6) 0.644560 /
+  0.625568 ms; 512 (3) 0.681936 / 0.662432 ms; 768 (2) 0.707584 / 0.691680 ms;
+  1024 (1) 0.950224 / 0.941504 ms. CUDA recommended 768 threads, but it was
+  9.8-10.6% slower than 256. The 128/256 winner reversed with order, so there
+  is no reproducible evidence to replace the existing 256-thread default.
 
 ## Blockers
 - No implementation blocker. Sandbox device isolation requires GPU commands to
@@ -153,11 +168,9 @@ Takeover run (2026-08-22):
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
 Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
 end-to-end `75ca7d6`, Wave 7 `6dd485f`, performance record `8413eb0`, memory
-safety hardening `bee938f`, and CUDA ABI audit `ef04ffb`.
-The root guide and architecture/safety contract are the current documentation
-milestone.
+safety hardening `bee938f`, CUDA ABI audit `ef04ffb`, documentation `b688e26`,
+JIT introspection `9656323`, and block-size sweep `50e6d96`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
-values. The validated typed launcher fixes that root cause. Next task: make
-the already-bound CUDA function/occupancy queries available through safe JIT
-introspection and validate the current kernel dispatch choice.
+values. The validated typed launcher fixes that root cause. Next task: add and
+validate a reusable multi-pass `f32` sum reduction.

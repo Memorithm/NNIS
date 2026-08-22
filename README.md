@@ -158,6 +158,11 @@ GB/s. These are observed results on that machine, not portable performance
 claims. Full measurements and methodology are recorded in the active
 [continuation log](docs/exec-plans/active/GLIMMER_CONTINUATION.md).
 
+A clean forward/reverse block-size sweep at `50e6d96` found that 128 and 256
+threads traded the lead depending on order, while 512, CUDA's occupancy-picked
+768, and 1024 were consistently slower. NNIS therefore retains the 256-thread
+default; occupancy is useful launch guidance, not a substitute for measurement.
+
 ## Current scope
 
 Implemented standard kernels are `f32` vector addition, scaling, and fused
