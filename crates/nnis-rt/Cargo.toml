@@ -1,0 +1,9 @@
+[package]
+name = "nnis-rt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Safe NVIDIA driver-runtime layer for NNIS: devices, contexts, streams, events, memory"
+
+[dependencies]
+nnis-sys = { workspace = true }

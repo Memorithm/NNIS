@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nnis-sys",
+    "crates/nnis-rt",
+    "crates/nnis-jit",
+    "crates/nnis-kernels",
+    "crates/nnis-bench",
+    "crates/nnis",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77"
+authors = ["Memorithm"]
+license = "MIT"
+
+[workspace.dependencies]
+libloading = "0.8"
+sha2 = "0.10"
+
+nnis-sys = { path = "crates/nnis-sys" }
+nnis-rt = { path = "crates/nnis-rt" }
+nnis-jit = { path = "crates/nnis-jit" }
+nnis-kernels = { path = "crates/nnis-kernels" }
+nnis-bench = { path = "crates/nnis-bench" }
+
+[profile.release]
+debug = true
+lto = "thin"
+
+[profile.bench]
+inherits = "release"
