@@ -27,7 +27,7 @@ pub struct NvrtcApi {
         *const *const CChar,
         *const *const CChar,
     ) -> NvrtcResult,
-    pub nvrtcDestroyProgram: unsafe extern "C" fn(*mut crate::nvrtcProgram) -> NvrtcResult,
+    pub nvrtcDestroyProgram: unsafe extern "C" fn(crate::nvrtcProgram) -> NvrtcResult,
     pub nvrtcCompileProgram:
         unsafe extern "C" fn(crate::nvrtcProgram, CInt, *const *const CChar) -> NvrtcResult,
     pub nvrtcGetPTXSize: unsafe extern "C" fn(crate::nvrtcProgram, *mut CSizeT) -> NvrtcResult,

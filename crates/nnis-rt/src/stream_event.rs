@@ -85,11 +85,11 @@ impl Stream {
         }
     }
 
-    pub(crate) fn raw(&self) -> CUstream {
+    pub fn raw(&self) -> CUstream {
         self.inner.raw
     }
 
-    pub(crate) fn ctx(&self) -> &Arc<Context> {
+    pub fn ctx(&self) -> &Arc<Context> {
         &self.inner.ctx
     }
 }

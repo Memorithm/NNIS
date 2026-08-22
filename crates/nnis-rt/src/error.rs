@@ -35,7 +35,7 @@ pub enum ErrorKind {
 }
 
 impl NnisError {
-    pub(crate) fn driver(op: impl Into<String>, code: i32) -> Self {
+    pub fn driver(op: impl Into<String>, code: i32) -> Self {
         NnisError {
             kind: ErrorKind::Driver { code },
             op: op.into(),
@@ -43,7 +43,7 @@ impl NnisError {
         }
     }
 
-    pub(crate) fn nvrtc(op: impl Into<String>, code: i32) -> Self {
+    pub fn nvrtc(op: impl Into<String>, code: i32) -> Self {
         NnisError {
             kind: ErrorKind::Nvrtc { code },
             op: op.into(),
@@ -75,7 +75,7 @@ impl NnisError {
         }
     }
 
-    pub(crate) fn io(op: impl Into<String>, err: std::io::Error) -> Self {
+    pub fn io(op: impl Into<String>, err: std::io::Error) -> Self {
         NnisError {
             kind: ErrorKind::Io(err),
             op: op.into(),
