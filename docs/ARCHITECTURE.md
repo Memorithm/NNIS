@@ -73,8 +73,11 @@ The custom-kernel path is:
    `Kernel`.
 6. `KernelArgs` copies primitive argument values into aligned host storage and
    retains the contexts of borrowed buffers.
-7. `KernelLaunch` validates nonzero grid/block axes, block and shared-memory
-   device limits, and context relationships before calling `cuLaunchKernel`.
+7. `Kernel::attributes` and `Kernel::recommend_occupancy` expose typed,
+   context-correct Driver API introspection without leaking raw handles.
+8. `KernelLaunch` validates nonzero grid/block axes, function/device block and
+   shared-memory limits, and context relationships before calling
+   `cuLaunchKernel`.
 
 The final launch remains `unsafe` because neither CUDA nor Rust reflection can
 prove that the selected function's parameter order and widths match the values

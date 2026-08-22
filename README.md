@@ -78,6 +78,13 @@ The example derives its NVRTC architecture from the active device, compiles a
 CUBIN, verifies a cache hit, loads a module, resolves and launches a function,
 measures it with CUDA events, and checks every result against a CPU oracle.
 
+Inspect a compiled kernel's registers, local/static/dynamic memory limits,
+code-generation versions, and CUDA occupancy recommendation with:
+
+```bash
+cargo run --release -p nnis-jit --example inspect_kernel
+```
+
 ## Workspace
 
 | Crate | Responsibility |

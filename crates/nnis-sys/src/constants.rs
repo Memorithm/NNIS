@@ -35,10 +35,13 @@ pub const CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN: i32 = 97;
 /// `CUfunction_attribute` (subset)
 pub const CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: i32 = 0;
 pub const CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES: i32 = 1;
+pub const CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES: i32 = 2;
 pub const CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES: i32 = 3;
 pub const CU_FUNC_ATTRIBUTE_NUM_REGS: i32 = 4;
-pub const CU_FUNC_ATTRIBUTE_BINARY_VERSION: i32 = 6;
 pub const CU_FUNC_ATTRIBUTE_PTX_VERSION: i32 = 5;
+pub const CU_FUNC_ATTRIBUTE_BINARY_VERSION: i32 = 6;
+pub const CU_FUNC_ATTRIBUTE_CACHE_MODE_CA: i32 = 7;
+pub const CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: i32 = 8;
 
 /// `CUjit_option` (subset used to capture JIT logs)
 pub const CU_JIT_INFO_LOG_BUFFER: i32 = 3;
@@ -74,6 +77,7 @@ mod tests {
         assert_eq!(CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, 16);
         assert_eq!(CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE, 38);
         assert_eq!(CU_FUNC_ATTRIBUTE_NUM_REGS, 4);
+        assert_eq!(CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, 8);
         assert_eq!(CU_JIT_ERROR_LOG_BUFFER, 5);
         assert_eq!(error_codes::CUDA_ERROR_OUT_OF_MEMORY, 2);
     }

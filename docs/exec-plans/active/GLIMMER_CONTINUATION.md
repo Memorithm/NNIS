@@ -40,6 +40,9 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - Project-level usage and architecture documentation now covers the facade,
   custom JIT path, ownership graph, blocking/async lifetime contract,
   `DevicePod`, validation, and reproducible CUDA-event benchmark commands.
+- JIT kernel introspection exposes cached typed function attributes, maximum
+  active blocks per SM, and occupancy-based launch recommendations. Launch
+  validation now applies function-specific thread/dynamic-shared-memory limits.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
@@ -73,8 +76,8 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   lifetime obligation. `DevicePod` gates bytewise host representations.
 
 ## Next task
-Expose safe CUDA function attributes and occupancy guidance through `nnis-jit`,
-then test and use the result to justify the standard kernel block-size choice.
+Benchmark the elementwise kernels at 128/256/512/768/1024 threads on Thor and
+compare against CUDA's occupancy recommendation before changing dispatch.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -101,6 +104,13 @@ Takeover run (2026-08-22):
 - Documentation milestone: `cargo doc --workspace --no-deps`, full workspace
   check/clippy/fmt/diff checks, and `NNIS_REQUIRE_GPU=1 cargo test --workspace
   --all-targets` all passed (26 tests on the Thor).
+- `cargo run --release -p nnis-jit --example inspect_kernel` executed a real
+  NVRTC CUBIN/function query on Thor: 8 registers/thread, no local/static shared
+  memory, 49,152-byte dynamic-shared limit, PTX/binary 11.0; CUDA recommended
+  768 threads, 40 minimum blocks, and 2 active blocks/SM.
+- Introspection milestone: workspace fmt/check/clippy/doc passed, followed by
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (26 tests, including
+  real attribute/occupancy queries and a launch using the recommended width).
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216

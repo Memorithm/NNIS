@@ -17,7 +17,8 @@ pub mod runtime {
 pub mod jit {
     pub use nnis_jit::{
         CodeKind, CompileOptions, CompiledCode, Dim3, JitCompiler, JitProgram, Kernel, KernelArgs,
-        KernelLaunch, KernelParameter, LaunchConfig, Module, ProgramCacheKey,
+        KernelAttributes, KernelLaunch, KernelParameter, LaunchConfig, Module,
+        OccupancyRecommendation, ProgramCacheKey,
     };
 }
 
@@ -27,7 +28,8 @@ pub mod kernels {
 }
 
 pub use jit::{
-    CompileOptions, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
+    CompileOptions, JitCompiler, Kernel, KernelArgs, KernelAttributes, KernelLaunch, LaunchConfig,
+    Module, OccupancyRecommendation,
 };
 pub use kernels::F32Elementwise;
 pub use runtime::{

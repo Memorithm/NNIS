@@ -7,7 +7,7 @@ mod program;
 
 pub use cache::{CompiledCode, JitCompiler};
 pub use launch::{Dim3, KernelArgs, KernelLaunch, KernelParameter, LaunchConfig};
-pub use module::{Kernel, Module};
+pub use module::{Kernel, KernelAttributes, Module, OccupancyRecommendation};
 pub use program::{CodeKind, CompileOptions, JitProgram, ProgramCacheKey};
 
 #[cfg(test)]
@@ -53,6 +53,42 @@ mod tests {
         let kernel = module.get_function("vector_add").unwrap();
         assert!(module.get_function("missing_kernel").is_err());
 
+        let attributes = kernel.attributes().unwrap();
+        assert!(attributes.max_threads_per_block > 0);
+        assert!(attributes.max_threads_per_block <= context.props().max_threads_per_block);
+        assert!(attributes.registers_per_thread > 0);
+        assert!(attributes.static_shared_memory_bytes <= context.props().shared_memory_per_block);
+        assert_eq!(
+            attributes.binary_version,
+            Some((
+                context.props().compute_capability.0 as u32,
+                context.props().compute_capability.1 as u32,
+            ))
+        );
+        assert_eq!(kernel.attributes().unwrap(), attributes);
+
+        let occupancy = kernel.recommend_occupancy(0, None).unwrap();
+        assert!(occupancy.block_size > 0);
+        assert!(occupancy.block_size <= attributes.max_threads_per_block);
+        assert!(occupancy.minimum_grid_size > 0);
+        assert!(occupancy.active_blocks_per_multiprocessor > 0);
+        assert_eq!(
+            kernel
+                .max_active_blocks_per_multiprocessor(occupancy.block_size, 0)
+                .unwrap(),
+            occupancy.active_blocks_per_multiprocessor
+        );
+        assert!(kernel.max_active_blocks_per_multiprocessor(0, 0).is_err());
+        assert!(kernel
+            .recommend_occupancy(0, Some(attributes.max_threads_per_block + 1))
+            .is_err());
+        assert!(kernel
+            .recommend_occupancy(
+                attributes.max_dynamic_shared_memory_bytes as usize + 1,
+                None,
+            )
+            .is_err());
+
         let elements = 1_025usize;
         let left_host = (0..elements)
             .map(|index| index as f32 * 0.25 - 10.0)
@@ -70,7 +106,7 @@ mod tests {
             .push_buffer(&right)
             .push_buffer(&output)
             .push(elements as i32);
-        let config = LaunchConfig::for_num_elements(elements, 256).unwrap();
+        let config = LaunchConfig::for_num_elements(elements, occupancy.block_size).unwrap();
         let launch = KernelLaunch::new(&kernel, &stream, config);
         // SAFETY: argument order/types match VECTOR_ADD; all referenced
         // objects remain alive through the synchronization below.

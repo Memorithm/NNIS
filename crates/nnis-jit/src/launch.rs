@@ -207,16 +207,26 @@ impl<'a> KernelLaunch<'a> {
             .volume()
             .ok_or_else(|| NnisError::invalid_input("kernel block volume overflows u64"))?;
         let properties = self.kernel.context().props();
-        if block_threads > u64::from(properties.max_threads_per_block) {
+        let function_attributes = self.kernel.attributes()?;
+        if block_threads > u64::from(function_attributes.max_threads_per_block) {
             return Err(NnisError::invalid_input(format!(
-                "kernel block has {block_threads} threads; device limit is {}",
-                properties.max_threads_per_block
+                "kernel block has {block_threads} threads; function limit is {}",
+                function_attributes.max_threads_per_block
             )));
         }
         if self.config.dynamic_shared_memory_bytes > properties.shared_memory_per_block {
             return Err(NnisError::invalid_input(format!(
                 "dynamic shared memory is {} bytes; default device limit is {}",
                 self.config.dynamic_shared_memory_bytes, properties.shared_memory_per_block
+            )));
+        }
+        if self.config.dynamic_shared_memory_bytes
+            > function_attributes.max_dynamic_shared_memory_bytes
+        {
+            return Err(NnisError::invalid_input(format!(
+                "dynamic shared memory is {} bytes; kernel limit is {}",
+                self.config.dynamic_shared_memory_bytes,
+                function_attributes.max_dynamic_shared_memory_bytes
             )));
         }
         if !Arc::ptr_eq(self.kernel.context(), self.stream.ctx()) {
