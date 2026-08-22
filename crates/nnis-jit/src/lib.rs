@@ -64,7 +64,7 @@ mod tests {
         let right = DeviceBuffer::from_host(&context, &stream, &right_host).unwrap();
         let output = DeviceBuffer::<f32>::new(&context, elements).unwrap();
 
-        let mut arguments = KernelArgs::new();
+        let mut arguments = KernelArgs::with_capacity(4, 3);
         arguments
             .push_buffer(&left)
             .push_buffer(&right)

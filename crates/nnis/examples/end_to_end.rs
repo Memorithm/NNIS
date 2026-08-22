@@ -43,7 +43,7 @@ fn main() -> Result<()> {
     let scale = -0.75_f32;
     let bias = 1.125_f32;
     let enqueue = || -> Result<()> {
-        let mut arguments = KernelArgs::new();
+        let mut arguments = KernelArgs::with_capacity(5, 2);
         arguments
             .push_buffer(&input)
             .push_buffer(&output)

@@ -26,10 +26,14 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
 - Wave 6: explicit custom-CUDA end-to-end example covering Device -> Context
   -> buffers -> NVRTC CUBIN -> Module -> Kernel -> launch -> events -> CPU
   validation.
+- Wave 7: reproducible JSON performance breakdown for NVRTC load/compile/cache,
+  module load/unload, allocation/free, argument packing, host launch submission,
+  event overhead, kernels, and H2D/D2H/D2D transfers. Inline aligned launch
+  arguments replace one heap allocation and dynamic dispatch per parameter.
 - Real Thor validation: runtime-compiled vector add passed for 1,025 elements;
   PTX and CUBIN paths, cache reuse, missing functions, and compiler failures
   are exercised. Elementwise kernels passed CPU-oracle checks for 0, 1, 31,
-  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 21 tests
+  32, 255, 256, 257, 1,025, and 4,097 elements. Workspace total: 22 tests
   passed with GPU required.
 
 ## Architectural decisions
@@ -51,10 +55,14 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   never reported as GPU latency.
 - The facade does not expose `nnis-sys`; raw FFI remains an implementation
   layer while custom-kernel users receive the validated JIT launch surface.
+- Kernel arguments use one aligned contiguous store. The A/B baseline showed
+  fewer allocations improve packing materially, while total launch submission
+  remains driver-dominated; no deeper launch micro-optimization is justified.
 
 ## Next task
-Wave 7: measure JIT cold/cache-hit latency, module load, launch, allocation,
-transfer, and event overhead; pursue only optimizations supported by results.
+Audit and harden asynchronous buffer-copy safety: ordinary host slices cannot
+soundly back safe async H2D/D2H APIs after the call returns. Preserve explicit
+unsafe async paths and make the ordinary safe paths lifetime-correct.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -71,7 +79,9 @@ Takeover run (2026-08-22):
   NNIS_BENCH_ITERATIONS=100 cargo run --release -p nnis-bench --example
   elementwise` (clean commit `85420bd`, output validation passed)
 - `cargo run --release -p nnis --example end_to_end` (1,000,003 results
-  validated on Thor; initial working-tree run: 44.646 ms JIT, 0.020288 ms GPU)
+  validated on clean commit `75ca7d6`: 21.591 ms JIT, 0.020736 ms GPU)
+- `cargo run --release -p nnis-bench --example performance_breakdown`
+  (all transfer/kernel outputs validated; JSON report emitted)
 
 ## Measured benchmarks
 - Thor, CC 11.0, driver/NVRTC 13.0, release `nnis_scale_f32`, 16,777,216
@@ -79,6 +89,20 @@ Takeover run (2026-08-22):
   0.623600 ms median, 0.683651 ms p95, 0.708187 ms p99, 0.615296-0.710816 ms
   range, 215.230 GB/s derived median throughput. Result validation passed;
   report provenance is commit `85420bd` with `git_dirty=false`.
+- Wave 7 working-tree baseline on Thor: cold CUBIN compile 10.113 ms median,
+  cache lookup 0.001370 ms, module load 0.023-0.024 ms, 4 MiB allocation
+  0.070-0.072 ms, free 0.042-0.043 ms, empty event pair 0.001088-0.001120 ms,
+  one-element kernel 0.004256-0.004576 ms, and 16,777,216-element scale
+  0.613-0.636 ms median. Transfer medians were about 0.646 ms H2D, 0.624 ms
+  D2H, and 0.607 ms D2D for 64 MiB.
+- Optimization A/B: boxed argument packing was 0.000166 ms median and total
+  host submission 0.002148-0.002194 ms. Inline aligned storage measured
+  0.000120-0.000121 ms packing and 0.002084-0.002130 ms total submission across
+  three runs. Retained: ~27% faster packing and ~2-4% total submission with
+  lower allocator exposure. The ~7,000x cold-JIT/cache gap validates retaining
+  the process-local compilation cache. Allocation pooling is the next measured
+  optimization opportunity; it is deferred until stream-ordered ownership can
+  be designed safely.
 
 ## Blockers
 - No implementation blocker. Sandbox device isolation requires GPU commands to
@@ -86,8 +110,9 @@ Takeover run (2026-08-22):
 
 ## Recent changes
 Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
-Wave 3 `00f9d20`, Wave 4 `85420bd`, and benchmark record `1282912`.
+Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, and facade /
+end-to-end `75ca7d6`.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next command:
-add a reproducible performance-breakdown example in `nnis-bench`.
+review `DeviceBuffer::{from_host,copy_from_host,copy_to_host}` lifetime safety.

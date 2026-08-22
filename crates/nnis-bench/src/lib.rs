@@ -215,7 +215,7 @@ where
         samples_ms.push(elapsed_ms);
     }
 
-    let statistics = timing_statistics(&samples_ms)?;
+    let statistics = summarize_samples_ms(&samples_ms)?;
     let throughput = throughput(&case, statistics.median_ms);
     Ok(BenchmarkReport {
         schema_version: 1,
@@ -228,7 +228,9 @@ where
     })
 }
 
-fn timing_statistics(samples: &[f64]) -> Result<TimingStatistics> {
+/// Summarize already-collected millisecond samples with the same distribution
+/// convention used by [`benchmark_gpu`].
+pub fn summarize_samples_ms(samples: &[f64]) -> Result<TimingStatistics> {
     if samples.is_empty() {
         return Err(NnisError::invalid_input(
             "cannot summarize an empty timing sample",
@@ -325,7 +327,7 @@ mod tests {
 
     #[test]
     fn statistics_use_interpolated_percentiles() {
-        let statistics = timing_statistics(&[4.0, 1.0, 3.0, 2.0]).unwrap();
+        let statistics = summarize_samples_ms(&[4.0, 1.0, 3.0, 2.0]).unwrap();
         assert_eq!(statistics.min_ms, 1.0);
         assert_eq!(statistics.median_ms, 2.5);
         assert_eq!(statistics.mean_ms, 2.5);

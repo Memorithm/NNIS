@@ -146,7 +146,7 @@ impl F32Elementwise {
         if output.is_empty() {
             return Ok(());
         }
-        let mut args = KernelArgs::new();
+        let mut args = KernelArgs::with_capacity(4, 3);
         args.push_buffer(left)
             .push_buffer(right)
             .push_buffer(output)
@@ -178,7 +178,7 @@ impl F32Elementwise {
         if output.is_empty() {
             return Ok(());
         }
-        let mut args = KernelArgs::new();
+        let mut args = KernelArgs::with_capacity(4, 2);
         args.push_buffer(input)
             .push_buffer(output)
             .push(scale)
@@ -214,7 +214,7 @@ impl F32Elementwise {
         if output.is_empty() {
             return Ok(());
         }
-        let mut args = KernelArgs::new();
+        let mut args = KernelArgs::with_capacity(5, 2);
         args.push_buffer(input)
             .push_buffer(output)
             .push(scale)

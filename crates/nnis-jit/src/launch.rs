@@ -89,15 +89,31 @@ macro_rules! kernel_parameters {
 
 kernel_parameters!(u8, i8, u16, i16, u32, i32, u64, i64, usize, isize, f32, f64);
 
-trait ErasedArgument {
-    fn as_mut_ptr(&mut self) -> *mut c_void;
-}
+/// Inline storage sized and aligned for every sealed `KernelParameter`.
+/// Values are copied byte-for-byte so CUDA observes their native host
+/// representation without one heap allocation per argument.
+#[repr(C, align(8))]
+struct ArgumentStorage([u8; 8]);
 
-struct TypedArgument<T: KernelParameter>(T);
+impl ArgumentStorage {
+    fn new<T: KernelParameter>(value: T) -> Self {
+        assert!(std::mem::size_of::<T>() <= std::mem::size_of::<Self>());
+        assert!(std::mem::align_of::<T>() <= std::mem::align_of::<Self>());
+        let mut storage = Self([0; 8]);
+        // SAFETY: the sealed parameter types are plain numeric values of at
+        // most eight bytes. Both ranges are valid and cannot overlap.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                std::ptr::from_ref(&value).cast::<u8>(),
+                storage.0.as_mut_ptr(),
+                std::mem::size_of::<T>(),
+            );
+        }
+        storage
+    }
 
-impl<T: KernelParameter> ErasedArgument for TypedArgument<T> {
     fn as_mut_ptr(&mut self) -> *mut c_void {
-        std::ptr::from_mut(&mut self.0).cast()
+        self.0.as_mut_ptr().cast()
     }
 }
 
@@ -109,7 +125,7 @@ impl<T: KernelParameter> ErasedArgument for TypedArgument<T> {
 /// while this argument pack remains alive.
 #[derive(Default)]
 pub struct KernelArgs<'buffers> {
-    values: Vec<Box<dyn ErasedArgument>>,
+    values: Vec<ArgumentStorage>,
     buffer_contexts: Vec<Arc<Context>>,
     _buffers: PhantomData<&'buffers ()>,
 }
@@ -119,14 +135,23 @@ impl<'buffers> KernelArgs<'buffers> {
         Self::default()
     }
 
+    /// Preallocate storage for a known signature. `buffer_arguments` is the
+    /// subset of arguments supplied through [`Self::push_buffer`].
+    pub fn with_capacity(arguments: usize, buffer_arguments: usize) -> Self {
+        Self {
+            values: Vec::with_capacity(arguments),
+            buffer_contexts: Vec::with_capacity(buffer_arguments),
+            _buffers: PhantomData,
+        }
+    }
+
     pub fn push<T: KernelParameter>(&mut self, value: T) -> &mut Self {
-        self.values.push(Box::new(TypedArgument(value)));
+        self.values.push(ArgumentStorage::new(value));
         self
     }
 
     pub fn push_buffer<T>(&mut self, buffer: &'buffers DeviceBuffer<T>) -> &mut Self {
-        self.values
-            .push(Box::new(TypedArgument(buffer.device_ptr())));
+        self.values.push(ArgumentStorage::new(buffer.device_ptr()));
         self.buffer_contexts.push(Arc::clone(buffer.ctx()));
         self
     }
@@ -285,5 +310,29 @@ mod tests {
     fn element_grid_rejects_zeroes() {
         assert!(LaunchConfig::for_num_elements(0, 256).is_err());
         assert!(LaunchConfig::for_num_elements(1, 0).is_err());
+    }
+
+    #[test]
+    fn inline_argument_storage_preserves_values_and_alignment() {
+        let mut arguments = KernelArgs::with_capacity(5, 0);
+        arguments
+            .push(0x5a_u8)
+            .push(-12_345_i32)
+            .push(0x1122_3344_5566_7788_u64)
+            .push(-3.25_f32)
+            .push(7.5_f64);
+        let pointers = arguments.raw_pointers();
+        for pointer in &pointers {
+            assert_eq!((*pointer as usize) % std::mem::align_of::<u64>(), 0);
+        }
+        // SAFETY: each pointer targets live aligned storage populated with the
+        // exact type read here, and `arguments` has not moved or mutated.
+        unsafe {
+            assert_eq!(*pointers[0].cast::<u8>(), 0x5a);
+            assert_eq!(*pointers[1].cast::<i32>(), -12_345);
+            assert_eq!(*pointers[2].cast::<u64>(), 0x1122_3344_5566_7788);
+            assert_eq!(*pointers[3].cast::<f32>(), -3.25);
+            assert_eq!(*pointers[4].cast::<f64>(), 7.5);
+        }
     }
 }
