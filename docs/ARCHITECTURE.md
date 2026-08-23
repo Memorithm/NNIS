@@ -112,6 +112,9 @@ recursively until a single device scalar remains. Consequences:
   replays that order, so GPU sums match it bit for bit; agreement with an
   f64 reference is additionally checked inside an explicit forward
   error bound rather than a silently loosened tolerance.
+- `argmax`/`argmax_into` extend the same tree to (value, index) pairs:
+  larger values win, ties break toward the lower index at every level
+  (matching top-k), and empty inputs are rejected as undefined.
 - `fmaxf` is exact, so max results are asserted bit-for-bit against the CPU.
 - An empty sum input schedules a zeroed output; an empty max input enqueues
   nothing and leaves the destination untouched.
@@ -163,6 +166,32 @@ structure: packed-bf16 `u16` operands are widened by exact bit shifts inside
 shared memory, accumulated in f32, and narrowed once per output element with
 round-to-nearest-even bit math. The oracle replays widen -> accumulate ->
 narrow exactly and is asserted bit-exact.
+
+### Attention (`F32Attention`)
+
+Scaled dot-product attention runs behind two paths sharing one
+[`AttentionMask`](crate::kernels::AttentionMask) contract:
+
+- Fused: one block streams a query row through shared-memory key/value
+  chunks with an online running-max softmax; the score matrix never
+  reaches global memory. Measured honestly slower than composed at
+  practical shapes (shared footprint caps occupancy) but retains O(1)
+  score-matrix memory growth for long sequences.
+- Composed: transposed-B GEMM for scores, a fused scale-and-causal-mask
+  elementwise pass when masking, dispatched row softmax, then a plain GEMM
+  against values - the measured default at practical shapes.
+
+Causal masking excludes positions above the diagonal before
+exponentiation and requires square score shapes; rectangular inputs are
+rejected before launch.
+
+### Gather and scatter
+
+`F32Gather`/`Bf16Gather` copy table rows selected by token ids; the twins
+`F32Scatter`/`Bf16Scatter` write source rows to target positions (KV-cache
+appends). Both are pure bit-pattern copies asserted exact in tests. Safe
+wrappers host-validate every index before launch; scatter additionally
+rejects duplicate positions because overlapping writes would race.
 
 ## Blocking and asynchronous APIs
 
