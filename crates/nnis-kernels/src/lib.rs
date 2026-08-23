@@ -6,6 +6,7 @@
 
 mod bf16;
 mod bf16_reduction;
+mod gemm;
 mod gemv;
 mod layernorm;
 mod reduction;
@@ -17,6 +18,7 @@ mod top_k;
 
 pub use bf16::Bf16Elementwise;
 pub use bf16_reduction::{Bf16Reduction, Bf16ReductionWorkspace};
+pub use gemm::F32Gemm;
 pub use gemv::F32Gemv;
 pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};
 pub use reduction::{F32Reduction, F32ReductionWorkspace};

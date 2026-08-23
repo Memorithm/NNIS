@@ -26,7 +26,7 @@ pub mod jit {
 pub mod kernels {
     pub use nnis_kernels::{
         Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
-        F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+        F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
         F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
         F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
     };
@@ -38,7 +38,7 @@ pub use jit::{
 };
 pub use kernels::{
     Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
-    F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+    F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
     F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
     F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
@@ -50,9 +50,9 @@ pub use runtime::{
 /// Imports for the typical NNIS execution path.
 pub mod prelude {
     pub use crate::{
-        CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise, F32Gemv,
-        F32LayerNorm, F32Reduction, F32RmsNorm, F32Softmax, F32Softmax2D, JitCompiler, KernelArgs,
-        KernelLaunch, LaunchConfig, Module, NnisError, Result, Session, Stream,
+        CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise, F32Gemm,
+        F32Gemv, F32LayerNorm, F32Reduction, F32RmsNorm, F32Softmax, F32Softmax2D, JitCompiler,
+        KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError, Result, Session, Stream,
     };
 }
 
@@ -67,6 +67,7 @@ pub struct Session {
     softmax: F32Softmax,
     softmax_2d: F32Softmax2D,
     gemv: F32Gemv,
+    gemm: F32Gemm,
     layer_norm: F32LayerNorm,
     rms_norm: F32RmsNorm,
     bf16_elementwise: Bf16Elementwise,
@@ -96,6 +97,7 @@ impl Session {
         let softmax = F32Softmax::load(&context, &compiler)?;
         let softmax_2d = F32Softmax2D::load(&context, &compiler)?;
         let gemv = F32Gemv::load(&context, &compiler)?;
+        let gemm = F32Gemm::load(&context, &compiler)?;
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         let rms_norm = F32RmsNorm::load(&context, &compiler)?;
         let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
@@ -111,6 +113,7 @@ impl Session {
             softmax,
             softmax_2d,
             gemv,
+            gemm,
             layer_norm,
             rms_norm,
             bf16_elementwise,
@@ -150,6 +153,10 @@ impl Session {
 
     pub fn gemv(&self) -> &F32Gemv {
         &self.gemv
+    }
+
+    pub fn gemm(&self) -> &F32Gemm {
+        &self.gemm
     }
 
     pub fn layer_norm(&self) -> &F32LayerNorm {
