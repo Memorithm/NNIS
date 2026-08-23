@@ -195,6 +195,17 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   up whatever scalar occupies that slot (found twice, fixed by dedicated
   per-signature packs). fmt/clippy/check clean; 58 GPU tests passed.
 
+- RoPE milestone (2026-08-23, branch `feature/rope`, PR workflow):
+  `F32Rope` ships both pairing conventions as separate kernels -
+  interleaved (original RoPE) and rotate-half (GPT-NeoX/Llama) - with
+  caller-supplied cos/sin caches so the GPU never evaluates
+  transcendentals and host/device share exact inputs. f64-oracle tests
+  over 7 shapes x 2 conventions plus identity-cache round-trip; odd-width,
+  short-cache, and block-size rejection. Facade/Session wired
+  (`session.rope()`); validated event-timed benchmark at the attention
+  shape 8192x128: 0.031968 ms median, 132.228 GB/s derived, max element
+  error 4.51e-7. fmt/clippy/check clean; 60 GPU tests passed on Thor.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after

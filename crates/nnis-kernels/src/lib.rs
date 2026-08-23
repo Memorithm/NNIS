@@ -9,6 +9,7 @@ mod gemv;
 mod layernorm;
 mod reduction;
 mod rms_norm;
+mod rope;
 mod row_softmax;
 mod softmax;
 
@@ -17,6 +18,7 @@ pub use gemv::F32Gemv;
 pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};
 pub use reduction::{F32Reduction, F32ReductionWorkspace};
 pub use rms_norm::F32RmsNorm;
+pub use rope::F32Rope;
 pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
 pub use softmax::F32Softmax;
 

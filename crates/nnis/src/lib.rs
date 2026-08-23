@@ -27,7 +27,7 @@ pub mod kernels {
     pub use nnis_kernels::{
         Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
         F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
-        F32RmsNorm, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+        F32RmsNorm, F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
 
@@ -37,7 +37,7 @@ pub use jit::{
 };
 pub use kernels::{
     Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv,
-    F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
+    F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
     F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
@@ -68,6 +68,7 @@ pub struct Session {
     layer_norm: F32LayerNorm,
     rms_norm: F32RmsNorm,
     bf16_elementwise: Bf16Elementwise,
+    rope: F32Rope,
 }
 
 impl Session {
@@ -94,6 +95,7 @@ impl Session {
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         let rms_norm = F32RmsNorm::load(&context, &compiler)?;
         let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
+        let rope = F32Rope::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -106,6 +108,7 @@ impl Session {
             layer_norm,
             rms_norm,
             bf16_elementwise,
+            rope,
         })
     }
 
@@ -151,6 +154,10 @@ impl Session {
 
     pub fn bf16_elementwise(&self) -> &Bf16Elementwise {
         &self.bf16_elementwise
+    }
+
+    pub fn rope(&self) -> &F32Rope {
+        &self.rope
     }
 }
 
