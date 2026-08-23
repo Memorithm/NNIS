@@ -134,6 +134,12 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   invalid-shape rejection, facade/Session integration (`session.gemv()`),
   and a validated event-timed benchmark example.
 
+## Workflow rule (2026-08-23, owner decision)
+Pull requests are mandatory from now on: every wave lands on a
+`feature/<name>` branch and reaches `main` only through a GitHub PR after
+the full validation loop passes on the branch. Direct pushes to `main` are
+no longer allowed for code changes.
+
 ## Next task
 All planned waves are complete. Remaining candidates in priority order:
 1. Cross-stream pooled-buffer handoff via explicit event record/wait
