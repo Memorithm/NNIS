@@ -339,9 +339,22 @@ no longer allowed for code changes.
 
 ## Next task
 Chained implementation waves continue while candidates remain:
-1. Embedding gather (f32 + bf16 tables) for token-id lookup.
-2. bf16 attention variants once a downstream project pins numeric policy.
-3. Dedicated argmax benchmark only if a sampling-heavy consumer asks.
+1. bf16 attention variants once a downstream project pins numeric policy
+   (composed path can reuse Bf16Gemm-NT + f32 score scratch).
+2. Dedicated argmax/gather benchmarks only if consumers ask; both are
+   bandwidth-bound single/multi-pass patterns already characterized.
+
+- Embedding-gather milestone (2026-08-23, branch `feature/embedding-gather`,
+  **PR #18**): `F32Gather` + `Bf16Gather` row lookup - one thread per output
+  element copies `table[indices[i] * cols + j]`; pure bit-pattern copy so
+  results are BIT-EXACT against table contents for both dtypes (asserted
+  across five shapes with duplicate/unsorted indices, poisoned-output
+  prefill). Safe wrappers validate EVERY index on the host before any
+  launch (out-of-range -> named error); unsafe enqueues skip that check
+  and document the obligation. Table/output shape and context validation
+  match the family template. Facade wired (`session.gather()`,
+  `session.bf16_gather()`). fmt/clippy/check clean; workspace GPU suite
+  green (87 tests).
 
 - Argmax milestone (2026-08-23, branch `feature/argmax`, **PR #17**):
   `F32Reduction::argmax` / `argmax_into` + `F32ArgmaxWorkspace` - multi-pass
