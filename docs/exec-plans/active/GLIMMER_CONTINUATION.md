@@ -332,7 +332,8 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   (`F32Reduction` already memset its scalar in the same situation).
 
 - bf16 attention milestone (2026-08-23, branch `feature/bf16-attention`,
-  session opened fresh per the deferral note): `Bf16Attention` ships scaled
+  **PR #21**, session opened fresh per the deferral note): `Bf16Attention`
+  ships scaled
   dot-product attention over packed-bf16 heads under the fixed policy
   (bf16 storage, f32 compute), with the numeric policy now PINNED:
   - Fused kernel `nnis_attention_fused_bf16`: mirrors the f32 fused kernel;
