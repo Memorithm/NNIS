@@ -292,14 +292,26 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete. GEMM (PR #9) extends the kernel set toward
-inference building blocks. Remaining candidates in priority order:
-1. bf16-storage/f32-compute GEMM following the established numeric policy
-   once the f32 GEMM lands.
-2. Attention-shaped fused primitive (e.g., scaled dot-product attention for
+All planned waves are complete. GEMM (PRs #9/#10) extends the kernel set
+toward inference building blocks. Remaining candidates in priority order:
+1. Attention-shaped fused primitive (e.g., scaled dot-product attention for
    small head dimensions) composing existing families.
-3. Occupancy/tile-size sweep for `F32Gemm` via the block_size_sweep
-   pattern before considering deeper tiling work.
+2. bf16 GEMM throughput work only if a downstream project needs it: the tile
+   sweep below shows the current tiling is issue/compute-bound, so gains
+   require vectorized loads/double buffering, not parameter tuning.
+
+## GEMM tile-size sweep (2026-08-23)
+`NNIS_BENCH_TILE` shipped for both GEMM benchmarks; clean forward/reverse
+sweeps at `71461a9` (`git_dirty=false`), Thor CC 11.0, 2048^3 f32,
+20 warmups, 100 iterations per width, every run output-validated with max
+absolute error 0.0 vs the f64 oracle (forward / reverse medians):
+- tile 8 (64 threads/block): 33.131905 / 33.016672 ms
+- tile 16 (256 threads/block): 23.004752 / 23.014607 ms
+- tile 32 (1024 threads/block): 25.378272 / 25.362416 ms
+Verdict: the 16x16 default wins both orders by >10% over either neighbor;
+order effects are within noise (<0.5%). Retained without code change -
+this matches the block_size_sweep precedent that measured defaults beat
+occupancy guesses.
 
 ## Measured benchmarks (continued)
 - Clean pooling A/B at `4a51645` (`git_dirty=false`), Thor CC 11.0,
