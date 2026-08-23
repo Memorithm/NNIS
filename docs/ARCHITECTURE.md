@@ -176,7 +176,11 @@ Scaled dot-product attention runs behind two paths sharing one
   chunks with an online running-max softmax; the score matrix never
   reaches global memory. Measured honestly slower than composed at
   practical shapes (shared footprint caps occupancy) but retains O(1)
-  score-matrix memory growth for long sequences.
+  score-matrix memory growth for long sequences. Both families also ship
+  `attention_fused_multihead`, one launch over a packed `[heads][rows][dim]`
+  layout whose per-head trajectory is bit-identical to looping the
+  single-head kernel (asserted in tests); its value is one launch and one
+  host call instead of H, not throughput - the occupancy verdict stands.
 - Composed: transposed-B GEMM for scores, a fused scale-and-causal-mask
   elementwise pass when masking, dispatched row softmax, then a plain GEMM
   against values - the measured default at practical shapes.

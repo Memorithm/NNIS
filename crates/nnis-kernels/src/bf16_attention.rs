@@ -164,6 +164,123 @@ extern "C" __global__ void nnis_attention_fused_bf16(
         output[row * value_dim + c] = f32_to_bf16_bits(acc[c] / running_sum);
     }
 }
+
+extern "C" __global__ void nnis_attention_fused_multihead_bf16(
+    const unsigned short* queries,
+    const unsigned short* keys,
+    const unsigned short* values,
+    unsigned short* output,
+    unsigned int heads,
+    unsigned long long query_rows,
+    unsigned long long head_dim,
+    unsigned long long kv_rows,
+    unsigned long long value_dim,
+    float scale,
+    unsigned int causal
+) {
+    extern __shared__ float smem[];
+    const unsigned int threads = blockDim.x;
+    const unsigned int tid = threadIdx.x;
+    float* q_sh = smem;                          // head_dim
+    float* k_tile = q_sh + head_dim;             // threads * head_dim
+    float* v_tile = k_tile + threads * head_dim; // threads * value_dim
+    float* scores = v_tile + threads * value_dim;// threads
+    float* scratch = scores + threads;           // threads
+    float* acc = scratch + threads;              // value_dim
+
+    // One block owns one (head, query row) pair over the packed
+    // [heads][rows][dim] layout.
+    const unsigned long long block = blockIdx.x;
+    const unsigned long long row = block % query_rows;
+    const unsigned long long head = block / query_rows;
+    const unsigned short* q_head = queries + head * query_rows * head_dim;
+    const unsigned short* k_head = keys + head * kv_rows * head_dim;
+    const unsigned short* v_head = values + head * kv_rows * value_dim;
+    unsigned short* o_head = output + head * query_rows * value_dim;
+
+    for (unsigned int i = tid; i < head_dim; i += threads) {
+        q_sh[i] = bf16_bits_to_f32(q_head[row * head_dim + i]);
+    }
+    for (unsigned int c = tid; c < value_dim; c += threads) {
+        acc[c] = 0.0f;
+    }
+
+    float running_max = nnis_neg_inf();
+    float running_sum = 0.0f;
+
+    for (unsigned long long base = 0; base < kv_rows; base += threads) {
+        for (unsigned int idx = tid; idx < threads * head_dim; idx += threads) {
+            const unsigned int r = idx / head_dim;
+            const unsigned int c = idx % head_dim;
+            const unsigned long long global = base + r;
+            k_tile[idx] =
+                global < kv_rows ? bf16_bits_to_f32(k_head[global * head_dim + c]) : 0.0f;
+        }
+        for (unsigned int idx = tid; idx < threads * value_dim; idx += threads) {
+            const unsigned int r = idx / value_dim;
+            const unsigned int c = idx % value_dim;
+            const unsigned long long global = base + r;
+            v_tile[idx] =
+                global < kv_rows ? bf16_bits_to_f32(v_head[global * value_dim + c]) : 0.0f;
+        }
+        __syncthreads();
+
+        float score = nnis_neg_inf();
+        const unsigned int key = base + tid;
+        const int unmasked = !causal || key <= row;
+        if (key < kv_rows && unmasked) {
+            score = 0.0f;
+            for (unsigned int e = 0; e < head_dim; ++e) {
+                score = fmaf(q_sh[e], k_tile[tid * head_dim + e], score);
+            }
+            score *= scale;
+        }
+        scores[tid] = score;
+        scratch[tid] = score;
+        __syncthreads();
+
+        for (unsigned int stride = threads / 2; stride > 0; stride >>= 1) {
+            if (tid < stride) {
+                scratch[tid] = fmaxf(scratch[tid], scratch[tid + stride]);
+            }
+            __syncthreads();
+        }
+        const float new_max = fmaxf(running_max, scratch[0]);
+        const float rescale = expf(running_max - new_max);
+
+        const float weight = expf(score - new_max);
+        scores[tid] = weight;
+        scratch[tid] = weight;
+        __syncthreads();
+
+        for (unsigned int stride = threads / 2; stride > 0; stride >>= 1) {
+            if (tid < stride) {
+                scratch[tid] += scratch[tid + stride];
+            }
+            __syncthreads();
+        }
+        running_sum = running_sum * rescale + scratch[0];
+        running_max = new_max;
+
+        for (unsigned int c = tid; c < value_dim; c += threads) {
+            acc[c] *= rescale;
+        }
+        __syncthreads();
+
+        for (unsigned int c = tid; c < value_dim; c += threads) {
+            float total = acc[c];
+            for (unsigned int t = 0; t < threads; ++t) {
+                total += scores[t] * v_tile[t * value_dim + c];
+            }
+            acc[c] = total;
+        }
+        __syncthreads();
+    }
+
+    for (unsigned int c = tid; c < value_dim; c += threads) {
+        o_head[row * value_dim + c] = f32_to_bf16_bits(acc[c] / running_sum);
+    }
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 64;
@@ -172,6 +289,7 @@ const DEFAULT_BLOCK_SIZE: u32 = 64;
 #[derive(Debug)]
 pub struct Bf16Attention {
     fused: Kernel,
+    fused_multihead: Kernel,
     block_size: u32,
 }
 
@@ -198,6 +316,7 @@ impl Bf16Attention {
             compiler.compile_cubin(BF16_ATTENTION_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let fused = module.get_function("nnis_attention_fused_bf16")?;
+        let fused_multihead = module.get_function("nnis_attention_fused_multihead_bf16")?;
         let attributes = fused.attributes()?;
         if block_size > attributes.max_threads_per_block {
             return Err(NnisError::invalid_input(format!(
@@ -205,7 +324,11 @@ impl Bf16Attention {
                 attributes.max_threads_per_block
             )));
         }
-        Ok(Self { fused, block_size })
+        Ok(Self {
+            fused,
+            fused_multihead,
+            block_size,
+        })
     }
 
     /// CUDA thread-block width; also the streamed key-chunk length.
@@ -354,6 +477,137 @@ impl Bf16Attention {
         unsafe { launch.launch(&mut arguments) }
     }
 
+    /// Fused scaled dot-product attention over packed multi-head inputs and
+    /// wait for completion.
+    ///
+    /// Layout: every buffer holds `[heads][rows][dim]` contiguously -
+    /// `queries` holds `num_heads * query_rows * head_dim`, `keys` holds
+    /// `num_heads * kv_rows * head_dim`, `values` holds
+    /// `num_heads * kv_rows * value_dim`, and `output` receives
+    /// `num_heads * query_rows * value_dim`; all packed-bf16 bit patterns.
+    /// One launch covers every head with a per-head trajectory identical to
+    /// [`Self::attention_fused`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn attention_fused_multihead(
+        &self,
+        stream: &Stream,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: AttentionMask,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe {
+            self.enqueue_attention_fused_multihead(
+                stream, queries, keys, values, output, num_heads, query_rows, head_dim, kv_rows,
+                value_dim, scale, mask,
+            )
+        };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue the multi-head fused bf16 attention without synchronizing
+    /// the stream.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, and this kernel must remain alive and
+    /// otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_attention_fused_multihead(
+        &self,
+        stream: &Stream,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: AttentionMask,
+    ) -> Result<()> {
+        self.validate_multihead_execution(
+            stream, queries, keys, values, output, num_heads, query_rows, head_dim, kv_rows,
+            value_dim,
+        )?;
+        if mask == AttentionMask::Causal && query_rows != kv_rows {
+            return Err(NnisError::invalid_input(format!(
+                "causal attention requires query_rows == kv_rows; got {query_rows} vs {kv_rows}"
+            )));
+        }
+        if !self.fused_available(head_dim, value_dim) {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 attention fused path needs {} shared-memory bytes for \
+                 head ({head_dim}, {value_dim}) at block {}",
+                self.fused_shared_memory_bytes(head_dim, value_dim)
+                    .unwrap_or_default(),
+                self.block_size
+            )));
+        }
+        if query_rows == 0 {
+            return Ok(());
+        }
+        let total_blocks = num_heads
+            .checked_mul(query_rows)
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        let grid_x = u32::try_from(total_blocks).map_err(|_| {
+            NnisError::invalid_input("bf16 attention exceeds u32::MAX head-by-query blocks")
+        })?;
+        let shared_memory_bytes = self
+            .fused_shared_memory_bytes(head_dim, value_dim)
+            .expect("validated above");
+        let (heads, query_rows, head_dim, kv_rows, value_dim) = (
+            u32::try_from(num_heads)
+                .map_err(|_| NnisError::invalid_input("bf16 attention heads exceed u32"))?,
+            u64::try_from(query_rows)
+                .map_err(|_| NnisError::invalid_input("bf16 attention rows exceed u64"))?,
+            u64::try_from(head_dim)
+                .map_err(|_| NnisError::invalid_input("bf16 attention head dim exceeds u64"))?,
+            u64::try_from(kv_rows)
+                .map_err(|_| NnisError::invalid_input("bf16 attention kv rows exceed u64"))?,
+            u64::try_from(value_dim)
+                .map_err(|_| NnisError::invalid_input("bf16 attention value dim exceeds u64"))?,
+        );
+        let config = LaunchConfig::new(Dim3::x(grid_x), Dim3::x(self.block_size))
+            .with_dynamic_shared_memory(u32::try_from(shared_memory_bytes).map_err(|_| {
+                NnisError::invalid_input("bf16 attention shared memory exceeds u32")
+            })?);
+        let mut arguments = KernelArgs::with_capacity(11, 4);
+        arguments
+            .push_buffer(queries)
+            .push_buffer(keys)
+            .push_buffer(values)
+            .push_buffer(output)
+            .push(heads)
+            .push(query_rows)
+            .push(head_dim)
+            .push(kv_rows)
+            .push(value_dim)
+            .push(scale)
+            .push(u32::from(mask == AttentionMask::Causal));
+        let launch = KernelLaunch::new(&self.fused_multihead, stream, config);
+        // SAFETY: argument order/widths match
+        // `nnis_attention_fused_multihead_bf16`; the caller owns the
+        // asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
     /// Composed bf16 attention through validated families and wait for
     /// completion: exact widening of every operand, the full f32 composed
     /// attention pipeline, and one final round-to-nearest-even narrowing.
@@ -477,6 +731,83 @@ impl Bf16Attention {
             return Err(NnisError::invalid_input(format!(
                 "bf16 attention output has {} elements; shape ({query_rows}, {value_dim}) \
                  requires {expected_o}",
+                output.len()
+            )));
+        }
+        let context = self.fused.context();
+        if !Arc::ptr_eq(context, stream.ctx())
+            || !Arc::ptr_eq(context, queries.ctx())
+            || !Arc::ptr_eq(context, keys.ctx())
+            || !Arc::ptr_eq(context, values.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "bf16 attention stream, buffers, and kernel must share one context",
+            ));
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn validate_multihead_execution(
+        &self,
+        stream: &Stream,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+    ) -> Result<()> {
+        if num_heads == 0 {
+            return Err(NnisError::invalid_input(
+                "bf16 attention requires at least one head",
+            ));
+        }
+        let expected_q = num_heads
+            .checked_mul(query_rows)
+            .and_then(|elements| elements.checked_mul(head_dim))
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        let expected_k = num_heads
+            .checked_mul(kv_rows)
+            .and_then(|elements| elements.checked_mul(head_dim))
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        let expected_v = num_heads
+            .checked_mul(kv_rows)
+            .and_then(|elements| elements.checked_mul(value_dim))
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        let expected_o = num_heads
+            .checked_mul(query_rows)
+            .and_then(|elements| elements.checked_mul(value_dim))
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        if queries.len() != expected_q {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 attention queries have {} elements; {num_heads} heads of shape \
+                 ({query_rows}, {head_dim}) requires {expected_q}",
+                queries.len()
+            )));
+        }
+        if keys.len() != expected_k {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 attention keys have {} elements; {num_heads} heads of shape \
+                 ({kv_rows}, {head_dim}) requires {expected_k}",
+                keys.len()
+            )));
+        }
+        if values.len() != expected_v {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 attention values have {} elements; {num_heads} heads of shape \
+                 ({kv_rows}, {value_dim}) requires {expected_v}",
+                values.len()
+            )));
+        }
+        if output.len() != expected_o {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 attention output has {} elements; {num_heads} heads of shape \
+                 ({query_rows}, {value_dim}) requires {expected_o}",
                 output.len()
             )));
         }
@@ -1071,5 +1402,304 @@ mod tests {
             error.to_string().contains("query_rows == kv_rows"),
             "{error}"
         );
+    }
+
+    /// (heads, query_rows, head_dim, kv_rows, value_dim).
+    const MULTIHEAD_SHAPES: &[(usize, usize, usize, usize, usize)] = &[
+        (1, 1, 16, 3, 16),
+        (2, 5, 64, 200, 64),
+        (3, 17, 32, 70, 96),
+        (4, 33, 48, 129, 48),
+    ];
+
+    /// Per-head host data with distinct seeds so cross-head mixing cannot
+    /// pass silently.
+    fn multihead_values(head: usize, len: usize) -> Vec<f32> {
+        (0..len)
+            .map(|index| {
+                (((index * 13 % 97) as f32 - 48.0) * 0.0625)
+                    + (((index + head * 11) % 5) as f32 - 2.0)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn bf16_attention_multihead_bit_matches_per_head_fused_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = Bf16Attention::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &(heads, query_rows, head_dim, kv_rows, value_dim) in MULTIHEAD_SHAPES {
+            // Interleave per-head hosts into the packed [heads][rows][dim]
+            // layout.
+            let mut queries_host: Vec<u16> = Vec::with_capacity(heads * query_rows * head_dim);
+            let mut keys_host: Vec<u16> = Vec::with_capacity(heads * kv_rows * head_dim);
+            let mut values_host: Vec<u16> = Vec::with_capacity(heads * kv_rows * value_dim);
+            for head in 0..heads {
+                queries_host.extend(to_bits(&multihead_values(head, query_rows * head_dim)));
+                keys_host.extend(to_bits(&multihead_values(head + 97, kv_rows * head_dim)));
+                values_host.extend(to_bits(&multihead_values(head + 193, kv_rows * value_dim)));
+            }
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_host).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_host).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_host).unwrap();
+            // Pre-fill so a skipped kernel cannot pass silently.
+            let poisoned = vec![0xFFFF_u16; heads * query_rows * value_dim];
+            let batched_output =
+                DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+            attention
+                .attention_fused_multihead(
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &batched_output,
+                    heads,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::None,
+                )
+                .unwrap();
+            let batched_actual = batched_output.to_vec(&stream).unwrap();
+
+            for head in 0..heads {
+                let head_queries = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head, query_rows * head_dim)),
+                )
+                .unwrap();
+                let head_keys = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head + 97, kv_rows * head_dim)),
+                )
+                .unwrap();
+                let head_values = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head + 193, kv_rows * value_dim)),
+                )
+                .unwrap();
+                let head_poisoned = vec![0xFFFF_u16; query_rows * value_dim];
+                let head_output =
+                    DeviceBuffer::from_host(&context, &stream, &head_poisoned).unwrap();
+                attention
+                    .attention_fused(
+                        &stream,
+                        &head_queries,
+                        &head_keys,
+                        &head_values,
+                        &head_output,
+                        query_rows,
+                        head_dim,
+                        kv_rows,
+                        value_dim,
+                        scale,
+                        AttentionMask::None,
+                    )
+                    .unwrap();
+                let head_actual = head_output.to_vec(&stream).unwrap();
+                let range = head * query_rows * value_dim..(head + 1) * query_rows * value_dim;
+                for (index, actual) in batched_actual[range].iter().enumerate() {
+                    assert_eq!(
+                        actual, &head_actual[index],
+                        "bf16 multihead {heads}h bit mismatch at head {head} element {index} \
+                         shape ({query_rows},{head_dim},{kv_rows},{value_dim})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bf16_attention_multihead_causal_bit_matches_per_head_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = Bf16Attention::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        const CAUSAL_HEADS_SHAPES: &[(usize, usize, usize)] =
+            &[(2, 7, 64), (3, 33, 48), (4, 70, 32)];
+
+        for &(heads, rows, head_dim) in CAUSAL_HEADS_SHAPES {
+            let value_dim = head_dim;
+            let mut queries_host: Vec<u16> = Vec::with_capacity(heads * rows * head_dim);
+            let mut keys_host: Vec<u16> = Vec::with_capacity(heads * rows * head_dim);
+            let mut values_host: Vec<u16> = Vec::with_capacity(heads * rows * value_dim);
+            for head in 0..heads {
+                queries_host.extend(to_bits(&multihead_values(head, rows * head_dim)));
+                keys_host.extend(to_bits(&multihead_values(head + 97, rows * head_dim)));
+                values_host.extend(to_bits(&multihead_values(head + 193, rows * value_dim)));
+            }
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_host).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_host).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_host).unwrap();
+            let poisoned = vec![0xFFFF_u16; heads * rows * value_dim];
+            let batched_output =
+                DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+
+            attention
+                .attention_fused_multihead(
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &batched_output,
+                    heads,
+                    rows,
+                    head_dim,
+                    rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::Causal,
+                )
+                .unwrap();
+            let batched_actual = batched_output.to_vec(&stream).unwrap();
+
+            for head in 0..heads {
+                let head_queries = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head, rows * head_dim)),
+                )
+                .unwrap();
+                let head_keys = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head + 97, rows * head_dim)),
+                )
+                .unwrap();
+                let head_values = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&multihead_values(head + 193, rows * value_dim)),
+                )
+                .unwrap();
+                let head_poisoned = vec![0xFFFF_u16; rows * value_dim];
+                let head_output =
+                    DeviceBuffer::from_host(&context, &stream, &head_poisoned).unwrap();
+                attention
+                    .attention_fused(
+                        &stream,
+                        &head_queries,
+                        &head_keys,
+                        &head_values,
+                        &head_output,
+                        rows,
+                        head_dim,
+                        rows,
+                        value_dim,
+                        scale,
+                        AttentionMask::Causal,
+                    )
+                    .unwrap();
+                let head_actual = head_output.to_vec(&stream).unwrap();
+                let range = head * rows * value_dim..(head + 1) * rows * value_dim;
+                for (index, actual) in batched_actual[range].iter().enumerate() {
+                    assert_eq!(
+                        actual, &head_actual[index],
+                        "bf16 causal multihead {heads}h bit mismatch at head {head} \
+                         element {index}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bf16_attention_multihead_rejects_invalid_shapes_before_launch() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = Bf16Attention::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        // Zero heads is outside the contract.
+        let queries = DeviceBuffer::<u16>::new(&context, 8).unwrap();
+        let keys = DeviceBuffer::<u16>::new(&context, 8).unwrap();
+        let values = DeviceBuffer::<u16>::new(&context, 8).unwrap();
+        let output = DeviceBuffer::<u16>::new(&context, 8).unwrap();
+        let error = attention
+            .attention_fused_multihead(
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                0,
+                1,
+                8,
+                1,
+                8,
+                0.25,
+                AttentionMask::None,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("at least one head"), "{error}");
+
+        // Short key buffer under the packed multi-head contract.
+        let error = attention
+            .attention_fused_multihead(
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                2,
+                1,
+                8,
+                1,
+                8,
+                0.25,
+                AttentionMask::None,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("2 heads"), "{error}");
+
+        // Rectangular causal scores remain rejected.
+        let queries = DeviceBuffer::<u16>::new(&context, 2 * 2 * 8).unwrap();
+        let keys = DeviceBuffer::<u16>::new(&context, 2 * 5 * 8).unwrap();
+        let values = DeviceBuffer::<u16>::new(&context, 2 * 5 * 4).unwrap();
+        let output = DeviceBuffer::<u16>::new(&context, 2 * 2 * 4).unwrap();
+        let error = attention
+            .attention_fused_multihead(
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                2,
+                2,
+                8,
+                5,
+                4,
+                0.25,
+                AttentionMask::Causal,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("query_rows == kv_rows"),
+            "{error}"
+        );
+
+        // Oversized heads are rejected before launch exactly like the
+        // single-head path.
+        assert!(!attention.fused_available(4096, 4096));
     }
 }
