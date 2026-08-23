@@ -338,15 +338,19 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete; the transformer-block primitives are now
-covered end to end (elementwise/activations -> norms -> GEMM/GEMV ->
-RoPE -> causal attention -> softmax/reductions/top-k). Remaining
-candidates:
-1. bf16 attention variants once a downstream project pins numeric policy.
-2. bf16 transposed-B GEMM if attention moves to packed-bf16 scores.
-3. Fused-attention occupancy work ONLY if long-sequence memory footprint
-   becomes a real requirement: the A/B below shows the one-block-per-row
-   design is 13x slower than composed at practical shapes.
+Chained implementation waves continue while candidates remain:
+1. Scalar tree argmax (greedy sampling) with top-k tie semantics.
+2. Embedding gather (f32 + bf16 tables) for token-id lookup.
+3. bf16 attention variants once a downstream project pins numeric policy.
+
+- bf16 GEMM-NT milestone (2026-08-23, branch `feature/bf16-gemm-nt`,
+  **PR #16**): `gemm_transposed_b` added to `Bf16Gemm` mirroring the f32
+  family - `C = A * B^T` over packed-bf16 operands stored row-major, same
+  tiled shared-memory structure and explicit-FMA ascending-k chain under
+  the fixed widen->compute->narrow policy. Oracle asserted BIT-EXACT
+  across the standard 8 shapes; `(n, k)` layout validation, empty-dimension
+  contracts, and per-function block/shared limits match the plain variant.
+  fmt/clippy/check clean; workspace GPU suite green (82 tests).
 
 - Activation milestone (2026-08-23, branch `feature/activations`,
   **PR #15**): ReLU, SiLU (`x / (1 + exp(-x))`), and tanh-approximated GELU
