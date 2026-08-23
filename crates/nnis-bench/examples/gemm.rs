@@ -23,18 +23,27 @@ fn env_usize(name: &str, default: usize) -> Result<usize, Box<dyn std::error::Er
     }
 }
 
+fn env_u32(name: &str, default: u32) -> Result<u32, Box<dyn std::error::Error>> {
+    match std::env::var(name) {
+        Ok(value) => Ok(value.parse()?),
+        Err(std::env::VarError::NotPresent) => Ok(default),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let m = env_usize("NNIS_BENCH_ROWS", 2_048)?;
     let n = env_usize("NNIS_BENCH_COLS", 2_048)?;
     let k = env_usize("NNIS_BENCH_K", 2_048)?;
     let warmups = env_usize("NNIS_BENCH_WARMUPS", 20)?;
     let iterations = env_usize("NNIS_BENCH_ITERATIONS", 100)?;
+    let tile_side = env_u32("NNIS_BENCH_TILE", 16)?;
 
     let device = Device::first()?;
     let context = Context::new(&device)?;
     let stream = Stream::new(&context)?;
     let compiler = JitCompiler::new();
-    let gemm = F32Gemm::load(&context, &compiler)?;
+    let gemm = F32Gemm::load_with_tile_side(&context, &compiler, tile_side)?;
 
     let a_host: Vec<f32> = (0..m * k)
         .map(|index| (((index * 13 % 97) as f32 - 48.0) * 0.0625) + ((index % 5) as f32 - 2.0))
