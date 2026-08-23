@@ -180,6 +180,21 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   No dedicated benchmark: the mechanism and economics are identical to the
   softmax A/B in PR #3 (pool overhead ~1 microsecond per buffer).
 
+- bf16 milestone (2026-08-23, branch `feature/bf16-elementwise`, stacked on
+  #3/#4): numeric policy fixed as **bf16 storage, f32 compute**; RNE
+  conversion implemented bit-identically in host helpers
+  (`nnis_rt::f32_to_bf16_rne` / `bf16_bits_to_f32`) and device bit-math
+  (no CUDA headers needed under NVRTC). `Bf16Elementwise` family:
+  widen/narrow conversions, vector_add, scale, affine (explicit FMA) -
+  all oracle tests assert BIT-EXACT equality against host replay.
+  Facade/Session wired (`session.bf16_elementwise()`). Clean benchmark at
+  16M elements: 0.611616 ms median, 164.586 GB/s derived (6 bytes per
+  element), bit-exact post-timing validation. Debugging note: kernels with
+  different arities must not share one argument pack - extra entries are
+  ignored by the driver but a kernel reading its count from entry N picks
+  up whatever scalar occupies that slot (found twice, fixed by dedicated
+  per-signature packs). fmt/clippy/check clean; 58 GPU tests passed.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after

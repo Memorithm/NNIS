@@ -25,9 +25,9 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
-        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Softmax,
-        F32Softmax2D, F32Softmax2DWorkspace,
+        Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
+        F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
+        F32RmsNorm, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
 
@@ -36,9 +36,9 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
-    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Softmax,
-    F32Softmax2D, F32Softmax2DWorkspace,
+    Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv,
+    F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
+    F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -67,6 +67,7 @@ pub struct Session {
     gemv: F32Gemv,
     layer_norm: F32LayerNorm,
     rms_norm: F32RmsNorm,
+    bf16_elementwise: Bf16Elementwise,
 }
 
 impl Session {
@@ -92,6 +93,7 @@ impl Session {
         let gemv = F32Gemv::load(&context, &compiler)?;
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         let rms_norm = F32RmsNorm::load(&context, &compiler)?;
+        let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -103,6 +105,7 @@ impl Session {
             gemv,
             layer_norm,
             rms_norm,
+            bf16_elementwise,
         })
     }
 
@@ -144,6 +147,10 @@ impl Session {
 
     pub fn rms_norm(&self) -> &F32RmsNorm {
         &self.rms_norm
+    }
+
+    pub fn bf16_elementwise(&self) -> &Bf16Elementwise {
+        &self.bf16_elementwise
     }
 }
 
