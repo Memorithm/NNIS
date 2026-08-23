@@ -5,6 +5,7 @@
 //! enqueue operations for callers that manage asynchronous buffer lifetimes.
 
 mod bf16;
+mod bf16_reduction;
 mod gemv;
 mod layernorm;
 mod reduction;
@@ -14,6 +15,7 @@ mod row_softmax;
 mod softmax;
 
 pub use bf16::Bf16Elementwise;
+pub use bf16_reduction::{Bf16Reduction, Bf16ReductionWorkspace};
 pub use gemv::F32Gemv;
 pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};
 pub use reduction::{F32Reduction, F32ReductionWorkspace};
