@@ -258,8 +258,12 @@ impl Bf16Reduction {
     }
 
     /// Reduce an input and return its host scalar, waiting for completion.
-    /// An empty input yields `0.0` for sum.
+    /// An empty input yields `0.0` for sum without touching device memory,
+    /// matching the tree identity.
     pub fn sum(&self, stream: &Stream, input: &DeviceBuffer<u16>) -> Result<f32> {
+        if input.is_empty() {
+            return Ok(0.0);
+        }
         let workspace = self.workspace(input.ctx(), input.len())?;
         let output = DeviceBuffer::<f32>::new(input.ctx(), 1)?;
         // SAFETY: all borrows remain live until synchronization below.

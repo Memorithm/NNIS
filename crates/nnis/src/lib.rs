@@ -25,10 +25,10 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
-        F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
-        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
-        F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
+        Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Attention,
+        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv,
+        F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
+        F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
     };
 }
 
@@ -37,7 +37,7 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
+    Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Attention, F32Elementwise,
     F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
     F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
     F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
@@ -75,6 +75,7 @@ pub struct Session {
     bf16_reduction: Bf16Reduction,
     rope: F32Rope,
     top_k: F32TopK,
+    attention: F32Attention,
 }
 
 impl Session {
@@ -106,6 +107,7 @@ impl Session {
         let bf16_reduction = Bf16Reduction::load(&context, &compiler)?;
         let rope = F32Rope::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
+        let attention = F32Attention::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -123,6 +125,7 @@ impl Session {
             bf16_reduction,
             rope,
             top_k,
+            attention,
         })
     }
 
@@ -188,6 +191,41 @@ impl Session {
 
     pub fn rope(&self) -> &F32Rope {
         &self.rope
+    }
+
+    pub fn attention(&self) -> &F32Attention {
+        &self.attention
+    }
+
+    /// Composed scaled dot-product attention over this session's kernels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn attention_composed(
+        &self,
+        queries: &DeviceBuffer<f32>,
+        keys: &DeviceBuffer<f32>,
+        values: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+    ) -> Result<()> {
+        F32Attention::attention_composed(
+            self.gemm(),
+            self.elementwise(),
+            self.softmax_2d(),
+            &self.stream,
+            queries,
+            keys,
+            values,
+            output,
+            query_rows,
+            head_dim,
+            kv_rows,
+            value_dim,
+            scale,
+        )
     }
 }
 
