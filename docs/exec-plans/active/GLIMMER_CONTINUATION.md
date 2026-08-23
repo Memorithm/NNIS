@@ -112,12 +112,31 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   probe-isolate-per-stage workflow found the root cause quickly. CUDA-event
   benchmark example validates after timing.
 
+- Fused single-kernel row softmax shipped (`nnis_softmax_row_fused_f32`):
+  one block stages its whole row in dynamic shared memory and performs max,
+  exp, sum, normalize in place - two matrix streams instead of six, no
+  workspace, no host roundtrips. Launch validation rejects rows where
+  `(cols + block_size) * 4` exceeds the function dynamic-shared limit.
+  f64-oracle tests across all shapes plus oversized-row rejection; benchmark
+  example gained an `NNIS_BENCH_FUSED=1` A/B mode.
+
 ## Next task
-Clean full-size row-softmax benchmark recorded here. Then evaluate: (a)
-fused single-kernel row softmax for narrow rows to cut two full-matrix
-passes, or (b) allocation pooling design note deferred from Wave 7.
+Add an automatic dispatch helper on `F32Softmax2D` (fused when the row fits
+dynamic shared memory, staged pipeline otherwise) and integrate
+`F32Softmax2D` into the facade `Session`; then consider allocation pooling
+design note deferred from Wave 7.
 
 ## Measured benchmarks (continued)
+- Fused-vs-staged row-softmax A/B, Thor CC 11.0, 8192x2048 f32 (16,777,216
+  elements), block 256, 20 warmups, 100 iterations:
+  - Staged four-kernel pipeline at clean `51fe244`: 2.507344 ms median,
+    stddev 0.0358 ms.
+  - Fused single kernel at clean `a3a3cd5` (`git_dirty=false`): 1.018608 ms
+    median, 1.015744 min, 1.049754 p95, stddev 0.0126 ms; max element error
+    4.09e-8 vs f64 oracle, validated.
+  - Decision: fused retained - 2.46x faster end-to-end and lower variance.
+    The staged path remains required for rows exceeding the shared-memory
+    budget. Dirty-tree smoke at 1024x2048 agreed (0.1266 vs 0.2069 ms).
 - Clean row-softmax benchmark at `ab0da37` (`git_dirty=false`), Thor CC 11.0,
   8192x2048 f32 (16,777,216 elements), block 256, four-stage pipeline,
   20 warmups, 100 iterations: 2.507344 ms median, 2.485664 min, 2.587187 p95,
