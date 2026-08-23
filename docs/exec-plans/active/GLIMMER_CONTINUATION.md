@@ -338,14 +338,30 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete. Causal attention (PR #14) completes the
-attention family for autoregressive use. Remaining candidates:
-1. Elementwise activation family (ReLU/SiLU/GELU-tanh) f32+bf16 - the FFN
-   half of a transformer block after norms/GEMM/attention.
-2. bf16 attention variants once a downstream project pins numeric policy.
+All planned waves are complete; the transformer-block primitives are now
+covered end to end (elementwise/activations -> norms -> GEMM/GEMV ->
+RoPE -> causal attention -> softmax/reductions/top-k). Remaining
+candidates:
+1. bf16 attention variants once a downstream project pins numeric policy.
+2. bf16 transposed-B GEMM if attention moves to packed-bf16 scores.
 3. Fused-attention occupancy work ONLY if long-sequence memory footprint
    becomes a real requirement: the A/B below shows the one-block-per-row
    design is 13x slower than composed at practical shapes.
+
+- Activation milestone (2026-08-23, branch `feature/activations`,
+  **PR #15**): ReLU, SiLU (`x / (1 + exp(-x))`), and tanh-approximated GELU
+  added to BOTH elementwise families with identical shape contracts.
+  - `F32Elementwise::{relu, silu, gelu_tanh}` + unsafe enqueues.
+  - `Bf16Elementwise` gains the same three under the fixed numeric policy
+    (packed-bf16 widen -> f32 compute -> RNE narrow).
+  Correctness: ReLU is pure bit math on both sides and asserted BIT-EXACT
+  (f32 vs host fmax; bf16 vs widen->max->narrow replay) over inputs spread
+  across negative/zero/positive including boundary sizes; SiLU/GELU use
+  device transcendentals and are validated against f64 oracles inside
+  explicit tolerances (softmax precedent). No dedicated benchmark: the
+  kernels are single-pass bandwidth-bound elementwise ops identical in
+  mechanism to scale/affine already measured at ~215 GB/s.
+  fmt/clippy/check clean; workspace GPU suite green (80 tests).
 
 - Causal attention milestone (2026-08-23, branch `feature/causal-attention`,
   **PR #14**): `AttentionMask::{None, Causal}` added to both paths. Fused

@@ -79,6 +79,46 @@ extern "C" __global__ void nnis_affine_f32(
         output[index] = fmaf(input[index], scale, bias);
     }
 }
+
+extern "C" __global__ void nnis_relu_f32(
+    const float* input,
+    float* output,
+    unsigned long long elements
+) {
+    const unsigned long long index =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < elements) {
+        output[index] = fmaxf(input[index], 0.0f);
+    }
+}
+
+extern "C" __global__ void nnis_silu_f32(
+    const float* input,
+    float* output,
+    unsigned long long elements
+) {
+    const unsigned long long index =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < elements) {
+        const float x = input[index];
+        output[index] = x / (1.0f + expf(-x));
+    }
+}
+
+extern "C" __global__ void nnis_gelu_tanh_f32(
+    const float* input,
+    float* output,
+    unsigned long long elements
+) {
+    const unsigned long long index =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index < elements) {
+        const float x = input[index];
+        const float inner =
+            0.7978845608028654f * (x + 0.044715f * x * x * x);
+        output[index] = 0.5f * x * (1.0f + tanhf(inner));
+    }
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
@@ -105,6 +145,9 @@ pub struct F32Elementwise {
     vector_add: Kernel,
     scale: Kernel,
     affine: Kernel,
+    relu: Kernel,
+    silu: Kernel,
+    gelu_tanh: Kernel,
     block_size: u32,
 }
 
@@ -133,13 +176,22 @@ impl F32Elementwise {
         let vector_add = module.get_function("nnis_vector_add_f32")?;
         let scale = module.get_function("nnis_scale_f32")?;
         let affine = module.get_function("nnis_affine_f32")?;
+        let relu = module.get_function("nnis_relu_f32")?;
+        let silu = module.get_function("nnis_silu_f32")?;
+        let gelu_tanh = module.get_function("nnis_gelu_tanh_f32")?;
         validate_block_size("vector_add", &vector_add, block_size)?;
         validate_block_size("scale", &scale, block_size)?;
         validate_block_size("affine", &affine, block_size)?;
+        validate_block_size("relu", &relu, block_size)?;
+        validate_block_size("silu", &silu, block_size)?;
+        validate_block_size("gelu_tanh", &gelu_tanh, block_size)?;
         Ok(Self {
             vector_add,
             scale,
             affine,
+            relu,
+            silu,
+            gelu_tanh,
             block_size,
         })
     }
@@ -210,6 +262,42 @@ impl F32Elementwise {
     ) -> Result<()> {
         // SAFETY: this method retains every buffer borrow until synchronization.
         unsafe { self.enqueue_affine(stream, input, output, scale, bias)? };
+        stream.synchronize()
+    }
+
+    /// Apply rectified linear units elementwise and wait for completion.
+    pub fn relu(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        // SAFETY: this method retains every buffer borrow until synchronization.
+        unsafe { self.enqueue_relu(stream, input, output)? };
+        stream.synchronize()
+    }
+
+    /// Apply the SiLU (swish) activation `x / (1 + exp(-x))` and wait.
+    pub fn silu(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        // SAFETY: this method retains every buffer borrow until synchronization.
+        unsafe { self.enqueue_silu(stream, input, output)? };
+        stream.synchronize()
+    }
+
+    /// Apply the tanh-approximated GELU activation and wait for completion.
+    pub fn gelu_tanh(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        // SAFETY: this method retains every buffer borrow until synchronization.
+        unsafe { self.enqueue_gelu_tanh(stream, input, output)? };
         stream.synchronize()
     }
 
@@ -320,6 +408,100 @@ impl F32Elementwise {
         // the remaining asynchronous lifetime obligation is documented above.
         unsafe { launch.launch(&mut args) }
     }
+
+    /// Enqueue ReLU without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// The stream, both buffers, and this kernel set must remain alive and
+    /// otherwise untouched until the stream has completed the launch.
+    pub unsafe fn enqueue_relu(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        validate_lengths("relu", &[("input", input.len()), ("output", output.len())])?;
+        if output.is_empty() {
+            return Ok(());
+        }
+        let mut args = KernelArgs::with_capacity(3, 2);
+        args.push_buffer(input)
+            .push_buffer(output)
+            .push(output.len() as u64);
+        let launch = KernelLaunch::new(
+            &self.relu,
+            stream,
+            LaunchConfig::for_num_elements(output.len(), self.block_size)?,
+        );
+        // SAFETY: argument order and widths exactly match `nnis_relu_f32`;
+        // the remaining asynchronous lifetime obligation is documented above.
+        unsafe { launch.launch(&mut args) }
+    }
+
+    /// Enqueue SiLU without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// The stream, both buffers, and this kernel set must remain alive and
+    /// otherwise untouched until the stream has completed the launch.
+    pub unsafe fn enqueue_silu(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        validate_lengths("silu", &[("input", input.len()), ("output", output.len())])?;
+        if output.is_empty() {
+            return Ok(());
+        }
+        let mut args = KernelArgs::with_capacity(3, 2);
+        args.push_buffer(input)
+            .push_buffer(output)
+            .push(output.len() as u64);
+        let launch = KernelLaunch::new(
+            &self.silu,
+            stream,
+            LaunchConfig::for_num_elements(output.len(), self.block_size)?,
+        );
+        // SAFETY: argument order and widths exactly match `nnis_silu_f32`;
+        // the remaining asynchronous lifetime obligation is documented above.
+        unsafe { launch.launch(&mut args) }
+    }
+
+    /// Enqueue tanh-approximated GELU without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// The stream, both buffers, and this kernel set must remain alive and
+    /// otherwise untouched until the stream has completed the launch.
+    pub unsafe fn enqueue_gelu_tanh(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        validate_lengths(
+            "gelu_tanh",
+            &[("input", input.len()), ("output", output.len())],
+        )?;
+        if output.is_empty() {
+            return Ok(());
+        }
+        let mut args = KernelArgs::with_capacity(3, 2);
+        args.push_buffer(input)
+            .push_buffer(output)
+            .push(output.len() as u64);
+        let launch = KernelLaunch::new(
+            &self.gelu_tanh,
+            stream,
+            LaunchConfig::for_num_elements(output.len(), self.block_size)?,
+        );
+        // SAFETY: argument order and widths exactly match
+        // `nnis_gelu_tanh_f32`; the remaining asynchronous lifetime
+        // obligation is documented above.
+        unsafe { launch.launch(&mut args) }
+    }
 }
 
 fn validate_block_size(operation: &str, kernel: &Kernel, block_size: u32) -> Result<()> {
@@ -428,6 +610,65 @@ mod tests {
                 .map(|&value| value.mul_add(scale, bias))
                 .collect::<Vec<_>>();
             assert_close(&actual, &expected, "affine");
+        }
+    }
+
+    #[test]
+    fn activation_kernels_match_cpu_oracles_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let kernels = F32Elementwise::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &size in TEST_SIZES {
+            // Spread across negative/zero/positive to exercise both ReLU
+            // branches and the sigmoid/tanh transitions.
+            let input_host = (0..size)
+                .map(|index| (index as f32 - size as f32 / 2.0) * 0.125)
+                .collect::<Vec<_>>();
+            let input = DeviceBuffer::from_host(&context, &stream, &input_host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, size).unwrap();
+
+            kernels.relu(&stream, &input, &output).unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            for index in 0..size {
+                // fmaxf(x, 0) is exact: assert bit equality.
+                assert_eq!(
+                    actual[index].to_bits(),
+                    input_host[index].max(0.0).to_bits(),
+                    "relu mismatch at {index} size {size}"
+                );
+            }
+
+            kernels.silu(&stream, &input, &output).unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            for index in 0..size {
+                let x = f64::from(input_host[index]);
+                let expected = x / (1.0 + (-x).exp());
+                let difference = (f64::from(actual[index]) - expected).abs();
+                assert!(
+                    difference <= 1.0e-6_f64.max(expected.abs() * 1.0e-6),
+                    "silu mismatch at {index}: {} vs {expected}",
+                    actual[index]
+                );
+            }
+
+            kernels.gelu_tanh(&stream, &input, &output).unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            for index in 0..size {
+                let x = f64::from(input_host[index]);
+                let inner = 0.7978845608028654_f64 * (x + 0.044_715_f64 * x * x * x);
+                let expected = 0.5 * x * (1.0 + inner.tanh());
+                let difference = (f64::from(actual[index]) - expected).abs();
+                assert!(
+                    difference <= 1.0e-6_f64.max(expected.abs() * 1.0e-6),
+                    "gelu mismatch at {index}: {} vs {expected}",
+                    actual[index]
+                );
+            }
         }
     }
 
