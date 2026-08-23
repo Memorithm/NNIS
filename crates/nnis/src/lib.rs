@@ -25,7 +25,7 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
+        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32Reduction,
         F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
@@ -35,7 +35,7 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
+    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32Reduction,
     F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
@@ -46,7 +46,7 @@ pub use runtime::{
 /// Imports for the typical NNIS execution path.
 pub mod prelude {
     pub use crate::{
-        CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise,
+        CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise, F32Gemv,
         F32Reduction, F32Softmax, F32Softmax2D, JitCompiler, KernelArgs, KernelLaunch,
         LaunchConfig, Module, NnisError, Result, Session, Stream,
     };
@@ -62,6 +62,7 @@ pub struct Session {
     reduction: F32Reduction,
     softmax: F32Softmax,
     softmax_2d: F32Softmax2D,
+    gemv: F32Gemv,
 }
 
 impl Session {
@@ -84,6 +85,7 @@ impl Session {
         let reduction = F32Reduction::load(&context, &compiler)?;
         let softmax = F32Softmax::load(&context, &compiler)?;
         let softmax_2d = F32Softmax2D::load(&context, &compiler)?;
+        let gemv = F32Gemv::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -92,6 +94,7 @@ impl Session {
             reduction,
             softmax,
             softmax_2d,
+            gemv,
         })
     }
 
@@ -121,6 +124,10 @@ impl Session {
 
     pub fn softmax_2d(&self) -> &F32Softmax2D {
         &self.softmax_2d
+    }
+
+    pub fn gemv(&self) -> &F32Gemv {
+        &self.gemv
     }
 }
 
