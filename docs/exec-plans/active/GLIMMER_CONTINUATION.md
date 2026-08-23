@@ -331,6 +331,40 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   immediately for empty inputs, mirroring `max`'s early `-inf` return
   (`F32Reduction` already memset its scalar in the same situation).
 
+- bf16 attention milestone (2026-08-23, branch `feature/bf16-attention`,
+  session opened fresh per the deferral note): `Bf16Attention` ships scaled
+  dot-product attention over packed-bf16 heads under the fixed policy
+  (bf16 storage, f32 compute), with the numeric policy now PINNED:
+  - Fused kernel `nnis_attention_fused_bf16`: mirrors the f32 fused kernel;
+    packed operands widen via exact bit shifts at shared-memory staging,
+    scores/online softmax/accumulator stay f32, one RNE narrow at the final
+    store. Score matrix never in global memory.
+  - Composed path = exact widening of Q/K/V -> full f32 composed pipeline ->
+    one narrowing. Chosen OVER reusing Bf16Gemm-NT for scores because that
+    would quantize logits to bf16 before softmax; with exact widening both
+    decompositions are arithmetically identical anyway, and Thor GEMM is
+    issue-bound so there is no bandwidth justification for the lossy variant.
+  Correctness: KEY PROPERTY - because widening is exact, bf16 results equal
+  the f32 family on widened inputs BIT-FOR-BIT after one host RNE narrow;
+  asserted across five shapes x two paths plus four square causal shapes,
+  alongside f64-oracle tolerances carrying the output quantization term
+  (observed max error 1.5e-2 = exactly half-ulp of the largest outputs).
+  Rejections: empty/short buffers, oversized heads, rectangular causal,
+  invalid block widths. Facade wired (`session.bf16_attention()`,
+  `session.bf16_attention_composed()`). fmt/clippy/check clean; **93 GPU
+  tests passed on Thor** (89 + 4 new).
+  Clean benchmark at commit SHA `acd2c0e` (`git_dirty=false`), Thor CC 11.0,
+  2048 query rows x head 64 vs 2048 kv x value 64, block 64, 20 warmups,
+  100 iterations, both outputs validated after timing (max err 1.21e-4):
+  - Fused bf16: 35.555634 ms median, stddev 0.382 ms (~parity with f32
+    fused 34.968 ms: occupancy-bound, not bandwidth-bound)
+  - Composed bf16: 3.208400 ms median, min 2.782 ms, stddev 0.657 ms
+    (f32 composed median was 2.673 ms; distributions overlap - parity
+    within noise, plus small real widen/narrow overhead)
+  Verdict: bf16 attention's value is halved KV storage/bandwidth, not
+  latency at these shapes; fidelity is fully preserved (bit-identical to
+  f32-on-widened-inputs). Honest negative on speed, recorded per rules.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -339,12 +373,11 @@ no longer allowed for code changes.
 
 ## Next task
 Chained implementation waves continue while candidates remain:
-1. bf16 attention variants once a downstream project pins numeric policy
-   (composed path can reuse Bf16Gemm-NT + f32 score scratch).
-2. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
+1. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
    bandwidth-bound patterns already characterized by siblings.
-
-- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+2. Candidate follow-ups if downstream demand appears: bf16 score
+   materialization variant (quantized-logit policy), multi-head batched
+   attention wrapper, vectorized GEMM loads (see PR #10 observation).- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
   README current-scope list now covers every family through scatter;
   ARCHITECTURE gained Attention (fused/composed + causal contract + honest
   A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics
