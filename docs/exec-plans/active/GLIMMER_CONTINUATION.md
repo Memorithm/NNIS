@@ -220,6 +220,23 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   input bandwidth (2 B/elem), relative error 0.0 vs widened host sum.
   fmt/clippy clean; 62 GPU tests passed on Thor.
 
+- Top-k milestone (2026-08-23, branch `feature/top-k`, stacked on
+  `feature/bf16-reductions`): deterministic iterative selection - each of k
+  rounds runs a multi-pass tree argmax (comparator: larger value wins,
+  ties break toward the lower index at every level) over a private scratch
+  copy, writes the pair to caller outputs, then a one-thread kernel masks
+  the winner to -infinity by reading its index straight from the indices
+  output buffer (stream-ordered, no host sync inside the loop). Four
+  kernels with four distinct argument signatures (fill/mask/scan-plain/
+  scan-pair) per the KernelArgs arity rule. NaN inputs are outside the
+  contract. CPU oracle is bit-exact across nine (n,k) shapes up to
+  131071x64 plus an all-ties test (indices must emerge ascending);
+  rejection tests cover k=0, k>n, short outputs, undersized workspace,
+  block-size mismatch. Facade wired (`session.top_k()`); bench drives the
+  preallocated enqueue path: 262144 elements, k=32 -> 0.622448 ms median,
+  55.592 GB/s derived (traffic = 4*(k+1)*n read + 8k written; 33 full
+  scans). fmt/clippy clean; 65 GPU tests passed on Thor.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after

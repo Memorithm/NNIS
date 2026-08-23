@@ -13,6 +13,7 @@ mod rms_norm;
 mod rope;
 mod row_softmax;
 mod softmax;
+mod top_k;
 
 pub use bf16::Bf16Elementwise;
 pub use bf16_reduction::{Bf16Reduction, Bf16ReductionWorkspace};
@@ -23,6 +24,7 @@ pub use rms_norm::F32RmsNorm;
 pub use rope::F32Rope;
 pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
 pub use softmax::F32Softmax;
+pub use top_k::{F32TopK, F32TopKWorkspace};
 
 use nnis_jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
