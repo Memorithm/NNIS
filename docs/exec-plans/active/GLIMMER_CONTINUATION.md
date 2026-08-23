@@ -134,6 +134,13 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   invalid-shape rejection, facade/Session integration (`session.gemv()`),
   and a validated event-timed benchmark example.
 
+- RMSNorm milestone (2026-08-23, branch `feature/rmsnorm`, PR workflow):
+  staged/fused/dispatched f32 RMS normalization following the LayerNorm
+  template; fmt/clippy/check clean; 50 GPU tests passed on the branch;
+  clean benchmark at `873ca3d`: 4096x4096 fused, 0.670544 ms median,
+  0.638912 min, 200.162 GB/s, max element error 4.89e-7 - faster than
+  fused layer norm (0.707 ms) because one reduction pass replaces two.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
