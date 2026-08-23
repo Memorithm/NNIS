@@ -135,11 +135,29 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   and a validated event-timed benchmark example.
 
 ## Next task
-Allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`
-(stream-ordered `cuMemAllocFromPoolAsync` behind an opt-in allocator),
-starting with pooled flat-softmax scratch and an end-to-end A/B benchmark.
+All planned waves are complete. Remaining candidates in priority order:
+1. Cross-stream pooled-buffer handoff via explicit event record/wait
+   (`share_with`) per step 3 of DESIGN_ALLOCATION_POOLING.md.
+2. Wire `StreamOrderedAllocator` into a real pipeline (flat softmax scratch)
+   behind an API that keeps today's safe defaults untouched.
+3. bf16/f16 elementwise + reduction kernels once a numeric policy is chosen.
 
 ## Measured benchmarks (continued)
+- Clean pooling A/B at `4a51645` (`git_dirty=false`), Thor CC 11.0,
+  5 warmups, 50 iterations per size; per iteration: 3 pool allocs ->
+  vector-add kernel -> 3 stream-ordered frees vs pre-allocated buffers:
+  - 256 elements: 0.007360 vs 0.004480 ms (1.64x)
+  - 4,096: 0.007392 vs 0.004416 ms (1.67x)
+  - 65,536: 0.007616 vs 0.006016 ms (1.27x)
+  - 1,048,576: 0.022080 vs 0.020352 ms (1.08x)
+  - 16,777,216: 0.883552 vs 0.863120 ms (1.02x)
+  Verdict recorded per the design note's decision criteria: async-pool
+  overhead is ~1 microsecond per buffer (3 buffers ~2.9 microseconds),
+  versus ~37 microseconds per buffer for synchronous cuMemAlloc+cuMemFree
+  from Wave 7 - roughly a 12x allocator-cost reduction for per-call
+  scratch. Pre-allocation still wins when shapes are static because it
+  pays zero allocator cost; pooling is the correct default for pipelines
+  whose shapes vary per call. Both paths validated bit-exact after timing.
 - Clean fused LayerNorm at `00dc763` (`git_dirty=false`), Thor CC 11.0,
   4096x4096 f32 (16,777,216 elements), block 256, fused shared-memory path,
   20 warmups, 100 iterations: 0.707136 ms median, 0.681984 min,
@@ -261,6 +279,10 @@ Takeover run (2026-08-22):
 - GEMV milestone (2026-08-23): fmt/clippy/check clean;
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 38 passed;
   committed `3e2893f`, pushed to origin main with clean benchmark record.
+- Pooling milestone (2026-08-23): nnis-sys pool FFI + nnis-rt
+  StreamOrderedAllocator/PooledBuffer shipped; fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 45 passed;
+  committed `4a51645`, pushed with clean A/B benchmark record and verdict.
 - LayerNorm milestone (2026-08-23): fmt/clippy/check clean;
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 43 passed
   (staged/fused/dispatched f64-oracle suites, constant-row stability,
