@@ -418,9 +418,20 @@ no longer allowed for code changes.
 Chained implementation waves continue while candidates remain:
 1. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
    bandwidth-bound patterns already characterized by siblings.
-2. Remaining follow-up if downstream demand appears: vectorized GEMM
-   loads (see PR #10 observation). Multi-head batched fused attention
-   and the bf16 quantized-scores variant shipped in the waves below.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+2. Vectorized GEMM loads - ASSESSED 2026-08-23, deferred to a dedicated
+   session by design, not laziness: proper vector staging does not fit
+   the existing tile structure. Widening the per-thread load to uint4
+   (8 bf16) multiplies the k-chunk per tile iteration by 8 and the
+   shared-memory A/B footprint with it (~16x at tile 16), blowing the
+   dynamic-shared budget; cooperative sub-vector redistribution keeps
+   the footprint but rewrites the validated staging loops outright.
+   Evidence is genuinely mixed: the pipeline is issue-bound, so 4x
+   fewer load instructions could free issue slots for FMAs, yet PR #10
+   showed halving operand traffic changed nothing. A faithful attempt
+   needs new kernels + bit-exact oracle replay + full sweep benchmarks;
+   do not start it late in a session. Multi-head batched fused attention
+   (PR #22) and the bf16 quantized-scores opt-in variant (PR #23)
+   shipped earlier this session.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
   README current-scope list now covers every family through scatter;
   ARCHITECTURE gained Attention (fused/composed + causal contract + honest
   A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics
