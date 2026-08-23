@@ -103,6 +103,65 @@ extern "C" __global__ void nnis_softmax_row_normalize_f32(
         data[index] /= row_total[row];
     }
 }
+
+// One block owns one entire row: the row is staged in dynamic shared
+// memory, so the matrix is read once and written once. Shared layout is
+// [row values (cols floats)][reduction partials (blockDim.x floats)].
+extern "C" __global__ void nnis_softmax_row_fused_f32(
+    const float* input,
+    float* output,
+    unsigned long long cols
+) {
+    extern __shared__ float shared[];
+    float* values = shared;
+    float* partial = shared + cols;
+
+    const unsigned int lane = threadIdx.x;
+    const unsigned long long row = blockIdx.x;
+    const float* source = input + row * cols;
+    float* destination = output + row * cols;
+
+    for (unsigned long long index = lane; index < cols; index += blockDim.x) {
+        values[index] = source[index];
+    }
+    __syncthreads();
+
+    float value = __int_as_float(0xff800000);
+    for (unsigned long long index = lane; index < cols; index += blockDim.x) {
+        value = fmaxf(value, values[index]);
+    }
+    partial[lane] = value;
+    __syncthreads();
+    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (lane < stride) {
+            partial[lane] = fmaxf(partial[lane], partial[lane + stride]);
+        }
+        __syncthreads();
+    }
+    const float maximum = partial[0];
+    __syncthreads();
+
+    float total = 0.0f;
+    for (unsigned long long index = lane; index < cols; index += blockDim.x) {
+        const float exponential = expf(values[index] - maximum);
+        values[index] = exponential;
+        total += exponential;
+    }
+    partial[lane] = total;
+    __syncthreads();
+    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (lane < stride) {
+            partial[lane] += partial[lane + stride];
+        }
+        __syncthreads();
+    }
+    const float sum = partial[0];
+    __syncthreads();
+
+    for (unsigned long long index = lane; index < cols; index += blockDim.x) {
+        destination[index] = values[index] / sum;
+    }
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
@@ -118,6 +177,7 @@ pub struct F32Softmax2D {
     exp_shift: Kernel,
     row_sum: Kernel,
     normalize: Kernel,
+    fused: Kernel,
     block_size: u32,
 }
 
@@ -165,11 +225,13 @@ impl F32Softmax2D {
         let exp_shift = module.get_function("nnis_softmax_row_exp_shift_f32")?;
         let row_sum = module.get_function("nnis_softmax_row_sum_f32")?;
         let normalize = module.get_function("nnis_softmax_row_normalize_f32")?;
+        let fused = module.get_function("nnis_softmax_row_fused_f32")?;
         for (name, function) in [
             ("row_max", &row_max),
             ("exp_shift", &exp_shift),
             ("row_sum", &row_sum),
             ("normalize", &normalize),
+            ("fused", &fused),
         ] {
             let attributes = function.attributes()?;
             if block_size > attributes.max_threads_per_block {
@@ -193,6 +255,7 @@ impl F32Softmax2D {
             exp_shift,
             row_sum,
             normalize,
+            fused,
             block_size,
         })
     }
@@ -240,6 +303,31 @@ impl F32Softmax2D {
         }
     }
 
+    /// Compute each row's stable softmax with the single-kernel fused path
+    /// and wait once.
+    ///
+    /// The row must fit in dynamic shared memory together with the
+    /// reduction partials: `(cols + block_size) * 4` bytes. No workspace is
+    /// required because no intermediate leaves the block.
+    pub fn fused_softmax_rows(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<()> {
+        // SAFETY: every buffer borrow remains live until synchronization.
+        let enqueue_result = unsafe { self.enqueue_fused_rows(stream, input, output, rows, cols) };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
     /// Enqueue the complete four-stage row softmax without synchronizing.
     ///
     /// # Safety
@@ -274,14 +362,13 @@ impl F32Softmax2D {
         Ok(())
     }
 
-    fn validate_execution(
+    fn validate_shapes(
         &self,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
         output: &DeviceBuffer<f32>,
         rows: usize,
         cols: usize,
-        workspace: &F32Softmax2DWorkspace,
     ) -> Result<()> {
         let count = rows
             .checked_mul(cols)
@@ -298,17 +385,78 @@ impl F32Softmax2D {
                 output.len()
             )));
         }
+        if !Arc::ptr_eq(self.context(), stream.ctx())
+            || !Arc::ptr_eq(self.context(), input.ctx())
+            || !Arc::ptr_eq(self.context(), output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "row-softmax stream, buffers, and kernels must share one context",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Enqueue the single-kernel fused row softmax without synchronizing.
+    ///
+    /// # Safety
+    ///
+    /// All buffers and the stream must remain alive and otherwise untouched
+    /// until the stream completes.
+    pub unsafe fn enqueue_fused_rows(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<()> {
+        self.validate_shapes(stream, input, output, rows, cols)?;
+        if rows == 0 || cols == 0 {
+            return Ok(());
+        }
+        let attributes = self.fused.attributes()?;
+        let shared_memory_bytes = self.fused_shared_memory(cols)?;
+        if shared_memory_bytes > attributes.max_dynamic_shared_memory_bytes as usize {
+            return Err(NnisError::invalid_input(format!(
+                "fused row softmax needs {shared_memory_bytes} shared-memory bytes for \
+                 {cols} columns; function limit is {}",
+                attributes.max_dynamic_shared_memory_bytes
+            )));
+        }
+        // SAFETY: the caller owns the asynchronous lifetime of both buffers.
+        unsafe { self.launch_fused(stream, input, output, rows, cols, shared_memory_bytes) }
+    }
+
+    fn fused_shared_memory(&self, cols: usize) -> Result<usize> {
+        let element = std::mem::size_of::<f32>();
+        let values = element
+            .checked_mul(cols)
+            .ok_or_else(|| NnisError::invalid_input("fused row softmax shared size overflows"))?;
+        let partials = element
+            .checked_mul(self.block_size as usize)
+            .ok_or_else(|| NnisError::invalid_input("fused row softmax shared size overflows"))?;
+        values
+            .checked_add(partials)
+            .ok_or_else(|| NnisError::invalid_input("fused row softmax shared size overflows"))
+    }
+
+    fn validate_execution(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+        workspace: &F32Softmax2DWorkspace,
+    ) -> Result<()> {
+        self.validate_shapes(stream, input, output, rows, cols)?;
         if rows > workspace.max_rows {
             return Err(NnisError::invalid_input(format!(
                 "row-softmax has {rows} rows; workspace capacity is {}",
                 workspace.max_rows
             )));
         }
-        if !Arc::ptr_eq(self.context(), stream.ctx())
-            || !Arc::ptr_eq(self.context(), input.ctx())
-            || !Arc::ptr_eq(self.context(), output.ctx())
-            || !Arc::ptr_eq(self.context(), workspace.context())
-        {
+        if !Arc::ptr_eq(self.context(), workspace.context()) {
             return Err(NnisError::invalid_input(
                 "row-softmax stream, buffers, and kernels must share one context",
             ));
@@ -426,6 +574,37 @@ impl F32Softmax2D {
         Ok((rows, cols))
     }
 
+    /// # Safety
+    ///
+    /// Caller owns the asynchronous lifetime of every buffer; see
+    /// [`F32Softmax2D::enqueue_softmax_rows`].
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn launch_fused(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+        shared_memory_bytes: usize,
+    ) -> Result<()> {
+        let grid_size = u32::try_from(rows)
+            .map_err(|_| NnisError::invalid_input("row-softmax exceeds u32::MAX rows"))?;
+        let cols = u64::try_from(cols)
+            .map_err(|_| NnisError::invalid_input("row-softmax width exceeds u64::MAX"))?;
+        let config = LaunchConfig::new(Dim3::x(grid_size), Dim3::x(self.block_size))
+            .with_dynamic_shared_memory(
+                u32::try_from(shared_memory_bytes)
+                    .map_err(|_| NnisError::invalid_input("fused shared memory exceeds u32"))?,
+            );
+        let mut arguments = KernelArgs::with_capacity(3, 2);
+        arguments.push_buffer(input).push_buffer(output).push(cols);
+        let launch = KernelLaunch::new(&self.fused, stream, config);
+        // SAFETY: argument order/widths match `nnis_softmax_row_fused_f32`;
+        // the caller owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
     fn context(&self) -> &Arc<Context> {
         self.row_max.context()
     }
@@ -527,6 +706,58 @@ mod tests {
             );
         }
         let _ = max_elements;
+    }
+
+    #[test]
+    fn fused_row_softmax_matches_high_precision_oracle_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let softmax = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &(rows, cols) in SHAPES {
+            let host = host_values(rows, cols);
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+            softmax
+                .fused_softmax_rows(&stream, &input, &output, rows, cols)
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            let expected = reference_rows(&host, rows, cols);
+            assert_eq!(actual.len(), expected.len());
+            for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+                let tolerance = 1.0e-6_f32.max((expected.abs() as f32) * 1.0e-5);
+                assert!(
+                    (actual - expected as f32).abs() <= tolerance,
+                    "fused row softmax mismatch at {index} shape ({rows}, {cols}): \
+                     {actual} != {expected}, tolerance={tolerance}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fused_row_softmax_rejects_oversized_rows() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let softmax = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+        // (cols + block_size) * 4 bytes must fit the function's dynamic
+        // shared-memory limit; 20,000 columns cannot.
+        let cols = 20_000_usize;
+        let rows = 2_usize;
+        let input = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+        let error = softmax
+            .fused_softmax_rows(&stream, &input, &output, rows, cols)
+            .unwrap_err();
+        assert!(error.to_string().contains("shared-memory"), "{error}");
     }
 
     #[test]

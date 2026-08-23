@@ -22,6 +22,12 @@ fn env_usize(name: &str, default: usize) -> Result<usize, Box<dyn std::error::Er
     }
 }
 
+fn env_flag(name: &str, default: bool) -> bool {
+    std::env::var(name)
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(default)
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let elements = env_usize("NNIS_BENCH_ELEMENTS", 1 << 24)?;
     let cols = env_usize("NNIS_BENCH_COLS", 2_048)?;
@@ -48,10 +54,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input = DeviceBuffer::from_host(&context, &stream, &host)?;
     let output = DeviceBuffer::<f32>::new(&context, elements)?;
 
-    // Traffic model: two full-matrix reads for the reductions, one read and
-    // one write each for exp shift and in-place normalize.
+    // Traffic model: staged pipeline moves six full-matrix streams (two
+    // reduction reads, exp read+write, normalize read+write); the fused
+    // kernel stages each row in shared memory and moves two.
+    let fused = env_flag("NNIS_BENCH_FUSED", false);
+    let streams = if fused { 2_u64 } else { 6_u64 };
     let bytes = (elements as u64)
-        .checked_mul(6)
+        .checked_mul(streams)
         .and_then(|value| value.checked_mul(4))
         .ok_or("traffic calculation overflow")?;
 
@@ -59,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_dimension("rows", rows as u64)
         .with_dimension("cols", cols as u64)
         .with_dimension("block_size", u64::from(softmax.block_size()))
-        .with_dimension("stages", 4)
+        .with_dimension("stages", if fused { 1 } else { 4 })
+        .with_dimension("fused", u64::from(fused))
         .with_work_items(elements as u64)
         .with_bytes_per_iteration(bytes);
     let report = benchmark_gpu(
@@ -71,7 +81,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // SAFETY: all buffers and the exclusive workspace outlive this
             // harness, which synchronizes the end event per invocation.
             unsafe {
-                softmax.enqueue_softmax_rows(&stream, &input, &output, rows, cols, &workspace)
+                if fused {
+                    softmax.enqueue_fused_rows(&stream, &input, &output, rows, cols)
+                } else {
+                    softmax.enqueue_softmax_rows(&stream, &input, &output, rows, cols, &workspace)
+                }
             }
         },
     )?;
