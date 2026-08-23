@@ -158,6 +158,12 @@ checked inside an explicit tolerance. An empty inner dimension zeroes the
 output, zero rows/columns write nothing, and column-block counts are
 validated against CUDA's 65535 gridDim.y limit.
 
+`Bf16Gemm` applies the project's bf16 numeric policy to the same tile
+structure: packed-bf16 `u16` operands are widened by exact bit shifts inside
+shared memory, accumulated in f32, and narrowed once per output element with
+round-to-nearest-even bit math. The oracle replays widen -> accumulate ->
+narrow exactly and is asserted bit-exact.
+
 ## Blocking and asynchronous APIs
 
 The default memory and standard-kernel methods are safe and synchronizing:

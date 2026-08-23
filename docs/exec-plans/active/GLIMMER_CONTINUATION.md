@@ -261,6 +261,30 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   under parallel execution during development; it passed in isolation and
   in four subsequent full-suite runs - unchanged here, no action taken.
 
+- bf16 GEMM milestone (2026-08-23, branch `feature/bf16-gemm`, **PR #10**,
+  stacked on merged #9): `Bf16Gemm` applies the fixed numeric policy -
+  bf16 storage, f32 compute - to the tiled matrix multiply: packed-bf16
+  operands widen via pure bit shifts inside the shared-memory tiles,
+  accumulate in explicit-FMA chains over ascending k, and narrow once at
+  the final store with the same RNE bit-math used by the elementwise
+  family. CPU oracle replays widen -> FMA chain -> narrow exactly and is
+  asserted BIT-EXACT across 8 shapes up to 128x96x129; output pre-filled
+  with 0xFFFF so a skipped kernel cannot pass silently. Empty inner
+  dimension zeroes the output; rejection tests mirror F32Gemm plus invalid
+  tiles. Facade wired (`session.bf16_gemm()`); event-timed bench example
+  validates against an f64 widened-input oracle after timing.
+  fmt/clippy/check clean; **71 GPU tests passed on Thor** (68 + 3 new).
+  Clean benchmark at commit SHA `d33c3b5` (`git_dirty=false`), 2048^3:
+  median 22.999727 ms, min 22.991713 ms, stddev 0.004492 ms;
+  max absolute error 0.5 vs f64 over widened inputs (bf16 output
+  quantization), validated. Measured observation: identical median to the
+  f32 kernel despite half the operand traffic - this simple one-FMA-chain
+  tiling is issue/compute-bound on Thor, so narrower inputs alone do not
+  speed it up; vectorized loads/double buffering or larger tiles are the
+  candidate levers if GEMM throughput ever becomes a priority.
+  Workflow note: PR #9 auto-merged before its docs commit landed, so that
+  commit was cherry-picked onto this branch and lands through PR #10.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
