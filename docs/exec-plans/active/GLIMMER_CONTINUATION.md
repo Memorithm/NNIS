@@ -120,11 +120,16 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   f64-oracle tests across all shapes plus oversized-row rejection; benchmark
   example gained an `NNIS_BENCH_FUSED=1` A/B mode.
 
+- Automatic row-softmax dispatch shipped: `softmax_rows_dispatched` picks
+  the fused kernel when `fused_available(cols)` (row + partials fit dynamic
+  shared memory) and falls back to the staged pipeline with freshly allocated
+  scratch otherwise; tested fused-selected, narrow, and oversized-row paths.
+  `Session` now loads and exposes `softmax_2d`. Workspace total: 36 GPU tests.
+
 ## Next task
-Add an automatic dispatch helper on `F32Softmax2D` (fused when the row fits
-dynamic shared memory, staged pipeline otherwise) and integrate
-`F32Softmax2D` into the facade `Session`; then consider allocation pooling
-design note deferred from Wave 7.
+Document the row-softmax family in docs/ARCHITECTURE.md and README usage;
+then evaluate allocation pooling (deferred Wave 7) or batched GEMV-style
+primitives as the next kernel wave.
 
 ## Measured benchmarks (continued)
 - Fused-vs-staged row-softmax A/B, Thor CC 11.0, 8192x2048 f32 (16,777,216
@@ -216,6 +221,9 @@ Takeover run (2026-08-22):
   NNIS_BENCH_WARMUPS=3 NNIS_BENCH_ITERATIONS=10 cargo run --release -p
   nnis-bench --example row_softmax`: median 0.2069 ms at 1024x2048,
   243.25 GB/s derived, max element error 4.09e-8, validated.
+- Dispatch milestone (2026-08-23): fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 36 passed;
+  committed `ee5f646`, pushed to origin main.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
@@ -257,11 +265,12 @@ Takeover run (2026-08-22):
   run with direct hardware access.
 
 ## Recent changes
-Protected baseline `d086ec2`; pushed milestones: `f7b39c6`, `34c8168`,
-Wave 3 `00f9d20`, Wave 4 `85420bd`, benchmark record `1282912`, facade /
-end-to-end `75ca7d6`, Wave 7 `6dd485f`, performance record `8413eb0`, memory
-safety hardening `bee938f`, CUDA ABI audit `ef04ffb`, documentation `b688e26`,
-JIT introspection `9656323`, and block-size sweep `50e6d96`.
+Protected baseline `d086ec2`; pushed milestones include Wave 7 `6dd485f`,
+memory hardening `bee938f`, ABI audit `ef04ffb`, docs `b688e26`,
+introspection `9656323`, sweep `50e6d96`/`f3480f7`, reduction
+`4a22f3c`/`85c27a2`, softmax `0459ee4`/`9924380`, row softmax
+`ab0da37`/`51fe244`, fused row softmax `a3a3cd5`/`0f200b6`, and auto-dispatch
+`ee5f646`. All pushed to origin main.
 The initial raw launch crashed in `cuLaunchKernel`; GDB proved that device
 addresses had been supplied where CUDA expects host pointers to argument
 values. The validated typed launcher fixes that root cause. Next task: add and
