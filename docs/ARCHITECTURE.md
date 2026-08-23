@@ -145,6 +145,19 @@ shared-memory budget. `softmax_rows_dispatched` chooses automatically via
 `fused_available`, keeping the architecture-specific optimization behind a
 dispatch boundary instead of hard-coding Thor assumptions.
 
+### Tiled matrix multiply (`F32Gemm`)
+
+`C = A * B` for row-major `f32` matrices: one thread block computes one
+`tile_side x tile_side` output tile (default 16, runtime-tunable to any
+non-zero power of two whose square fits the function block limit). A and B
+tiles are staged cooperatively in dynamic shared memory with boundary guards,
+and every output element is one explicit-FMA chain over `k` in ascending
+order. The CPU oracle replays that exact order with `mul_add`, so results are
+bit-exact regardless of compiler contraction; an independent f64 reference is
+checked inside an explicit tolerance. An empty inner dimension zeroes the
+output, zero rows/columns write nothing, and column-block counts are
+validated against CUDA's 65535 gridDim.y limit.
+
 ## Blocking and asynchronous APIs
 
 The default memory and standard-kernel methods are safe and synchronizing:
