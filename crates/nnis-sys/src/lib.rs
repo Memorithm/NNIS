@@ -29,7 +29,52 @@ pub type CUstream = *mut core::ffi::c_void;
 pub type CUevent = *mut core::ffi::c_void;
 pub type CUmodule = *mut core::ffi::c_void;
 pub type CUfunction = *mut core::ffi::c_void;
+pub type CUmemoryPool = *mut core::ffi::c_void;
 pub type CUdeviceptr = usize;
+
+/// `CUmemAllocationType` (cuda.h): only `PINNED` is valid for pool props.
+pub const CU_MEM_ALLOCATION_TYPE_PINNED: u32 = 0x1;
+/// `CUmemHandleType` (cuda.h): no export mechanism.
+pub const CU_MEM_HANDLE_TYPE_NONE: u32 = 0x0;
+/// `CUmemLocationType` (cuda.h): `id` is a device ordinal.
+pub const CU_MEM_LOCATION_TYPE_DEVICE: u32 = 0x1;
+/// `CUmemPool_attribute` (cuda.h): bytes retained before OS release.
+pub const CU_MEMPOOL_ATTR_RELEASE_THRESHOLD: u32 = 4;
+
+/// `CUmemLocation` (cuda.h, CUDA 13.0).
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CUmemLocation {
+    pub type_: u32,
+    pub id: i32,
+}
+
+/// `CUmemPoolProps_v1` (cuda.h, CUDA 13.0). `reserved` must be zeroed.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct CUmemPoolProps {
+    pub alloc_type: u32,
+    pub handle_types: u32,
+    pub location: CUmemLocation,
+    pub win32_security_attributes: *mut core::ffi::c_void,
+    pub max_size: usize,
+    pub usage: u16,
+    pub reserved: [u8; 54],
+}
+
+impl Default for CUmemPoolProps {
+    fn default() -> Self {
+        Self {
+            alloc_type: 0,
+            handle_types: 0,
+            location: CUmemLocation { type_: 0, id: 0 },
+            win32_security_attributes: std::ptr::null_mut(),
+            max_size: 0,
+            usage: 0,
+            reserved: [0; 54],
+        }
+    }
+}
 #[allow(non_camel_case_types)]
 pub type nvrtcProgram = *mut core::ffi::c_void;
 

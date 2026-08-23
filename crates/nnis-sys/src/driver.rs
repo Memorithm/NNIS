@@ -4,8 +4,8 @@
 //! order: `$NNIS_CUDA_DRIVER_PATH` (if set), then the candidate sonames.
 
 use crate::{
-    CUcontext, CUdevice, CUdeviceptr, CUevent, CUfunction, CUmodule, CUresult, CUstream, CUuuid,
-    LibraryError,
+    CUcontext, CUdevice, CUdeviceptr, CUevent, CUfunction, CUmemoryPool, CUmodule, CUresult,
+    CUstream, CUuuid, LibraryError,
 };
 use libloading::Library;
 use std::sync::OnceLock;
@@ -47,6 +47,19 @@ pub struct DriverApi {
     pub cuMemFree: unsafe extern "C" fn(CUdeviceptr) -> CUresult,
     pub cuMemAllocHost: unsafe extern "C" fn(*mut *mut CVoid, CSizeT) -> CUresult,
     pub cuMemFreeHost: unsafe extern "C" fn(*mut CVoid) -> CUresult,
+    /// Stream-ordered memory pool creation (`cuMemPoolCreate`, CUDA 11.2+).
+    pub cuMemPoolCreate:
+        unsafe extern "C" fn(*mut CUmemoryPool, *const crate::CUmemPoolProps) -> CUresult,
+    /// NOTE: destroying a pool requires every allocation from it to be freed.
+    pub cuMemPoolDestroy: unsafe extern "C" fn(CUmemoryPool) -> CUresult,
+    /// `attr` is a `CUmemPool_attribute`; `value` points to the attr's value
+    /// type (e.g. `cuuint64_t` for `CU_MEMPOOL_ATTR_RELEASE_THRESHOLD`).
+    pub cuMemPoolSetAttribute: unsafe extern "C" fn(CUmemoryPool, CUInt, *mut CVoid) -> CUresult,
+    pub cuMemAllocFromPoolAsync:
+        unsafe extern "C" fn(*mut CUdeviceptr, CSizeT, CUmemoryPool, CUstream) -> CUresult,
+    /// Stream-ordered free: release is enqueued, reuse happens after the
+    /// stream's outstanding work completes.
+    pub cuMemFreeAsync: unsafe extern "C" fn(CUdeviceptr, CUstream) -> CUresult,
     /// NOTE: the trailing count is in **elements** (u32 words / bytes).
     pub cuMemsetD32Async: unsafe extern "C" fn(CUdeviceptr, CUInt, CSizeT, CUstream) -> CUresult,
     pub cuMemsetD8Async: unsafe extern "C" fn(CUdeviceptr, CUChar, CSizeT, CUstream) -> CUresult,
@@ -211,6 +224,11 @@ pub fn api() -> Result<&'static DriverApi, LibraryError> {
                     cuMemFree: ["cuMemFree_v2", "cuMemFree"],
                     cuMemAllocHost: ["cuMemAllocHost_v2", "cuMemAllocHost"],
                     cuMemFreeHost: ["cuMemFreeHost"],
+                    cuMemPoolCreate: ["cuMemPoolCreate"],
+                    cuMemPoolDestroy: ["cuMemPoolDestroy"],
+                    cuMemPoolSetAttribute: ["cuMemPoolSetAttribute"],
+                    cuMemAllocFromPoolAsync: ["cuMemAllocFromPoolAsync"],
+                    cuMemFreeAsync: ["cuMemFreeAsync"],
                     cuMemsetD32Async: ["cuMemsetD32Async"],
                     cuMemsetD8Async: ["cuMemsetD8Async"],
                     cuMemcpyHtoDAsync: ["cuMemcpyHtoDAsync_v2", "cuMemcpyHtoDAsync"],

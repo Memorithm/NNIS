@@ -8,12 +8,14 @@ pub mod context;
 pub mod device;
 pub mod error;
 pub mod memory;
+pub mod pool;
 pub mod stream_event;
 
 pub use context::{gpu_context, Context};
 pub use device::{Device, DeviceProps};
 pub use error::{ErrorKind, NnisError, Result};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
+pub use pool::{PooledBuffer, StreamOrderedAllocator};
 pub use stream_event::{Event, Stream};
 
 #[cfg(test)]
