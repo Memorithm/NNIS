@@ -3,7 +3,9 @@
 use nnis_jit::{
     CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
 };
-use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
+use nnis_rt::{
+    Context, DeviceBuffer, NnisError, PooledBuffer, Result, Stream, StreamOrderedAllocator,
+};
 use std::sync::Arc;
 
 const REDUCTION_SOURCE: &str = r#"
@@ -74,17 +76,51 @@ extern "C" __global__ void nnis_reduce_max_f32(
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
 
+/// Scratch storage for the reduction tree: plain or stream-ordered pooled.
+///
+/// Both variants expose the same launch surface; the launch path only needs
+/// a device pointer and an element count.
+#[derive(Debug)]
+pub(crate) enum TreeScratch {
+    Plain(DeviceBuffer<f32>),
+    Pooled(PooledBuffer<f32>),
+}
+
+impl TreeScratch {
+    fn ptr(&self) -> u64 {
+        match self {
+            Self::Plain(buffer) => buffer.device_ptr(),
+            Self::Pooled(buffer) => buffer.device_ptr(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Plain(buffer) => buffer.len(),
+            Self::Pooled(buffer) => buffer.len(),
+        }
+    }
+
+    fn ctx(&self) -> &Arc<Context> {
+        match self {
+            Self::Plain(buffer) => buffer.ctx(),
+            Self::Pooled(buffer) => buffer.ctx(),
+        }
+    }
+}
+
 /// Reusable scratch storage for an [`F32Reduction`] sum.
 ///
 /// A workspace is context- and block-size-specific. It may be reused for any
 /// input no larger than `max_elements`, but not by overlapping asynchronous
-/// operations.
+/// operations. The scratch slots may be plain or pooled stream-ordered
+/// storage; pooling is opt-in through [`F32Reduction::pooled_workspace`].
 #[derive(Debug)]
 pub struct F32ReductionWorkspace {
     max_elements: usize,
     block_size: u32,
-    scratch_a: DeviceBuffer<f32>,
-    scratch_b: DeviceBuffer<f32>,
+    scratch_a: TreeScratch,
+    scratch_b: TreeScratch,
 }
 
 impl F32ReductionWorkspace {
@@ -189,8 +225,30 @@ impl F32Reduction {
         Ok(F32ReductionWorkspace {
             max_elements,
             block_size: self.block_size,
-            scratch_a: DeviceBuffer::new(context, scratch_elements)?,
-            scratch_b: DeviceBuffer::new(context, scratch_elements)?,
+            scratch_a: TreeScratch::Plain(DeviceBuffer::new(context, scratch_elements)?),
+            scratch_b: TreeScratch::Plain(DeviceBuffer::new(context, scratch_elements)?),
+        })
+    }
+
+    /// Build a workspace whose tree scratch is allocated stream-ordered
+    /// from `allocator` (pooled frees enqueue on the allocator's stream at
+    /// drop). Capacity semantics match [`Self::workspace`].
+    pub fn pooled_workspace(
+        &self,
+        allocator: &StreamOrderedAllocator,
+        max_elements: usize,
+    ) -> Result<F32ReductionWorkspace> {
+        if !Arc::ptr_eq(allocator.context(), self.sum.context()) {
+            return Err(NnisError::invalid_input(
+                "reduction and allocator contexts do not match",
+            ));
+        }
+        let scratch_elements = partial_count(max_elements, self.block_size)?;
+        Ok(F32ReductionWorkspace {
+            max_elements,
+            block_size: self.block_size,
+            scratch_a: TreeScratch::Pooled(allocator.alloc(scratch_elements)?),
+            scratch_b: TreeScratch::Pooled(allocator.alloc(scratch_elements)?),
         })
     }
 
@@ -253,7 +311,46 @@ impl F32Reduction {
     ) -> Result<()> {
         // SAFETY: identical buffers and lifetime obligations as this method's
         // documented contract; only the reduction operator differs.
-        unsafe { self.enqueue_tree(&self.sum, stream, input, output, workspace, TreeKind::Sum) }
+        unsafe {
+            self.enqueue_tree(
+                &self.sum,
+                stream,
+                input,
+                output.device_ptr(),
+                output.len(),
+                workspace,
+                TreeKind::Sum,
+            )
+        }
+    }
+
+    /// Pointer-form [`Self::enqueue_sum`]: the one-element scalar
+    /// destination is passed by device address.
+    ///
+    /// # Safety
+    ///
+    /// `output_ptr` must name a live one-element `f32` allocation distinct
+    /// from every workspace slot; remaining obligations match
+    /// [`Self::enqueue_sum`].
+    pub unsafe fn enqueue_sum_ptr(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output_ptr: u64,
+        workspace: &F32ReductionWorkspace,
+    ) -> Result<()> {
+        // SAFETY: caller owns the pointer's lifetime per this method's docs.
+        unsafe {
+            self.enqueue_tree(
+                &self.sum,
+                stream,
+                input,
+                output_ptr,
+                1,
+                workspace,
+                TreeKind::Sum,
+            )
+        }
     }
 
     /// Enqueue every max-reduction pass without synchronizing the stream.
@@ -272,49 +369,112 @@ impl F32Reduction {
         workspace: &F32ReductionWorkspace,
     ) -> Result<()> {
         // SAFETY: identical buffers and lifetime obligations as `enqueue_sum`.
-        unsafe { self.enqueue_tree(&self.max, stream, input, output, workspace, TreeKind::Max) }
+        unsafe {
+            self.enqueue_tree(
+                &self.max,
+                stream,
+                input,
+                output.device_ptr(),
+                output.len(),
+                workspace,
+                TreeKind::Max,
+            )
+        }
     }
 
+    /// Pointer-form [`Self::enqueue_max`].
+    ///
+    /// # Safety
+    ///
+    /// `output_ptr` must name a live one-element `f32` allocation distinct
+    /// from every workspace slot; remaining obligations match
+    /// [`Self::enqueue_sum`].
+    pub unsafe fn enqueue_max_ptr(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output_ptr: u64,
+        workspace: &F32ReductionWorkspace,
+    ) -> Result<()> {
+        // SAFETY: caller owns the pointer's lifetime per this method's docs.
+        unsafe {
+            self.enqueue_tree(
+                &self.max,
+                stream,
+                input,
+                output_ptr,
+                1,
+                workspace,
+                TreeKind::Max,
+            )
+        }
+    }
+
+    /// # Safety
+    ///
+    /// `output_ptr`/`output_len` describe a live allocation; obligations
+    /// mirror [`Self::enqueue_sum`] / [`Self::enqueue_max`].
+    #[allow(clippy::too_many_arguments)]
     unsafe fn enqueue_tree(
         &self,
         kernel: &Kernel,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
-        output: &DeviceBuffer<f32>,
+        output_ptr: u64,
+        output_len: usize,
         workspace: &F32ReductionWorkspace,
         kind: TreeKind,
     ) -> Result<()> {
-        self.validate_execution(stream, input, output, workspace)?;
+        if output_len != 1 {
+            return Err(NnisError::invalid_input(format!(
+                "reduction output has {output_len} elements; expected 1"
+            )));
+        }
+        self.validate_execution(stream, input, output_ptr, workspace)?;
         if input.is_empty() {
             if matches!(kind, TreeKind::Sum) {
-                // SAFETY: the output and stream lifetime obligation is
-                // inherited by this method's contract.
-                return unsafe { output.zero_async(stream) };
+                let context = self.sum.context();
+                context.set_current()?;
+                let api = nnis_sys::driver::api()?;
+                // SAFETY: the pointer names a live one-element allocation;
+                // lifetime inherited by this method's contract.
+                let rc = unsafe { (api.cuMemsetD8Async)(output_ptr as usize, 0, 4, stream.raw()) };
+                if rc != 0 {
+                    return Err(NnisError::driver("cuMemsetD8Async", rc).with("bytes", 4));
+                }
             }
             return Ok(());
         }
 
-        let mut current = input;
+        let mut current_ptr = input.device_ptr();
         let mut current_elements = input.len();
         let mut write_scratch_a = true;
         loop {
             let output_elements = partial_count(current_elements, self.block_size)?;
-            let destination = if output_elements == 1 {
-                output
+            let (destination_ptr, destination_capacity) = if output_elements == 1 {
+                (output_ptr, output_len)
             } else if write_scratch_a {
-                &workspace.scratch_a
+                (workspace.scratch_a.ptr(), workspace.scratch_a.len())
             } else {
-                &workspace.scratch_b
+                (workspace.scratch_b.ptr(), workspace.scratch_b.len())
             };
-            // SAFETY: buffers are distinct workspace/output allocations, all
-            // passes are ordered on one stream, and caller owns the lifetime.
+            // SAFETY: pointers name distinct live allocations (input/output
+            // or workspace slots), all passes are ordered on one stream, and
+            // the caller owns every asynchronous lifetime involved.
             unsafe {
-                self.enqueue_pass(kernel, stream, current, destination, current_elements)?;
+                self.enqueue_pass(
+                    kernel,
+                    stream,
+                    current_ptr,
+                    current_elements,
+                    destination_ptr,
+                    destination_capacity,
+                )?;
             }
             if output_elements == 1 {
                 break;
             }
-            current = destination;
+            current_ptr = destination_ptr;
             current_elements = output_elements;
             write_scratch_a = !write_scratch_a;
         }
@@ -325,15 +485,9 @@ impl F32Reduction {
         &self,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
-        output: &DeviceBuffer<f32>,
+        _output_ptr: u64,
         workspace: &F32ReductionWorkspace,
     ) -> Result<()> {
-        if output.len() != 1 {
-            return Err(NnisError::invalid_input(format!(
-                "reduction output has {} elements; expected 1",
-                output.len()
-            )));
-        }
         if input.len() > workspace.max_elements {
             return Err(NnisError::invalid_input(format!(
                 "reduction input has {} elements; workspace capacity is {}",
@@ -350,7 +504,6 @@ impl F32Reduction {
         let context = self.sum.context();
         if !Arc::ptr_eq(context, stream.ctx())
             || !Arc::ptr_eq(context, input.ctx())
-            || !Arc::ptr_eq(context, output.ctx())
             || !Arc::ptr_eq(context, workspace.context())
         {
             return Err(NnisError::invalid_input(
@@ -397,19 +550,24 @@ impl F32Reduction {
         }
     }
 
+    /// # Safety
+    ///
+    /// Both pointers must name distinct live `f32` device allocations with
+    /// at least the stated capacities; see the enclosing operation's
+    /// documented asynchronous-lifetime contract.
     unsafe fn enqueue_pass(
         &self,
         kernel: &Kernel,
         stream: &Stream,
-        input: &DeviceBuffer<f32>,
-        output: &DeviceBuffer<f32>,
+        input_ptr: u64,
         elements: usize,
+        output_ptr: u64,
+        output_capacity: usize,
     ) -> Result<()> {
         let output_elements = partial_count(elements, self.block_size)?;
-        if output_elements == 0 || output.len() < output_elements {
+        if output_elements == 0 || output_capacity < output_elements {
             return Err(NnisError::invalid_input(format!(
-                "reduction pass needs {output_elements} output elements; allocation has {}",
-                output.len()
+                "reduction pass needs {output_elements} output elements; allocation has {output_capacity}"
             )));
         }
         let grid_size = u32::try_from(output_elements)
@@ -422,11 +580,8 @@ impl F32Reduction {
             .ok_or_else(|| NnisError::invalid_input("reduction shared-memory size overflows"))?;
         let config = LaunchConfig::new(Dim3::x(grid_size), Dim3::x(self.block_size))
             .with_dynamic_shared_memory(shared_memory_bytes);
-        let mut arguments = KernelArgs::with_capacity(3, 2);
-        arguments
-            .push_buffer(input)
-            .push_buffer(output)
-            .push(elements);
+        let mut arguments = KernelArgs::with_capacity(3, 0);
+        arguments.push(input_ptr).push(output_ptr).push(elements);
         let launch = KernelLaunch::new(kernel, stream, config);
         // SAFETY: argument order/widths match both reduction kernels, which
         // share one signature; the enclosing operation owns the asynchronous

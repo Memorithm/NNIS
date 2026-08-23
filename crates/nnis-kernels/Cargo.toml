@@ -8,3 +8,4 @@ description = "NVIDIA Native Inference Stack"
 [dependencies]
 nnis-jit = { workspace = true }
 nnis-rt = { workspace = true }
+nnis-sys = { workspace = true }
