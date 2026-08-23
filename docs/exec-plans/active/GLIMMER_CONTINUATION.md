@@ -135,11 +135,17 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   and a validated event-timed benchmark example.
 
 ## Next task
-LayerNorm building block (per-row mean/variance reductions reusing the tree
-pattern, fused normalize stage) following the F32Softmax2D template, or the
-allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`.
+Allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`
+(stream-ordered `cuMemAllocFromPoolAsync` behind an opt-in allocator),
+starting with pooled flat-softmax scratch and an end-to-end A/B benchmark.
 
 ## Measured benchmarks (continued)
+- Clean fused LayerNorm at `00dc763` (`git_dirty=false`), Thor CC 11.0,
+  4096x4096 f32 (16,777,216 elements), block 256, fused shared-memory path,
+  20 warmups, 100 iterations: 0.707136 ms median, 0.681984 min,
+  stddev 0.023695 ms; 189.805 GB/s derived; max element error 6.17e-7 vs the
+  f64 oracle, validated after timing. Dirty pre-commit run agreed
+  (0.731152 ms median, 183.570 GB/s).
 - Clean GEMV benchmark at `3e2893f` (`git_dirty=false`), Thor CC 11.0,
   4096x4096 f32 matrix, block 256, 20 warmups, 100 iterations:
   0.377824 ms median, 0.375520 min, stddev 0.009716 ms; 177.706 GB/s derived;
@@ -255,6 +261,11 @@ Takeover run (2026-08-22):
 - GEMV milestone (2026-08-23): fmt/clippy/check clean;
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 38 passed;
   committed `3e2893f`, pushed to origin main with clean benchmark record.
+- LayerNorm milestone (2026-08-23): fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 43 passed
+  (staged/fused/dispatched f64-oracle suites, constant-row stability,
+  oversized-row and invalid-shape rejection); committed `00dc763`, pushed
+  with clean benchmark record.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
