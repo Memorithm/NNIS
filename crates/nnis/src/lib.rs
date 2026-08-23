@@ -25,9 +25,10 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
-        F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
-        F32RmsNorm, F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+        Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
+        F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
+        F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
 
@@ -36,9 +37,10 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    Bf16Elementwise, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv,
-    F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
-    F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+    Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
+    F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
+    F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -68,6 +70,7 @@ pub struct Session {
     layer_norm: F32LayerNorm,
     rms_norm: F32RmsNorm,
     bf16_elementwise: Bf16Elementwise,
+    bf16_reduction: Bf16Reduction,
     rope: F32Rope,
 }
 
@@ -95,6 +98,7 @@ impl Session {
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         let rms_norm = F32RmsNorm::load(&context, &compiler)?;
         let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
+        let bf16_reduction = Bf16Reduction::load(&context, &compiler)?;
         let rope = F32Rope::load(&context, &compiler)?;
         Ok(Self {
             context,
@@ -108,6 +112,7 @@ impl Session {
             layer_norm,
             rms_norm,
             bf16_elementwise,
+            bf16_reduction,
             rope,
         })
     }
@@ -154,6 +159,10 @@ impl Session {
 
     pub fn bf16_elementwise(&self) -> &Bf16Elementwise {
         &self.bf16_elementwise
+    }
+
+    pub fn bf16_reduction(&self) -> &Bf16Reduction {
+        &self.bf16_reduction
     }
 
     pub fn rope(&self) -> &F32Rope {

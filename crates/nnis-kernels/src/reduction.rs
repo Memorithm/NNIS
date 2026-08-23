@@ -87,21 +87,21 @@ pub(crate) enum TreeScratch {
 }
 
 impl TreeScratch {
-    fn ptr(&self) -> u64 {
+    pub(crate) fn ptr(&self) -> u64 {
         match self {
             Self::Plain(buffer) => buffer.device_ptr(),
             Self::Pooled(buffer) => buffer.device_ptr(),
         }
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         match self {
             Self::Plain(buffer) => buffer.len(),
             Self::Pooled(buffer) => buffer.len(),
         }
     }
 
-    fn ctx(&self) -> &Arc<Context> {
+    pub(crate) fn ctx(&self) -> &Arc<Context> {
         match self {
             Self::Plain(buffer) => buffer.ctx(),
             Self::Pooled(buffer) => buffer.ctx(),
@@ -597,7 +597,7 @@ enum TreeKind {
     Max,
 }
 
-fn partial_count(elements: usize, block_size: u32) -> Result<usize> {
+pub(crate) fn partial_count(elements: usize, block_size: u32) -> Result<usize> {
     if elements == 0 {
         return Ok(0);
     }

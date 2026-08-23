@@ -206,6 +206,20 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   shape 8192x128: 0.031968 ms median, 132.228 GB/s derived, max element
   error 4.51e-7. fmt/clippy/check clean; 60 GPU tests passed on Thor.
 
+- bf16 reductions milestone (2026-08-23, branch `feature/bf16-reductions`):
+  `Bf16Reduction` reduces packed-bf16 inputs (DeviceBuffer<u16> of bit
+  patterns) with all arithmetic in f32: the first tree pass widens while
+  reducing (pure bit-shift widening in CUDA source), later passes reuse
+  plain f32 tree kernels compiled into the same module, so results are
+  bit-exact against F32Reduction run on the widened buffer at the same
+  block size. Sum oracle asserts bit-exact ordered-tree equality plus a
+  depth-based f64 error bound; max is exact on widened values with an
+  explicit empty-input -infinity identity. Facade wired
+  (`session.bf16_reduction()`); bench uses preallocated workspace +
+  enqueue path: 1M elements -> 0.033808 ms median, 62.031 GB/s derived
+  input bandwidth (2 B/elem), relative error 0.0 vs widened host sum.
+  fmt/clippy clean; 62 GPU tests passed on Thor.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
