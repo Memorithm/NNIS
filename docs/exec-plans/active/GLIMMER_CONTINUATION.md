@@ -343,8 +343,12 @@ Chained implementation waves continue while candidates remain:
    (composed path can reuse Bf16Gemm-NT + f32 score scratch).
 2. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
    bandwidth-bound patterns already characterized by siblings.
-3. README/ARCHITECTURE sweep for the newest families (argmax, gather,
-   scatter) - docs-only follow-up.
+
+- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+  README current-scope list now covers every family through scatter;
+  ARCHITECTURE gained Attention (fused/composed + causal contract + honest
+  A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics
+  in the reductions notes. Docs-only change.
 
 - Row-scatter milestone (2026-08-23, branch `feature/scatter`, **PR #19**):
   `F32Scatter` + `Bf16Scatter` - the inverse of gather:

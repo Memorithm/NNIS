@@ -202,12 +202,16 @@ default; occupancy is useful launch guidance, not a substitute for measurement.
 
 ## Current scope
 
-Implemented standard kernels are `f32` vector addition, scaling, fused affine
-transformation, multi-pass sum/max tree reductions, stable flat softmax,
-stable row-batched softmax with a fused shared-memory kernel behind automatic
-dispatch, RMS/Layer normalization, matrix-vector products, tiled
-matrix-matrix products, rotary position embeddings, and deterministic top-k.
-Near-term extension points include safe owned abstractions for
-longer asynchronous pipelines and allocation pooling (see the
+Implemented standard kernels cover a full transformer block in `f32` and
+under the bf16-storage/f32-compute policy: vector addition, scaling, fused
+affine, ReLU/SiLU/GELU-tanh activations, multi-pass sum/max tree reductions,
+a deterministic tree argmax, stable flat and row-batched softmax (fused
+shared-memory kernel behind automatic dispatch), RMS/Layer normalization,
+matrix-vector and tiled matrix-matrix products (including transposed-B
+score forms), rotary position embeddings, scaled dot-product attention with
+optional causal masking behind fused or composed paths, deterministic
+top-k, embedding row gather, and positional row scatter. Near-term
+extension points include safe owned abstractions for longer asynchronous
+pipelines and allocation pooling (see the
 [design note](docs/DESIGN_ALLOCATION_POOLING.md)). NNIS deliberately does not
 depend on PyTorch, TensorFlow, Candle, Burn, wgpu, or downstream projects.
