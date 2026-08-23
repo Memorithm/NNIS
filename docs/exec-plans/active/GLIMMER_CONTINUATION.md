@@ -81,9 +81,19 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   256-thread elementwise default stays because the clean ordered sweeps did not
   show a repeatable improvement from any alternative.
 
+- Arbitrary-length `f32` sum reduction shipped: multi-pass tree reduction
+  kernel (two-elements-per-lane load + shared-memory stride halving), reusable
+  context-bound workspace, safe synchronizing `sum`/`sum_into` plus unsafe
+  `enqueue_sum`, exact ordered-tree bit-for-bit CPU oracle, forward-error-bound
+  tolerance checks over 17 sizes (0..=1,000,003), invalid-shape/workspace
+  rejection tests, CUDA-event benchmark example with pass count, traffic model,
+  and post-timing result validation. Workspace total: 28 tests passed with GPU
+  required.
+
 ## Next task
-Add an arbitrary-length `f32` sum reduction with a CPU oracle, multi-pass native
-CUDA execution, boundary-size GPU tests, and CUDA-event benchmark coverage.
+Clean full-size reduction benchmark at 16,777,216 elements; record measured
+results in this document. Then consider a fused softmax building block that
+composes the reduction and elementwise families.
 
 ## Commands that passed
 Takeover run (2026-08-22):
@@ -124,6 +134,12 @@ Takeover run (2026-08-22):
   result; clean full-size measurements are the exact next task.
 - Sweep-infrastructure milestone: workspace fmt/check/clippy/doc and
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` passed (26 tests).
+- Reduction takeover (2026-08-23): inherited uncommitted reduction work from a
+  context-exhausted session, verified it, and passed `cargo fmt/check/clippy`,
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` (28 tests), plus a
+  dirty-tree smoke run `NNIS_BENCH_ELEMENTS=1048576 NNIS_BENCH_WARMUPS=3
+  NNIS_BENCH_ITERATIONS=10 cargo run --release -p nnis-bench --example
+  reduction` (validated output; 3 passes; median 0.0342 ms).
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216

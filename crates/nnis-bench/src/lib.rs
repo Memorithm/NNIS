@@ -173,7 +173,9 @@ impl BenchmarkReport {
 /// `enqueue` must submit the complete operation to `stream` and return without
 /// synchronizing it. The harness performs warmups, brackets each measured
 /// invocation with events on that same stream, and synchronizes the end event
-/// before reading its elapsed time.
+/// before reading its elapsed time. If submission or event handling fails
+/// after work may have been queued, the harness drains the stream before
+/// returning so captured asynchronous borrows can unwind safely.
 pub fn benchmark_gpu<F>(
     context: &Arc<Context>,
     stream: &Stream,
@@ -194,7 +196,10 @@ where
     // Establish a clean stream boundary before warmup and measurement.
     stream.synchronize()?;
     for _ in 0..config.warmup_iterations {
-        enqueue()?;
+        if let Err(error) = enqueue() {
+            let _ = stream.synchronize();
+            return Err(error);
+        }
     }
     stream.synchronize()?;
 
@@ -203,9 +208,18 @@ where
     let mut samples_ms = Vec::with_capacity(config.iterations);
     for _ in 0..config.iterations {
         start.record(stream)?;
-        enqueue()?;
-        end.record(stream)?;
-        end.synchronize()?;
+        if let Err(error) = enqueue() {
+            let _ = stream.synchronize();
+            return Err(error);
+        }
+        if let Err(error) = end.record(stream) {
+            let _ = stream.synchronize();
+            return Err(error);
+        }
+        if let Err(error) = end.synchronize() {
+            let _ = stream.synchronize();
+            return Err(error);
+        }
         let elapsed_ms = end.elapsed_ms(&start)?;
         if !elapsed_ms.is_finite() || elapsed_ms < 0.0 {
             return Err(NnisError::unsupported(format!(
@@ -382,6 +396,29 @@ mod tests {
         for (index, (&actual, &input)) in actual.iter().zip(&host).enumerate() {
             assert_eq!(actual, input * scale, "mismatch at element {index}");
         }
+
+        let mut calls = 0;
+        let failure_case = BenchmarkCase::new("synthetic_enqueue_failure", "f32");
+        let error = benchmark_gpu(
+            &context,
+            &stream,
+            failure_case,
+            BenchConfig::new(1, 1),
+            || {
+                // SAFETY: the harness must retain and drain this submission
+                // even when the closure reports an error immediately after it.
+                unsafe { kernels.enqueue_scale(&stream, &input, &output, scale)? };
+                calls += 1;
+                if calls == 2 {
+                    Err(NnisError::invalid_input("synthetic enqueue failure"))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("synthetic enqueue failure"));
+        assert!(stream.query().unwrap(), "error path must drain the stream");
         println!("{}", report.to_json_pretty().unwrap());
     }
 }

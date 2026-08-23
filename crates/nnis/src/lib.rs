@@ -24,14 +24,20 @@ pub mod jit {
 
 /// Reusable NNIS native kernel families.
 pub mod kernels {
-    pub use nnis_kernels::{F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy};
+    pub use nnis_kernels::{
+        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
+        F32ReductionWorkspace,
+    };
 }
 
 pub use jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelAttributes, KernelLaunch, LaunchConfig,
     Module, OccupancyRecommendation,
 };
-pub use kernels::{F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy};
+pub use kernels::{
+    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
+    F32ReductionWorkspace,
+};
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
     PinnedBuffer, Result, Stream,
@@ -41,8 +47,8 @@ pub use runtime::{
 pub mod prelude {
     pub use crate::{
         CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise,
-        JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError, Result, Session,
-        Stream,
+        F32Reduction, JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError,
+        Result, Session, Stream,
     };
 }
 
@@ -53,6 +59,7 @@ pub struct Session {
     stream: Stream,
     compiler: JitCompiler,
     elementwise: F32Elementwise,
+    reduction: F32Reduction,
 }
 
 impl Session {
@@ -72,11 +79,13 @@ impl Session {
         let stream = Stream::new(&context)?;
         let compiler = JitCompiler::new();
         let elementwise = F32Elementwise::load(&context, &compiler)?;
+        let reduction = F32Reduction::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
             compiler,
             elementwise,
+            reduction,
         })
     }
 
@@ -94,6 +103,10 @@ impl Session {
 
     pub fn elementwise(&self) -> &F32Elementwise {
         &self.elementwise
+    }
+
+    pub fn reduction(&self) -> &F32Reduction {
+        &self.reduction
     }
 }
 
@@ -123,5 +136,10 @@ mod tests {
         for (index, (&actual, &input)) in actual.iter().zip(&host).enumerate() {
             assert_eq!(actual, input.mul_add(-0.5, 1.25), "mismatch at {index}");
         }
+        let expected_sum = host.iter().sum::<f32>();
+        assert_eq!(
+            session.reduction().sum(session.stream(), &input).unwrap(),
+            expected_sum
+        );
     }
 }
