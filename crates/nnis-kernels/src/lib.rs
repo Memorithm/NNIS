@@ -5,9 +5,11 @@
 //! enqueue operations for callers that manage asynchronous buffer lifetimes.
 
 mod reduction;
+mod row_softmax;
 mod softmax;
 
 pub use reduction::{F32Reduction, F32ReductionWorkspace};
+pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
 pub use softmax::F32Softmax;
 
 use nnis_jit::{

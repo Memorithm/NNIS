@@ -26,7 +26,7 @@ pub mod jit {
 pub mod kernels {
     pub use nnis_kernels::{
         F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
-        F32ReductionWorkspace, F32Softmax,
+        F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
 
@@ -36,7 +36,7 @@ pub use jit::{
 };
 pub use kernels::{
     F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
-    F32ReductionWorkspace, F32Softmax,
+    F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -47,8 +47,8 @@ pub use runtime::{
 pub mod prelude {
     pub use crate::{
         CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise,
-        F32Reduction, F32Softmax, JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module,
-        NnisError, Result, Session, Stream,
+        F32Reduction, F32Softmax, F32Softmax2D, JitCompiler, KernelArgs, KernelLaunch,
+        LaunchConfig, Module, NnisError, Result, Session, Stream,
     };
 }
 

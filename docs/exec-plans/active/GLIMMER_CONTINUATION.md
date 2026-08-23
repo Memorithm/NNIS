@@ -102,10 +102,20 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   a validated softmax path; CUDA-event benchmark example validates after
   timing.
 
+- Row-batched `F32Softmax2D` shipped (attention-shaped primitive): one block
+  per row strided max/sum reductions plus per-element exp-shift and in-place
+  normalize, all four stages enqueued on one stream with device-resident row
+  scalars; reusable per-row workspace; f64-oracle tests over 9 shapes
+  (1x1..17x4097), uniform-row check, invalid-shape/capacity rejection.
+  Debugging note: a stage initially produced NaN because the normalize launch
+  pushed its data buffer twice, shifting every later kernel argument; the
+  probe-isolate-per-stage workflow found the root cause quickly. CUDA-event
+  benchmark example validates after timing.
+
 ## Next task
-Clean full-size softmax benchmark at >=16 Mi elements recorded here; then
-evaluate row-batched (2-D) softmax for attention-style consumers (FLAT) or an
-allocation-pooling design note as the next optimization wave.
+Clean full-size row-softmax benchmark recorded here. Then evaluate: (a)
+fused single-kernel row softmax for narrow rows to cut two full-matrix
+passes, or (b) allocation pooling design note deferred from Wave 7.
 
 ## Measured benchmarks (continued)
 - Clean softmax benchmark at `0459ee4` (`git_dirty=false`), Thor CC 11.0,
@@ -174,6 +184,12 @@ Takeover run (2026-08-22):
   NNIS_BENCH_ITERATIONS=10 cargo run --release -p nnis-bench --example
   softmax`: median 0.132 ms, probability sum 0.99998, max element error
   2.4e-11, validated.
+- Row-softmax milestone (2026-08-23): workspace fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 33 passed;
+  dirty-tree smoke `NNIS_BENCH_ELEMENTS=2097152 NNIS_BENCH_COLS=2048
+  NNIS_BENCH_WARMUPS=3 NNIS_BENCH_ITERATIONS=10 cargo run --release -p
+  nnis-bench --example row_softmax`: median 0.2069 ms at 1024x2048,
+  243.25 GB/s derived, max element error 4.09e-8, validated.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
