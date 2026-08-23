@@ -17,7 +17,9 @@
 use nnis_jit::{
     CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
 };
-use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
+use nnis_rt::{
+    Context, DeviceBuffer, NnisError, PooledBuffer, Result, Stream, StreamOrderedAllocator,
+};
 use std::sync::Arc;
 
 const RMS_NORM_SOURCE: &str = r#"
@@ -130,11 +132,41 @@ pub struct F32RmsNorm {
     block_size: u32,
 }
 
+/// Per-row sum-of-squares column: plain or stream-ordered pooled.
+#[derive(Debug)]
+pub(crate) enum RowColumn {
+    Plain(DeviceBuffer<f32>),
+    Pooled(PooledBuffer<f32>),
+}
+
+impl RowColumn {
+    fn ptr(&self) -> u64 {
+        match self {
+            Self::Plain(buffer) => buffer.device_ptr(),
+            Self::Pooled(buffer) => buffer.device_ptr(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Plain(buffer) => buffer.len(),
+            Self::Pooled(buffer) => buffer.len(),
+        }
+    }
+
+    fn ctx(&self) -> &Arc<Context> {
+        match self {
+            Self::Plain(buffer) => buffer.ctx(),
+            Self::Pooled(buffer) => buffer.ctx(),
+        }
+    }
+}
+
 /// Reusable per-row sum-of-squares storage for [`F32RmsNorm`].
 #[derive(Debug)]
 pub struct F32RmsNormWorkspace {
     max_rows: usize,
-    row_sumsq: DeviceBuffer<f32>,
+    row_sumsq: RowColumn,
 }
 
 impl F32RmsNormWorkspace {
@@ -240,6 +272,30 @@ impl F32RmsNorm {
         )
     }
 
+    /// Normalize each row choosing fused when it fits shared memory and a
+    /// pooled staged workspace otherwise; every scratch byte comes from
+    /// `allocator` and waits once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn normalize_rows_dispatched_pooled(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+        epsilon: f32,
+        gamma: f32,
+        allocator: &StreamOrderedAllocator,
+    ) -> Result<()> {
+        if self.fused_available(cols) {
+            return self.fused_normalize_rows(stream, input, output, rows, cols, epsilon, gamma);
+        }
+        let workspace = self.pooled_workspace(allocator, rows)?;
+        self.normalize_rows(
+            stream, input, output, rows, cols, epsilon, gamma, &workspace,
+        )
+    }
+
     /// Allocate per-row sum-of-squares storage reusable up to `max_rows`.
     pub fn workspace(
         &self,
@@ -253,7 +309,25 @@ impl F32RmsNorm {
         }
         Ok(F32RmsNormWorkspace {
             max_rows,
-            row_sumsq: DeviceBuffer::new(context, max_rows)?,
+            row_sumsq: RowColumn::Plain(DeviceBuffer::new(context, max_rows)?),
+        })
+    }
+
+    /// Build a pooled workspace whose per-row column is allocated
+    /// stream-ordered from `allocator` (async free on drop).
+    pub fn pooled_workspace(
+        &self,
+        allocator: &StreamOrderedAllocator,
+        max_rows: usize,
+    ) -> Result<F32RmsNormWorkspace> {
+        if !Arc::ptr_eq(allocator.context(), self.context()) {
+            return Err(NnisError::invalid_input(
+                "rms-norm and allocator contexts do not match",
+            ));
+        }
+        Ok(F32RmsNormWorkspace {
+            max_rows,
+            row_sumsq: RowColumn::Pooled(allocator.alloc(max_rows)?),
         })
     }
 
@@ -341,12 +415,19 @@ impl F32RmsNorm {
         // SAFETY: stages are ordered on one stream; the normalize stage
         // reads only stats-stage output under this method's contract.
         unsafe {
-            self.launch_row_sumsq(stream, input, &workspace.row_sumsq, rows, cols)?;
+            self.launch_row_sumsq(
+                stream,
+                input,
+                workspace.row_sumsq.ptr(),
+                workspace.row_sumsq.len(),
+                rows,
+                cols,
+            )?;
             self.launch_normalize(
                 stream,
                 input,
                 output,
-                &workspace.row_sumsq,
+                workspace.row_sumsq.ptr(),
                 rows,
                 cols,
                 epsilon,
@@ -465,11 +546,16 @@ impl F32RmsNorm {
     ///
     /// Caller owns the asynchronous lifetime of every buffer; see
     /// [`F32RmsNorm::enqueue_normalize_rows`].
+    /// # Safety
+    ///
+    /// `row_sumsq_ptr` must name a live allocation of at least
+    /// `row_sumsq_capacity` floats; obligations mirror the enqueue API.
     unsafe fn launch_row_sumsq(
         &self,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
-        row_sumsq: &DeviceBuffer<f32>,
+        row_sumsq_ptr: u64,
+        row_sumsq_capacity: usize,
         rows: usize,
         cols: usize,
     ) -> Result<()> {
@@ -483,11 +569,13 @@ impl F32RmsNorm {
             .ok_or_else(|| NnisError::invalid_input("rms-norm shared memory overflows"))?;
         let config = LaunchConfig::new(Dim3::x(grid_size), Dim3::x(self.block_size))
             .with_dynamic_shared_memory(shared_memory_bytes);
-        let mut arguments = KernelArgs::with_capacity(3, 2);
-        arguments
-            .push_buffer(input)
-            .push_buffer(row_sumsq)
-            .push(cols);
+        if rows > row_sumsq_capacity {
+            return Err(NnisError::invalid_input(format!(
+                "rms-norm has {rows} rows; scratch capacity is {row_sumsq_capacity}"
+            )));
+        }
+        let mut arguments = KernelArgs::with_capacity(3, 1);
+        arguments.push_buffer(input).push(row_sumsq_ptr).push(cols);
         let launch = KernelLaunch::new(&self.row_sumsq, stream, config);
         // SAFETY: argument order/widths match `nnis_rmsnorm_row_sumsq_f32`;
         // the caller owns lifetimes.
@@ -504,7 +592,7 @@ impl F32RmsNorm {
         stream: &Stream,
         input: &DeviceBuffer<f32>,
         output: &DeviceBuffer<f32>,
-        row_sumsq: &DeviceBuffer<f32>,
+        row_sumsq_ptr: u64,
         rows: usize,
         cols: usize,
         epsilon: f32,
@@ -514,11 +602,11 @@ impl F32RmsNorm {
             .checked_mul(cols)
             .ok_or_else(|| NnisError::invalid_input("rms-norm length overflows usize"))?;
         let (rows, cols) = self.u64_shape(rows, cols)?;
-        let mut arguments = KernelArgs::with_capacity(8, 3);
+        let mut arguments = KernelArgs::with_capacity(8, 2);
         arguments
             .push_buffer(input)
             .push_buffer(output)
-            .push_buffer(row_sumsq)
+            .push(row_sumsq_ptr)
             .push(rows)
             .push(cols)
             .push(1.0_f32 / cols as f32)
@@ -706,6 +794,44 @@ mod tests {
                 "constant-row mismatch at {index}: {value} != {expected}"
             );
         }
+    }
+
+    #[test]
+    fn pooled_rms_norm_matches_oracle_and_rejects_undersized_workspace() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::new(&stream).unwrap();
+        let compiler = JitCompiler::new();
+        let rms_norm = F32RmsNorm::load(&context, &compiler).unwrap();
+
+        for &(rows, cols) in &[(5, 2_048), (2, 20_000), (7, 257)] {
+            let host = host_values(rows, cols);
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+            rms_norm
+                .normalize_rows_dispatched_pooled(
+                    &stream, &input, &output, rows, cols, EPSILON, GAMMA, &allocator,
+                )
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            assert_close(
+                &actual,
+                &reference_rows(&host, rows, cols),
+                &format!("pooled ({rows}, {cols})"),
+            );
+        }
+
+        // Undersized pooled workspace is rejected before any launch.
+        let input = DeviceBuffer::from_host(&context, &stream, &host_values(3, 4)).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, 12).unwrap();
+        let workspace = rms_norm.pooled_workspace(&allocator, 2).unwrap();
+        let error = rms_norm
+            .normalize_rows(&stream, &input, &output, 3, 4, EPSILON, GAMMA, &workspace)
+            .unwrap_err();
+        assert!(error.to_string().contains("capacity is 2"), "{error}");
     }
 
     #[test]
