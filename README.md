@@ -209,8 +209,10 @@ a deterministic tree argmax, stable flat and row-batched softmax (fused
 shared-memory kernel behind automatic dispatch), RMS/Layer normalization,
 matrix-vector and tiled matrix-matrix products (including transposed-B
 score forms), rotary position embeddings, scaled dot-product attention with
-optional causal masking behind fused or composed paths, deterministic
-top-k, embedding row gather, and positional row scatter. Near-term
+optional causal masking behind fused or composed paths in `f32` and over
+packed-bf16 heads (bit-exact against the f32 family on widened inputs),
+deterministic top-k, embedding row gather, and positional row scatter.
+Near-term
 extension points include safe owned abstractions for longer asynchronous
 pipelines and allocation pooling (see the
 [design note](docs/DESIGN_ALLOCATION_POOLING.md)). NNIS deliberately does not

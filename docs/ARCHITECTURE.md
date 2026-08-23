@@ -185,6 +185,29 @@ Causal masking excludes positions above the diagonal before
 exponentiation and requires square score shapes; rectangular inputs are
 rejected before launch.
 
+### Packed-bf16 attention (`Bf16Attention`)
+
+The same two paths over packed-bf16 `u16` heads under the fixed
+bf16-storage/f32-compute policy:
+
+- Fused: identical structure to the f32 fused kernel - packed operands are
+  widened with exact bit shifts while staging shared memory, every score,
+  softmax, and accumulator stays f32, and the output is narrowed once with
+  round-to-nearest-even. Halves global key/value traffic and KV footprint.
+- Composed: exact widening of Q/K/V, the full f32 composed pipeline above,
+  one final narrowing. Because widening is exact this is arithmetically
+  identical to a native path keeping f32 score scratch behind a bf16 GEMM;
+  it deliberately avoids quantizing logits to bf16 before the softmax.
+
+Because widening is position independent and exact, bf16 results must
+equal the f32 family evaluated on the same widened inputs bit-for-bit
+after one host RNE narrowing - tests assert exactly that across fused,
+composed, and causal shapes, alongside f64-oracle tolerances that carry
+the output quantization term. Measured honestly at attention shapes:
+latency parity with the f32 families (the pipeline is issue-bound on
+Thor), so bf16's value here is halved storage/bandwidth for KV caches,
+not speed.
+
 ### Gather and scatter
 
 `F32Gather`/`Bf16Gather` copy table rows selected by token ids; the twins

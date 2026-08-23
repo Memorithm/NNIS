@@ -25,7 +25,7 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        AttentionMask, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
+        AttentionMask, Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
         Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
         F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
@@ -39,10 +39,10 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    AttentionMask, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
-    Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
-    F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
-    F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
+    AttentionMask, Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
+    Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks,
+    F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace,
+    F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
     F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
@@ -79,6 +79,7 @@ pub struct Session {
     rope: F32Rope,
     top_k: F32TopK,
     attention: F32Attention,
+    bf16_attention: Bf16Attention,
     gather: F32Gather,
     bf16_gather: Bf16Gather,
     scatter: F32Scatter,
@@ -115,6 +116,7 @@ impl Session {
         let rope = F32Rope::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let attention = F32Attention::load(&context, &compiler)?;
+        let bf16_attention = Bf16Attention::load(&context, &compiler)?;
         let gather = F32Gather::load(&context, &compiler)?;
         let bf16_gather = Bf16Gather::load(&context, &compiler)?;
         let scatter = F32Scatter::load(&context, &compiler)?;
@@ -137,6 +139,7 @@ impl Session {
             rope,
             top_k,
             attention,
+            bf16_attention,
             gather,
             bf16_gather,
             scatter,
@@ -212,6 +215,10 @@ impl Session {
         &self.attention
     }
 
+    pub fn bf16_attention(&self) -> &Bf16Attention {
+        &self.bf16_attention
+    }
+
     pub fn gather(&self) -> &F32Gather {
         &self.gather
     }
@@ -244,6 +251,42 @@ impl Session {
         mask: kernels::AttentionMask,
     ) -> Result<()> {
         self.attention.attention_composed(
+            self.gemm(),
+            self.elementwise(),
+            self.softmax_2d(),
+            &self.stream,
+            queries,
+            keys,
+            values,
+            output,
+            query_rows,
+            head_dim,
+            kv_rows,
+            value_dim,
+            scale,
+            mask,
+        )
+    }
+
+    /// Composed packed-bf16 attention over this session's kernels: exact
+    /// widening, the f32 composed pipeline above, one final RNE narrowing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bf16_attention_composed(
+        &self,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: kernels::AttentionMask,
+    ) -> Result<()> {
+        self.bf16_attention.attention_composed(
+            self.bf16_elementwise(),
+            self.attention(),
             self.gemm(),
             self.elementwise(),
             self.softmax_2d(),
