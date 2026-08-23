@@ -91,9 +91,17 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   required.
 
 ## Next task
-Clean full-size reduction benchmark at 16,777,216 elements; record measured
-results in this document. Then consider a fused softmax building block that
-composes the reduction and elementwise families.
+Numerically stable `f32` softmax building block that composes the reduction
+(max) and elementwise (affine/exp/scale) families; CPU oracle, boundary-size
+GPU tests, benchmark coverage.
+
+## Measured benchmarks (continued)
+- Clean reduction benchmark at `4a22f3c` (`git_dirty=false`), Thor CC 11.0,
+  16,777,216 f32 elements, block 256, 20 warmups, 100 iterations: 3 passes;
+  0.477168 ms median, 0.465536 min, 0.541933 p95, 0.570264 p99, 141.190 GB/s
+  derived from the multi-pass traffic model (values moved x 4 bytes).
+  Post-timing validation passed: absolute error 1.94e-6 against an
+  f64 reference, forward-error bound 99.31.
 
 ## Commands that passed
 Takeover run (2026-08-22):
