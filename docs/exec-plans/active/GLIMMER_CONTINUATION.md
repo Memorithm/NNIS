@@ -141,6 +141,18 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   0.638912 min, 200.162 GB/s, max element error 4.89e-7 - faster than
   fused layer norm (0.707 ms) because one reduction pass replaces two.
 
+- Cross-stream pooling milestone (2026-08-23, branch
+  `feature/pooled-cross-stream`, PR workflow): `PooledBuffer::share_with`
+  grants a second stream access via an explicit producer-side event chain,
+  registers the consumer, and orders the drop-time free after all work the
+  consumer had enqueued; `PoolOptions` exposes the three CUDA reuse flags
+  (defaults match the driver). Strict-pool tests cycle shared buffers eight
+  times and verify no consumer write leaks into recycled blocks; repeated
+  grants deduplicate; same-stream grants are no-ops. Mutation experiments
+  showed CUDA's pool already repairs ordering whenever any event chain
+  exists, so tests assert the observable contract rather than one side of
+  the implementation. fmt/clippy/check clean; 52 GPU tests passed.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after

@@ -13,15 +13,17 @@
 //! locally once frees become stream work. This mirrors NNIS's existing
 //! process-lifetime library-ownership rule.
 
-use crate::{Context, DevicePod, NnisError, Result, Stream};
+use crate::{Context, DevicePod, Event, NnisError, Result, Stream};
 use nnis_sys::driver;
 use nnis_sys::{
     CUdeviceptr, CUmemLocation, CUmemPoolProps, CU_MEMPOOL_ATTR_RELEASE_THRESHOLD,
-    CU_MEM_ALLOCATION_TYPE_PINNED, CU_MEM_HANDLE_TYPE_NONE, CU_MEM_LOCATION_TYPE_DEVICE,
+    CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES, CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
+    CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES, CU_MEM_ALLOCATION_TYPE_PINNED,
+    CU_MEM_HANDLE_TYPE_NONE, CU_MEM_LOCATION_TYPE_DEVICE,
 };
 use std::marker::PhantomData;
 use std::mem::size_of;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// Process-lifetime CUDA memory-pool handle.
 ///
@@ -36,6 +38,28 @@ struct PoolHandle {
 unsafe impl Send for PoolHandle {}
 unsafe impl Sync for PoolHandle {}
 
+/// Reuse-policy knobs for [`StreamOrderedAllocator::with_options`].
+///
+/// All flags default to `true`, matching CUDA's own pool defaults. Tests
+/// disable the internal-dependency flag to prove that NNIS's explicit
+/// `share_with` event ordering carries the correctness burden on its own.
+#[derive(Debug, Clone, Copy)]
+pub struct PoolOptions {
+    pub reuse_follow_event_dependencies: bool,
+    pub reuse_allow_opportunistic: bool,
+    pub reuse_allow_internal_dependencies: bool,
+}
+
+impl Default for PoolOptions {
+    fn default() -> Self {
+        Self {
+            reuse_follow_event_dependencies: true,
+            reuse_allow_opportunistic: true,
+            reuse_allow_internal_dependencies: true,
+        }
+    }
+}
+
 /// Stream-ordered allocator backed by one CUDA memory pool.
 ///
 /// Freed memory is retained for reuse (release threshold set to `u64::MAX`)
@@ -47,9 +71,14 @@ pub struct StreamOrderedAllocator {
 }
 
 impl StreamOrderedAllocator {
-    /// Create a pool whose allocations reside on `stream`'s device and are
-    /// ordered on `stream`.
+    /// Create a pool with CUDA-default reuse policies.
     pub fn new(stream: &Stream) -> Result<Self> {
+        Self::with_options(stream, PoolOptions::default())
+    }
+
+    /// Create a pool whose allocations reside on `stream`'s device and are
+    /// ordered on `stream`, with explicit reuse policies.
+    pub fn with_options(stream: &Stream, options: PoolOptions) -> Result<Self> {
         let context = stream.ctx();
         context.set_current()?;
         let api = driver::api()?;
@@ -72,15 +101,39 @@ impl StreamOrderedAllocator {
         if rc != 0 {
             return Err(NnisError::driver("cuMemPoolCreate", rc));
         }
+        let int_attrs: [(u32, u32); 3] = [
+            (
+                CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES,
+                u32::from(options.reuse_follow_event_dependencies),
+            ),
+            (
+                CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC,
+                u32::from(options.reuse_allow_opportunistic),
+            ),
+            (
+                CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES,
+                u32::from(options.reuse_allow_internal_dependencies),
+            ),
+        ];
+        for (attribute, value) in int_attrs {
+            let mut current = value;
+            // SAFETY: pool was just created; these attributes expect an
+            // `int` value pointer per cuda.h.
+            let rc = unsafe {
+                (api.cuMemPoolSetAttribute)(pool, attribute, std::ptr::addr_of_mut!(current).cast())
+            };
+            if rc != 0 {
+                return Err(NnisError::driver("cuMemPoolSetAttribute", rc));
+            }
+        }
         // Never trim back to the OS: inference pipelines cycle fixed shapes.
-        let threshold = u64::MAX;
-        // SAFETY: pool was just created; the attribute expects a
-        // `cuuint64_t` value pointer per cuda.h.
+        let mut threshold = u64::MAX;
+        // SAFETY: this attribute expects a `cuuint64_t` value pointer per cuda.h.
         let rc = unsafe {
             (api.cuMemPoolSetAttribute)(
                 pool,
                 CU_MEMPOOL_ATTR_RELEASE_THRESHOLD,
-                std::ptr::addr_of!(threshold).cast_mut().cast(),
+                std::ptr::addr_of_mut!(threshold).cast(),
             )
         };
         if rc != 0 {
@@ -129,6 +182,7 @@ impl StreamOrderedAllocator {
             len,
             allocator: Arc::clone(&self.inner),
             stream: Arc::clone(&self.stream),
+            consumers: Mutex::new(Vec::new()),
             _marker: PhantomData,
         })
     }
@@ -138,9 +192,15 @@ impl StreamOrderedAllocator {
 ///
 /// Dropping enqueues a stream-ordered free on the allocating stream; no host
 /// synchronization happens in `Drop`. Same-stream reuse is correct by
-/// program order. Using the buffer's contents from another stream without a
-/// recorded event dependency between that stream and the allocating stream
-/// is a safety violation, exactly as documented in the pooling design note.
+/// program order.
+///
+/// Cross-stream consumption requires an explicit handoff through
+/// [`Self::share_with`]: it records the producer-side event dependency
+/// (allocating-stream writes happen-before the consumer's enqueued work)
+/// and registers the consumer so `Drop` orders the free after everything
+/// the consumer had enqueued at drop time. Using the buffer from any stream
+/// that never received a `share_with` grant is a safety violation, exactly
+/// as documented in the pooling design note.
 pub struct PooledBuffer<T> {
     ptr: CUdeviceptr,
     len: usize,
@@ -148,6 +208,9 @@ pub struct PooledBuffer<T> {
     #[allow(dead_code)]
     allocator: Arc<PoolHandle>,
     stream: Arc<Stream>,
+    /// Streams granted access through `share_with`, in grant order. The free
+    /// in `Drop` must be ordered after their enqueued work.
+    consumers: Mutex<Vec<Arc<Stream>>>,
     _marker: PhantomData<*mut T>,
 }
 
@@ -177,6 +240,43 @@ impl<T> PooledBuffer<T> {
     /// Owning context (the allocating stream's context).
     pub fn ctx(&self) -> &Arc<Context> {
         self.stream.ctx()
+    }
+
+    /// Grant `other` access to this buffer's contents.
+    ///
+    /// Records an event on the allocating stream and makes `other` wait on
+    /// it, so every write already enqueued there is complete before work on
+    /// `other` starts. The consumer is remembered: when the buffer is
+    /// dropped, an event recorded on each registered consumer orders the
+    /// allocating stream's free after all work those consumers had enqueued
+    /// by then. Work enqueued on a consumer *after* the drop is NOT covered
+    /// and remains a caller obligation.
+    ///
+    /// Sharing with the allocating stream itself is a cheap no-op.
+    pub fn share_with(&self, other: &Stream) -> Result<()> {
+        if !Arc::ptr_eq(self.ctx(), other.ctx()) {
+            return Err(NnisError::invalid_input(
+                "pooled-buffer share target must live in the buffer's context",
+            ));
+        }
+        if self.stream.raw() == other.raw() {
+            return Ok(());
+        }
+        // Producer side: allocating-stream history happens-before other.
+        let produced = Event::new(self.ctx())?;
+        produced.record(&self.stream)?;
+        other.wait_event(&produced)?;
+        // Remember the consumer for the drop-side ordering.
+        let mut consumers = self.consumers.lock().unwrap();
+        if !consumers.iter().any(|stream| stream.raw() == other.raw()) {
+            consumers.push(Arc::new(other.clone()));
+        }
+        Ok(())
+    }
+
+    /// Number of consumer streams currently registered by `share_with`.
+    pub fn consumer_count(&self) -> usize {
+        self.consumers.lock().unwrap().len()
     }
 
     fn ensure_stream_context(&self, stream: &Stream) -> Result<()> {
@@ -329,13 +429,21 @@ impl<T> Drop for PooledBuffer<T> {
         if self.ptr == 0 {
             return;
         }
-        // Best-effort stream-ordered free: program-order correctness holds
-        // on the allocating stream; failures cannot be surfaced from Drop.
+        // Best-effort ordering; failures cannot be surfaced from Drop.
+        // Consumer side: everything the registered consumers had enqueued
+        // by now happens-before the free below.
+        for consumer in self.consumers.lock().unwrap().drain(..) {
+            if let Ok(consumed) = Event::new(consumer.ctx()) {
+                if consumed.record(&consumer).is_ok() {
+                    let _ = self.stream.wait_event(&consumed);
+                }
+            }
+        }
         if let Ok(api) = driver::api() {
             let _context_current = self.stream.ctx().set_current();
             // SAFETY: self owns the allocation exclusively; Drop implies no
-            // further Rust-side access, and same-stream consumers were
-            // ordered before any prior enqueue by contract.
+            // further Rust-side access, and both same-stream program order
+            // and the recorded consumer events order every prior use.
             unsafe { (api.cuMemFreeAsync)(self.ptr, self.stream.raw()) };
         }
     }
@@ -413,5 +521,94 @@ mod tests {
             error.to_string().contains("does not match pooled buffer"),
             "{error}"
         );
+    }
+}
+
+#[cfg(test)]
+mod cross_stream_tests {
+    use super::*;
+    use crate::gpu_context;
+
+    /// End-to-end contract check for repeated cross-stream cycles against
+    /// a strict pool (internal-dependency reuse disabled): data written by
+    /// the consumer must never leak into a block recycled after drop, and
+    /// every cycle must observe exactly its own marker. Mutation testing
+    /// shows CUDA's pool already repairs missing ordering whenever an event
+    /// chain exists, so this validates the observable contract rather than
+    /// isolating one side of the implementation.
+    #[test]
+    fn dropped_shared_buffer_frees_only_after_consumer_work() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let producer = Stream::new(&context).unwrap();
+        let consumer = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::with_options(
+            &producer,
+            PoolOptions {
+                reuse_allow_internal_dependencies: false,
+                ..PoolOptions::default()
+            },
+        )
+        .unwrap();
+
+        let len = 4_096_usize;
+        let seed: Vec<f32> = vec![1.0; len];
+        let late_writes: Vec<f32> = vec![2.0; len];
+        let marker: Vec<f32> = vec![7.0; len];
+
+        for cycle in 0..8 {
+            let buffer: PooledBuffer<f32> = allocator.alloc(len).unwrap();
+            assert_eq!(buffer.consumer_count(), 0);
+            buffer.copy_from_host(&producer, &seed).unwrap();
+            // Grant access BEFORE enqueueing consumer work.
+            buffer.share_with(&consumer).unwrap();
+            assert_eq!(buffer.consumer_count(), 1);
+            unsafe {
+                // Two async writes land on the consumer timeline after the
+                // producer-side wait; neither may race the upcoming free.
+                buffer.zero_async(&consumer).unwrap();
+                buffer
+                    .copy_from_host_async(&consumer, &late_writes)
+                    .unwrap();
+            }
+            // Host drops immediately while consumer work is still queued.
+            drop(buffer);
+
+            // Same-size realloc: the pool is expected to hand back the same
+            // block, which makes any ordering violation observable.
+            let recycled: PooledBuffer<f32> = allocator.alloc(len).unwrap();
+            recycled.copy_from_host(&producer, &marker).unwrap();
+            producer.synchronize().unwrap();
+            consumer.synchronize().unwrap();
+            for (index, value) in recycled.to_vec(&producer).unwrap().iter().enumerate() {
+                assert_eq!(
+                    *value, 7.0,
+                    "cycle {cycle}: consumer write leaked into recycled block at {index}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn share_with_same_stream_is_noop_and_repeated_grants_dedupe() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::new(&stream).unwrap();
+        let buffer: PooledBuffer<f32> = allocator.alloc(16).unwrap();
+
+        // Same-stream grant is a no-op and registers nothing.
+        buffer.share_with(&stream).unwrap();
+        assert_eq!(buffer.consumer_count(), 0);
+
+        // A second stream registers exactly once even if granted repeatedly.
+        let other = Stream::new(&context).unwrap();
+        buffer.share_with(&other).unwrap();
+        buffer.share_with(&other).unwrap();
+        assert_eq!(buffer.consumer_count(), 1);
     }
 }
