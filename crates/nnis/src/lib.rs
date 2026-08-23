@@ -25,8 +25,9 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32Reduction,
-        F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32Softmax, F32Softmax2D,
+        F32Softmax2DWorkspace,
     };
 }
 
@@ -35,8 +36,9 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32Reduction,
-    F32ReductionWorkspace, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
+    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32Softmax, F32Softmax2D,
+    F32Softmax2DWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -63,6 +65,7 @@ pub struct Session {
     softmax: F32Softmax,
     softmax_2d: F32Softmax2D,
     gemv: F32Gemv,
+    layer_norm: F32LayerNorm,
 }
 
 impl Session {
@@ -86,6 +89,7 @@ impl Session {
         let softmax = F32Softmax::load(&context, &compiler)?;
         let softmax_2d = F32Softmax2D::load(&context, &compiler)?;
         let gemv = F32Gemv::load(&context, &compiler)?;
+        let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -95,6 +99,7 @@ impl Session {
             softmax,
             softmax_2d,
             gemv,
+            layer_norm,
         })
     }
 
@@ -128,6 +133,10 @@ impl Session {
 
     pub fn gemv(&self) -> &F32Gemv {
         &self.gemv
+    }
+
+    pub fn layer_norm(&self) -> &F32LayerNorm {
+        &self.layer_norm
     }
 }
 

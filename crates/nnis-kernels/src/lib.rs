@@ -5,11 +5,13 @@
 //! enqueue operations for callers that manage asynchronous buffer lifetimes.
 
 mod gemv;
+mod layernorm;
 mod reduction;
 mod row_softmax;
 mod softmax;
 
 pub use gemv::F32Gemv;
+pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};
 pub use reduction::{F32Reduction, F32ReductionWorkspace};
 pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
 pub use softmax::F32Softmax;
