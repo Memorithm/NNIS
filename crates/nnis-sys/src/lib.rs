@@ -38,6 +38,12 @@ pub const CU_MEM_ALLOCATION_TYPE_PINNED: u32 = 0x1;
 pub const CU_MEM_HANDLE_TYPE_NONE: u32 = 0x0;
 /// `CUmemLocationType` (cuda.h): `id` is a device ordinal.
 pub const CU_MEM_LOCATION_TYPE_DEVICE: u32 = 0x1;
+/// `CUmemPool_attribute` (cuda.h): follow event dependencies when reusing.
+pub const CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES: u32 = 1;
+/// `CUmemPool_attribute` (cuda.h): opportunistically reuse completed frees.
+pub const CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC: u32 = 2;
+/// `CUmemPool_attribute` (cuda.h): may insert dependencies to enable reuse.
+pub const CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES: u32 = 3;
 /// `CUmemPool_attribute` (cuda.h): bytes retained before OS release.
 pub const CU_MEMPOOL_ATTR_RELEASE_THRESHOLD: u32 = 4;
 
