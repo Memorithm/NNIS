@@ -212,6 +212,15 @@ latency parity with the f32 families (the pipeline is issue-bound on
 Thor), so bf16's value here is halved storage/bandwidth for KV caches,
 not speed.
 
+An opt-in `attention_composed_quantized` variant materializes the
+opposite policy: bf16 GEMM-NT logits and bf16 probabilities with f32
+only for the in-place scale/mask/softmax stages. Both intermediates
+carry bf16 rounding before exponentiation and accumulation, so expect
+visibly larger error than the default path (validated against an oracle
+that replays the exact quantization sequence bit-for-bit); its value is
+inspectable packed-bf16 attention maps and a smaller score scratch, not
+fidelity.
+
 ### Gather and scatter
 
 `F32Gather`/`Bf16Gather` copy table rows selected by token ids; the twins
