@@ -28,7 +28,7 @@ pub mod kernels {
         Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
         F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
-        F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+        F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
     };
 }
 
@@ -40,7 +40,7 @@ pub use kernels::{
     Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
     F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
     F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
-    F32Softmax2D, F32Softmax2DWorkspace,
+    F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -72,6 +72,7 @@ pub struct Session {
     bf16_elementwise: Bf16Elementwise,
     bf16_reduction: Bf16Reduction,
     rope: F32Rope,
+    top_k: F32TopK,
 }
 
 impl Session {
@@ -100,6 +101,7 @@ impl Session {
         let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
         let bf16_reduction = Bf16Reduction::load(&context, &compiler)?;
         let rope = F32Rope::load(&context, &compiler)?;
+        let top_k = F32TopK::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -114,6 +116,7 @@ impl Session {
             bf16_elementwise,
             bf16_reduction,
             rope,
+            top_k,
         })
     }
 
@@ -163,6 +166,10 @@ impl Session {
 
     pub fn bf16_reduction(&self) -> &Bf16Reduction {
         &self.bf16_reduction
+    }
+
+    pub fn top_k(&self) -> &F32TopK {
+        &self.top_k
     }
 
     pub fn rope(&self) -> &F32Rope {
