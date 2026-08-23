@@ -15,7 +15,9 @@
 use nnis_jit::{
     CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
 };
-use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
+use nnis_rt::{
+    Context, DeviceBuffer, NnisError, PooledBuffer, Result, Stream, StreamOrderedAllocator,
+};
 use std::sync::Arc;
 
 const LAYER_NORM_SOURCE: &str = r#"
@@ -168,12 +170,42 @@ pub struct F32LayerNorm {
     block_size: u32,
 }
 
+/// Per-row statistic column: plain or stream-ordered pooled.
+#[derive(Debug)]
+pub(crate) enum RowColumn {
+    Plain(DeviceBuffer<f32>),
+    Pooled(PooledBuffer<f32>),
+}
+
+impl RowColumn {
+    fn ptr(&self) -> u64 {
+        match self {
+            Self::Plain(buffer) => buffer.device_ptr(),
+            Self::Pooled(buffer) => buffer.device_ptr(),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Plain(buffer) => buffer.len(),
+            Self::Pooled(buffer) => buffer.len(),
+        }
+    }
+
+    fn ctx(&self) -> &Arc<Context> {
+        match self {
+            Self::Plain(buffer) => buffer.ctx(),
+            Self::Pooled(buffer) => buffer.ctx(),
+        }
+    }
+}
+
 /// Reusable per-row statistic storage for [`F32LayerNorm`].
 #[derive(Debug)]
 pub struct F32LayerNormWorkspace {
     max_rows: usize,
-    row_means: DeviceBuffer<f32>,
-    row_vars: DeviceBuffer<f32>,
+    row_means: RowColumn,
+    row_vars: RowColumn,
 }
 
 impl F32LayerNormWorkspace {
@@ -282,6 +314,32 @@ impl F32LayerNorm {
         )
     }
 
+    /// Normalize each row choosing fused when it fits shared memory and a
+    /// pooled staged workspace otherwise; every scratch byte comes from
+    /// `allocator` and waits once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn normalize_rows_dispatched_pooled(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+        epsilon: f32,
+        gamma: f32,
+        beta: f32,
+        allocator: &StreamOrderedAllocator,
+    ) -> Result<()> {
+        if self.fused_available(cols) {
+            return self
+                .fused_normalize_rows(stream, input, output, rows, cols, epsilon, gamma, beta);
+        }
+        let workspace = self.pooled_workspace(allocator, rows)?;
+        self.normalize_rows(
+            stream, input, output, rows, cols, epsilon, gamma, beta, &workspace,
+        )
+    }
+
     /// Allocate per-row statistic storage reusable up to `max_rows`.
     pub fn workspace(
         &self,
@@ -295,8 +353,27 @@ impl F32LayerNorm {
         }
         Ok(F32LayerNormWorkspace {
             max_rows,
-            row_means: DeviceBuffer::new(context, max_rows)?,
-            row_vars: DeviceBuffer::new(context, max_rows)?,
+            row_means: RowColumn::Plain(DeviceBuffer::new(context, max_rows)?),
+            row_vars: RowColumn::Plain(DeviceBuffer::new(context, max_rows)?),
+        })
+    }
+
+    /// Build a pooled workspace whose per-row statistic columns are
+    /// allocated stream-ordered from `allocator` (async free on drop).
+    pub fn pooled_workspace(
+        &self,
+        allocator: &StreamOrderedAllocator,
+        max_rows: usize,
+    ) -> Result<F32LayerNormWorkspace> {
+        if !Arc::ptr_eq(allocator.context(), self.context()) {
+            return Err(NnisError::invalid_input(
+                "layer-norm and allocator contexts do not match",
+            ));
+        }
+        Ok(F32LayerNormWorkspace {
+            max_rows,
+            row_means: RowColumn::Pooled(allocator.alloc(max_rows)?),
+            row_vars: RowColumn::Pooled(allocator.alloc(max_rows)?),
         })
     }
 
@@ -391,8 +468,10 @@ impl F32LayerNorm {
             self.launch_row_stats(
                 stream,
                 input,
-                &workspace.row_means,
-                &workspace.row_vars,
+                workspace.row_means.ptr(),
+                workspace.row_means.len(),
+                workspace.row_vars.ptr(),
+                workspace.row_vars.len(),
                 rows,
                 cols,
             )?;
@@ -400,8 +479,8 @@ impl F32LayerNorm {
                 stream,
                 input,
                 output,
-                &workspace.row_means,
-                &workspace.row_vars,
+                workspace.row_means.ptr(),
+                workspace.row_vars.ptr(),
                 rows,
                 cols,
                 epsilon,
@@ -522,12 +601,19 @@ impl F32LayerNorm {
     ///
     /// Caller owns the asynchronous lifetime of every buffer; see
     /// [`F32LayerNorm::enqueue_normalize_rows`].
+    /// # Safety
+    ///
+    /// Both pointers must name live allocations of at least the stated
+    /// capacities; obligations mirror the enqueue API.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn launch_row_stats(
         &self,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
-        row_means: &DeviceBuffer<f32>,
-        row_vars: &DeviceBuffer<f32>,
+        row_means_ptr: u64,
+        row_means_capacity: usize,
+        row_vars_ptr: u64,
+        row_vars_capacity: usize,
         rows: usize,
         cols: usize,
     ) -> Result<()> {
@@ -541,11 +627,16 @@ impl F32LayerNorm {
             .ok_or_else(|| NnisError::invalid_input("layer-norm shared memory overflows"))?;
         let config = LaunchConfig::new(Dim3::x(grid_size), Dim3::x(self.block_size))
             .with_dynamic_shared_memory(shared_memory_bytes);
-        let mut arguments = KernelArgs::with_capacity(4, 3);
+        if rows > row_means_capacity || rows > row_vars_capacity {
+            return Err(NnisError::invalid_input(format!(
+                "layer-norm has {rows} rows; scratch capacities are                  {row_means_capacity}/{row_vars_capacity}"
+            )));
+        }
+        let mut arguments = KernelArgs::with_capacity(4, 1);
         arguments
             .push_buffer(input)
-            .push_buffer(row_means)
-            .push_buffer(row_vars)
+            .push(row_means_ptr)
+            .push(row_vars_ptr)
             .push(cols);
         let launch = KernelLaunch::new(&self.row_stats, stream, config);
         // SAFETY: argument order/widths match `nnis_layernorm_row_stats_f32`;
@@ -563,8 +654,8 @@ impl F32LayerNorm {
         stream: &Stream,
         input: &DeviceBuffer<f32>,
         output: &DeviceBuffer<f32>,
-        row_means: &DeviceBuffer<f32>,
-        row_vars: &DeviceBuffer<f32>,
+        row_means_ptr: u64,
+        row_vars_ptr: u64,
         rows: usize,
         cols: usize,
         epsilon: f32,
@@ -575,12 +666,12 @@ impl F32LayerNorm {
             .checked_mul(cols)
             .ok_or_else(|| NnisError::invalid_input("layer-norm length overflows usize"))?;
         let (rows, cols) = self.u64_shape(rows, cols)?;
-        let mut arguments = KernelArgs::with_capacity(10, 4);
+        let mut arguments = KernelArgs::with_capacity(10, 2);
         arguments
             .push_buffer(input)
             .push_buffer(output)
-            .push_buffer(row_means)
-            .push_buffer(row_vars)
+            .push(row_means_ptr)
+            .push(row_vars_ptr)
             .push(rows)
             .push(cols)
             .push(1.0_f32 / cols as f32)
@@ -774,6 +865,46 @@ mod tests {
                 "constant-row mismatch at {index}: {value} != {BETA}"
             );
         }
+    }
+
+    #[test]
+    fn pooled_layer_norm_matches_oracle_and_rejects_undersized_workspace() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::new(&stream).unwrap();
+        let compiler = JitCompiler::new();
+        let layer_norm = F32LayerNorm::load(&context, &compiler).unwrap();
+
+        for &(rows, cols) in &[(5, 2_048), (2, 20_000), (7, 257)] {
+            let host = host_values(rows, cols);
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+            layer_norm
+                .normalize_rows_dispatched_pooled(
+                    &stream, &input, &output, rows, cols, EPSILON, GAMMA, BETA, &allocator,
+                )
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            assert_close(
+                &actual,
+                &reference_rows(&host, rows, cols),
+                &format!("pooled ({rows}, {cols})"),
+            );
+        }
+
+        // Undersized pooled workspace is rejected before any launch.
+        let input = DeviceBuffer::from_host(&context, &stream, &host_values(3, 4)).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, 12).unwrap();
+        let workspace = layer_norm.pooled_workspace(&allocator, 2).unwrap();
+        let error = layer_norm
+            .normalize_rows(
+                &stream, &input, &output, 3, 4, EPSILON, GAMMA, BETA, &workspace,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("capacity is 2"), "{error}");
     }
 
     #[test]

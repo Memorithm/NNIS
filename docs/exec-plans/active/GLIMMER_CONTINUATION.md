@@ -169,6 +169,17 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   pipeline and lands within measurement noise of full pre-allocation.
   fmt/clippy/check clean; 53 GPU tests passed.
 
+- Pooled-norms milestone (2026-08-23, branch `feature/pooled-norms`,
+  stacked on PR #3): `F32RmsNorm::normalize_rows_dispatched_pooled` and
+  `F32LayerNorm::normalize_rows_dispatched_pooled` run fused when the row
+  fits shared memory and pooled staged workspaces otherwise; per-row
+  statistic columns live behind an internal RowColumn enum with pointer
+  launches and capacity validation. Oracle tests cover fused-selected,
+  staged-fallback (20,000 columns), and undersized-pooled-workspace
+  rejection for both families. fmt/clippy/check clean; 55 GPU tests.
+  No dedicated benchmark: the mechanism and economics are identical to the
+  softmax A/B in PR #3 (pool overhead ~1 microsecond per buffer).
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
