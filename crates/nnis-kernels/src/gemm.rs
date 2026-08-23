@@ -62,6 +62,57 @@ extern "C" __global__ void nnis_gemm_f32(
         output[row * n + col] = value;
     }
 }
+
+extern "C" __global__ void nnis_gemm_nt_f32(
+    const float* matrix_a,
+    const float* matrix_b,
+    float* output,
+    unsigned long long m,
+    unsigned long long n,
+    unsigned long long k
+) {
+    extern __shared__ float tile[];
+    const unsigned int tile_side = blockDim.x;
+    float* tile_a = tile;
+    float* tile_b = tile + tile_side * tile_side;
+
+    const unsigned int tx = threadIdx.x;
+    const unsigned int ty = threadIdx.y;
+    const unsigned long long row =
+        (unsigned long long)blockIdx.x * blockDim.x + ty;
+    const unsigned long long col =
+        (unsigned long long)blockIdx.y * blockDim.y + tx;
+
+    float value = 0.0f;
+    for (unsigned long long tile_start = 0; tile_start < k;
+         tile_start += tile_side) {
+        const unsigned long long a_col = tile_start + tx;
+        if (row < m && a_col < k) {
+            tile_a[ty * tile_side + tx] = matrix_a[row * k + a_col];
+        } else {
+            tile_a[ty * tile_side + tx] = 0.0f;
+        }
+        // B is stored row-major as (n x k): B^T[e][col] = B[col][e].
+        const unsigned long long depth = tile_start + ty;
+        if (col < n && depth < k) {
+            tile_b[ty * tile_side + tx] = matrix_b[col * k + depth];
+        } else {
+            tile_b[ty * tile_side + tx] = 0.0f;
+        }
+        __syncthreads();
+        for (unsigned int d2 = 0; d2 < tile_side; ++d2) {
+            value = fmaf(
+                tile_a[ty * tile_side + d2],
+                tile_b[d2 * tile_side + tx],
+                value
+            );
+        }
+        __syncthreads();
+    }
+    if (row < m && col < n) {
+        output[row * n + col] = value;
+    }
+}
 "#;
 
 const DEFAULT_TILE_SIDE: u32 = 16;
@@ -72,6 +123,7 @@ const MAX_GRID_Y_BLOCKS: u64 = 65_535;
 #[derive(Debug)]
 pub struct F32Gemm {
     gemm: Kernel,
+    gemm_nt: Kernel,
     tile_side: u32,
 }
 
@@ -99,7 +151,9 @@ impl F32Gemm {
         let code = compiler.compile_cubin(GEMM_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let gemm = module.get_function("nnis_gemm_f32")?;
+        let gemm_nt = module.get_function("nnis_gemm_nt_f32")?;
         let attributes = gemm.attributes()?;
+        let attributes_nt = gemm_nt.attributes()?;
         let threads_per_block = u64::from(tile_side)
             .checked_mul(u64::from(tile_side))
             .ok_or_else(|| NnisError::invalid_input("gemm block size overflows"))?;
@@ -116,7 +170,24 @@ impl F32Gemm {
                 attributes.max_dynamic_shared_memory_bytes
             )));
         }
-        Ok(Self { gemm, tile_side })
+        let threads_limit = u64::from(attributes.max_threads_per_block);
+        if threads_per_block > threads_limit {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt tile side {tile_side} implies {threads_per_block} threads per block; \
+                 function limit is {threads_limit}"
+            )));
+        }
+        if shared_memory_bytes as usize > attributes_nt.max_dynamic_shared_memory_bytes as usize {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt requires {shared_memory_bytes} shared-memory bytes; function limit is {}",
+                attributes_nt.max_dynamic_shared_memory_bytes
+            )));
+        }
+        Ok(Self {
+            gemm,
+            gemm_nt,
+            tile_side,
+        })
     }
 
     /// CUDA block/tile side used along both matrix dimensions.
@@ -150,6 +221,98 @@ impl F32Gemm {
                 Err(error)
             }
         }
+    }
+
+    /// Compute `output = matrix_a * matrix_b_transposed` and wait for
+    /// completion.
+    ///
+    /// Shapes: `matrix_a` holds `m * k` row-major elements, `matrix_b` holds
+    /// `n * k` row-major elements (so the math reads `B` transposed), and
+    /// `output` receives `m * n`. This is the score form `Q * K^T` used by
+    /// attention when both operands store rows per token. Empty inner
+    /// dimension zeroes the output; zero rows or columns leave nothing to
+    /// write.
+    #[allow(clippy::too_many_arguments)]
+    pub fn gemm_transposed_b(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<f32>,
+        matrix_b: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result =
+            unsafe { self.enqueue_gemm_transposed_b(stream, matrix_a, matrix_b, output, m, n, k) };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue the transposed-B GEMM without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, and this kernel must remain alive and
+    /// otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_gemm_transposed_b(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<f32>,
+        matrix_b: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        self.validate_execution_nt(stream, matrix_a, matrix_b, output, m, n, k)?;
+        if m == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            // SAFETY: the output lifetime obligation is documented above.
+            return unsafe { output.zero_async(stream) };
+        }
+        let shared_memory_bytes = Self::shared_memory_bytes(self.tile_side)?;
+        let grid_x = u32::try_from(m.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("gemm-nt exceeds u32::MAX row blocks"))?;
+        let grid_y = u64::try_from(n.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("gemm-nt column blocks exceed u64"))?;
+        if grid_y > MAX_GRID_Y_BLOCKS {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt requires {grid_y} column blocks; \
+                 gridDim.y limit is {MAX_GRID_Y_BLOCKS}"
+            )));
+        }
+        let (m, n, k) = (
+            u64::try_from(m).map_err(|_| NnisError::invalid_input("gemm-nt m exceeds u64"))?,
+            u64::try_from(n).map_err(|_| NnisError::invalid_input("gemm-nt n exceeds u64"))?,
+            u64::try_from(k).map_err(|_| NnisError::invalid_input("gemm-nt k exceeds u64"))?,
+        );
+        let config = LaunchConfig::new(
+            Dim3::new(grid_x, grid_y as u32, 1),
+            Dim3::new(self.tile_side, self.tile_side, 1),
+        )
+        .with_dynamic_shared_memory(shared_memory_bytes);
+        let mut arguments = KernelArgs::with_capacity(6, 3);
+        arguments
+            .push_buffer(matrix_a)
+            .push_buffer(matrix_b)
+            .push_buffer(output)
+            .push(m)
+            .push(n)
+            .push(k);
+        let launch = KernelLaunch::new(&self.gemm_nt, stream, config);
+        // SAFETY: argument order/widths match `nnis_gemm_nt_f32`; the caller
+        // owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
     }
 
     /// Enqueue the GEMM without synchronizing the stream.
@@ -209,6 +372,57 @@ impl F32Gemm {
         // SAFETY: argument order/widths match `nnis_gemm_f32`; the caller
         // owns the asynchronous lifetime obligation.
         unsafe { launch.launch(&mut arguments) }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn validate_execution_nt(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<f32>,
+        matrix_b: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        let expected_a = m
+            .checked_mul(k)
+            .ok_or_else(|| NnisError::invalid_input("gemm-nt shape overflows usize"))?;
+        let expected_b = n
+            .checked_mul(k)
+            .ok_or_else(|| NnisError::invalid_input("gemm-nt shape overflows usize"))?;
+        let expected_output = m
+            .checked_mul(n)
+            .ok_or_else(|| NnisError::invalid_input("gemm-nt shape overflows usize"))?;
+        if matrix_a.len() != expected_a {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt matrix_a has {} elements; shape ({m}, {k}) requires {expected_a}",
+                matrix_a.len()
+            )));
+        }
+        if matrix_b.len() != expected_b {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt matrix_b has {} elements; shape ({n}, {k}) requires {expected_b}",
+                matrix_b.len()
+            )));
+        }
+        if output.len() != expected_output {
+            return Err(NnisError::invalid_input(format!(
+                "gemm-nt output has {} elements; shape ({m}, {n}) requires {expected_output}",
+                output.len()
+            )));
+        }
+        let context = self.gemm.context();
+        if !Arc::ptr_eq(context, stream.ctx())
+            || !Arc::ptr_eq(context, matrix_a.ctx())
+            || !Arc::ptr_eq(context, matrix_b.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "gemm-nt stream, buffers, and kernel must share one context",
+            ));
+        }
+        Ok(())
     }
 
     fn shared_memory_bytes(tile_side: u32) -> Result<u32> {
@@ -413,6 +627,77 @@ mod tests {
         let long_output = DeviceBuffer::<f32>::new(&context, 10).unwrap();
         let error = gemm
             .gemm(&stream, &matrix_a, &matrix_b, &long_output, 3, 3, 4)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("shape (3, 3) requires 9"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn gemm_transposed_b_matches_ordered_cpu_oracle_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let gemm = F32Gemm::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &(m, n, k) in SHAPES {
+            let a_host = host_matrix_a(m, k);
+            // B stored row-major as (n x k).
+            let b_host = host_matrix_a(n, k);
+            let matrix_a = DeviceBuffer::from_host(&context, &stream, &a_host).unwrap();
+            let matrix_b = DeviceBuffer::from_host(&context, &stream, &b_host).unwrap();
+            // Pre-fill the output so a skipped kernel cannot pass silently.
+            let output_host = vec![f32::NAN; m * n];
+            let output = DeviceBuffer::from_host(&context, &stream, &output_host).unwrap();
+
+            gemm.gemm_transposed_b(&stream, &matrix_a, &matrix_b, &output, m, n, k)
+                .unwrap();
+            let output_host = output.to_vec(&stream).unwrap();
+            for row in 0..m {
+                for col in 0..n {
+                    // Replays the kernel: explicit-FMA chain over k ascending
+                    // with the B operand read from its (col, depth) storage.
+                    let expected = (0..k).fold(0.0_f32, |value, depth| {
+                        a_host[row * k + depth].mul_add(b_host[col * k + depth], value)
+                    });
+                    assert_eq!(
+                        output_host[row * n + col].to_bits(),
+                        expected.to_bits(),
+                        "ordered gemm-nt mismatch at ({row}, {col}) shape ({m}, {n}, {k})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gemm_transposed_b_rejects_invalid_shapes_before_launch() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let gemm = F32Gemm::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+        let matrix_a = DeviceBuffer::<f32>::new(&context, 12).unwrap(); // 3 x 4
+        let short_matrix_b = DeviceBuffer::<f32>::new(&context, 11).unwrap(); // needs 12
+        let output = DeviceBuffer::<f32>::new(&context, 9).unwrap(); // 3 x 3
+        let error = gemm
+            .gemm_transposed_b(&stream, &matrix_a, &short_matrix_b, &output, 3, 3, 4)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("shape (3, 4) requires 12"),
+            "{error}"
+        );
+
+        let matrix_b = DeviceBuffer::<f32>::new(&context, 12).unwrap();
+        let long_output = DeviceBuffer::<f32>::new(&context, 10).unwrap();
+        let error = gemm
+            .gemm_transposed_b(&stream, &matrix_a, &matrix_b, &long_output, 3, 3, 4)
             .unwrap_err();
         assert!(
             error.to_string().contains("shape (3, 3) requires 9"),
