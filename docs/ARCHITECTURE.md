@@ -91,6 +91,60 @@ holding each argument value. NNIS's packer provides exactly that representation;
 a device address is stored as a `u64` value inside aligned host storage rather
 than being misinterpreted as the host pointer to the parameter.
 
+## Kernel families
+
+Standard kernels live in `nnis-kernels` behind operation-level APIs. Each
+family compiles its CUDA source through the JIT cache on first use, validates
+launch shapes before any native call, and offers a safe synchronizing method
+plus an explicitly unsafe enqueue counterpart.
+
+### Reductions (`F32Reduction`)
+
+Sum and max share one tree structure: each block halves `2 * block_size`
+input elements into shared-memory partials through stride-halving passes,
+writing one partial per block; multi-pass invocations reduce those partials
+recursively until a single device scalar remains. Consequences:
+
+- A `F32ReductionWorkspace` holds two scratch buffers sized by the largest
+  input and is reusable for any input up to that capacity, but never by
+  overlapping asynchronous operations.
+- The sum tree defines a deterministic evaluation order. The CPU oracle
+  replays that order, so GPU sums match it bit for bit; agreement with an
+  f64 reference is additionally checked inside an explicit forward
+  error bound rather than a silently loosened tolerance.
+- `fmaxf` is exact, so max results are asserted bit-for-bit against the CPU.
+- An empty sum input schedules a zeroed output; an empty max input enqueues
+  nothing and leaves the destination untouched.
+
+### Flat softmax (`F32Softmax`)
+
+A numerically stable four-stage pipeline over one flat buffer: device-side
+max, `exp(input - max)`, device-side sum of exponentials, in-place normalize.
+The maximum and total stay in one-element device buffers between stages, so
+the whole pipeline enqueues without host roundtrips and safe wrappers
+synchronize exactly once. This is the pattern for multi-stage NNIS pipelines:
+stage boundaries are stream ordering, not host synchronization.
+
+### Row-batched softmax (`F32Softmax2D`)
+
+For row-major `rows x cols` matrices, two execution paths exist behind one
+operation family:
+
+- Staged: one thread block per row performs strided max/sum reductions into
+  a device-resident per-row scalar column (`F32Softmax2DWorkspace`); exp
+  shift and in-place normalize index that column per element. Six full-matrix
+  streams move through global memory.
+- Fused: when `(cols + block_size) * 4` bytes fit the kernel's dynamic
+  shared-memory limit, one block stages its entire row in shared memory and
+  computes max, exponentials, total, and normalized output with one matrix
+  read and one matrix write.
+
+A clean Thor A/B at 8192x2048 measured the fused path 2.46x faster than the
+staged pipeline; the staged path remains required for rows exceeding the
+shared-memory budget. `softmax_rows_dispatched` chooses automatically via
+`fused_available`, keeping the architecture-specific optimization behind a
+dispatch boundary instead of hard-coding Thor assumptions.
+
 ## Blocking and asynchronous APIs
 
 The default memory and standard-kernel methods are safe and synchronizing:

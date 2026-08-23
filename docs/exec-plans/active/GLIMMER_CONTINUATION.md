@@ -127,11 +127,19 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   `Session` now loads and exposes `softmax_2d`. Workspace total: 36 GPU tests.
 
 ## Next task
-Document the row-softmax family in docs/ARCHITECTURE.md and README usage;
-then evaluate allocation pooling (deferred Wave 7) or batched GEMV-style
-primitives as the next kernel wave.
+Allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`
+(stream-ordered `cuMemAllocFromPoolAsync` behind an opt-in
+`StreamOrderedAllocator`), starting with pooled flat-softmax scratch and an
+end-to-end A/B through the benchmark harness.
 
 ## Measured benchmarks (continued)
+- Pinned vs pageable 64 MiB f32 transfers, clean tree, Thor CC 11.0,
+  20 warmups, 100 iterations (`nnis-bench` example `transfers`, event-timed,
+  both paths data-validated): H2D pinned 0.627344 ms vs pageable 0.711184 ms
+  (pinned 11.8% faster); D2H pinned 0.613056 ms vs pageable 0.636144 ms
+  (pinned 3.6% faster). Positive result: pinned staging benefits both
+  directions; largest win on H2D. Pooled/pinned staging is worth exposing to
+  pipelines that stream host data.
 - Fused-vs-staged row-softmax A/B, Thor CC 11.0, 8192x2048 f32 (16,777,216
   elements), block 256, 20 warmups, 100 iterations:
   - Staged four-kernel pipeline at clean `51fe244`: 2.507344 ms median,
@@ -224,6 +232,14 @@ Takeover run (2026-08-22):
 - Dispatch milestone (2026-08-23): fmt/clippy/check clean;
   `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 36 passed;
   committed `ee5f646`, pushed to origin main.
+- Documentation closeout (2026-08-23): ARCHITECTURE.md gained a "Kernel
+  families" section (reduction tree semantics, flat softmax pipeline pattern,
+  row softmax staged/fused paths and dispatch boundary); README quick start
+  now covers reductions and dispatched row softmax with benchmark commands;
+  `docs/DESIGN_ALLOCATION_POOLING.md` records the deferred pooling design
+  (stream-ordered pools, safety rationale, decision criteria); new event-timed
+  `transfers` benchmark example measured pinned vs pageable. fmt/clippy/check
+  clean, 36 GPU tests passed, all committed and pushed.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
