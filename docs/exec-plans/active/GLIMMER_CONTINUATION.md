@@ -338,14 +338,27 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete. Attention (PR #13) is the newest family.
-Remaining candidates in priority order:
-1. Fused-attention occupancy work ONLY if long-sequence memory footprint
-   becomes a real requirement: the A/B below shows the current one-block-
-   per-row design is 13x slower than composed at practical shapes; levers
-   are smaller blocks, query-tile blocks, and warp-level reductions.
-2. bf16 attention variants once a downstream project pins numeric policy
-   for attention specifically.
+All planned waves are complete. Causal attention (PR #14) completes the
+attention family for autoregressive use. Remaining candidates:
+1. Elementwise activation family (ReLU/SiLU/GELU-tanh) f32+bf16 - the FFN
+   half of a transformer block after norms/GEMM/attention.
+2. bf16 attention variants once a downstream project pins numeric policy.
+3. Fused-attention occupancy work ONLY if long-sequence memory footprint
+   becomes a real requirement: the A/B below shows the one-block-per-row
+   design is 13x slower than composed at practical shapes.
+
+- Causal attention milestone (2026-08-23, branch `feature/causal-attention`,
+  **PR #14**): `AttentionMask::{None, Causal}` added to both paths. Fused
+  kernel masks key positions above the diagonal BEFORE exponentiation
+  (zero weight exactly; chunks fully above the diagonal reduce to rescale
+  by exp(0)=1 with zero weights); composed path gained a fused
+  scale-and-mask elementwise kernel (`nnis_attention_scale_causal_f32`,
+  block 256) applied between QK^T and row softmax. Causal requires square
+  score shapes (query_rows == kv_rows), rejected before launch on both
+  paths. f64-oracle causal tests across four square shapes including
+  multi-chunk sequences validate fused AND composed against a shared
+  reference; rectangular-shape rejection tested for both paths.
+  fmt/clippy/check clean; workspace GPU suite green (78 tests).
 
 ## GEMM tile-size sweep (2026-08-23)
 `NNIS_BENCH_TILE` shipped for both GEMM benchmarks; clean forward/reverse

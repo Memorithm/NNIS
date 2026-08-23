@@ -1,6 +1,6 @@
 use nnis_bench::{benchmark_gpu, BenchConfig, BenchmarkCase, BenchmarkReport};
 use nnis_jit::JitCompiler;
-use nnis_kernels::{F32Attention, F32Elementwise, F32Gemm, F32Softmax2D};
+use nnis_kernels::{AttentionMask, F32Attention, F32Elementwise, F32Gemm, F32Softmax2D};
 use nnis_rt::{Context, Device, DeviceBuffer, Stream};
 use serde::Serialize;
 
@@ -112,6 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     kv_rows,
                     value_dim,
                     scale,
+                    AttentionMask::None,
                 )
             }
         },
@@ -124,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_bytes_per_iteration(composed_bytes as u64),
         config,
         || {
-            F32Attention::attention_composed(
+            attention.attention_composed(
                 &gemm,
                 &elementwise,
                 &softmax_2d,
@@ -138,6 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 kv_rows,
                 value_dim,
                 scale,
+                AttentionMask::None,
             )
         },
     )?;
