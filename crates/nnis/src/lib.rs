@@ -26,10 +26,11 @@ pub mod jit {
 pub mod kernels {
     pub use nnis_kernels::{
         AttentionMask, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
-        Bf16ReductionWorkspace, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks,
-        F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace,
-        F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax, F32Softmax2D,
-        F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
+        Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
+        F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
+        F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
+        F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
+        F32TopKWorkspace,
     };
 }
 
@@ -39,10 +40,10 @@ pub use jit::{
 };
 pub use kernels::{
     AttentionMask, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
-    F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather,
-    F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
-    F32RmsNorm, F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
-    F32TopKWorkspace,
+    Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
+    F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
+    F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
+    F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -80,6 +81,8 @@ pub struct Session {
     attention: F32Attention,
     gather: F32Gather,
     bf16_gather: Bf16Gather,
+    scatter: F32Scatter,
+    bf16_scatter: Bf16Scatter,
 }
 
 impl Session {
@@ -114,6 +117,8 @@ impl Session {
         let attention = F32Attention::load(&context, &compiler)?;
         let gather = F32Gather::load(&context, &compiler)?;
         let bf16_gather = Bf16Gather::load(&context, &compiler)?;
+        let scatter = F32Scatter::load(&context, &compiler)?;
+        let bf16_scatter = Bf16Scatter::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -134,6 +139,8 @@ impl Session {
             attention,
             gather,
             bf16_gather,
+            scatter,
+            bf16_scatter,
         })
     }
 
@@ -211,6 +218,14 @@ impl Session {
 
     pub fn bf16_gather(&self) -> &Bf16Gather {
         &self.bf16_gather
+    }
+
+    pub fn scatter(&self) -> &F32Scatter {
+        &self.scatter
+    }
+
+    pub fn bf16_scatter(&self) -> &Bf16Scatter {
+        &self.bf16_scatter
     }
 
     /// Composed scaled dot-product attention over this session's kernels.

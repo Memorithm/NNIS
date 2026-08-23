@@ -341,8 +341,22 @@ no longer allowed for code changes.
 Chained implementation waves continue while candidates remain:
 1. bf16 attention variants once a downstream project pins numeric policy
    (composed path can reuse Bf16Gemm-NT + f32 score scratch).
-2. Dedicated argmax/gather benchmarks only if consumers ask; both are
-   bandwidth-bound single/multi-pass patterns already characterized.
+2. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
+   bandwidth-bound patterns already characterized by siblings.
+3. README/ARCHITECTURE sweep for the newest families (argmax, gather,
+   scatter) - docs-only follow-up.
+
+- Row-scatter milestone (2026-08-23, branch `feature/scatter`, **PR #19**):
+  `F32Scatter` + `Bf16Scatter` - the inverse of gather:
+  `output[positions[i]*cols+j] = source[i*cols+j]` for KV-cache appends
+  and positional writes. Bit patterns copied verbatim (tests assert exact
+  bits AND that non-targeted rows stay untouched via sentinel prefill).
+  Safe wrappers host-validate positions: out-of-range rejected with a
+  named error; DUPLICATE positions rejected outright because overlapping
+  writes would race (documented contract). Shape/context validation and a
+  macro-generated twin-family implementation keep both widths identical.
+  Facade wired (`session.scatter()`, `session.bf16_scatter()`).
+  fmt/clippy/check clean; workspace GPU suite green (89 tests).
 
 - Embedding-gather milestone (2026-08-23, branch `feature/embedding-gather`,
   **PR #18**): `F32Gather` + `Bf16Gather` row lookup - one thread per output
