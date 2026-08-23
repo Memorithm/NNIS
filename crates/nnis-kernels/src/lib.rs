@@ -5,6 +5,7 @@
 //! enqueue operations for callers that manage asynchronous buffer lifetimes.
 
 mod bf16;
+mod bf16_gemm;
 mod bf16_reduction;
 mod gemm;
 mod gemv;
@@ -17,6 +18,7 @@ mod softmax;
 mod top_k;
 
 pub use bf16::Bf16Elementwise;
+pub use bf16_gemm::Bf16Gemm;
 pub use bf16_reduction::{Bf16Reduction, Bf16ReductionWorkspace};
 pub use gemm::F32Gemm;
 pub use gemv::F32Gemv;
