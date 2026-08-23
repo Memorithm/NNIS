@@ -219,6 +219,15 @@ pub struct PooledBuffer<T> {
 unsafe impl<T: Send> Send for PooledBuffer<T> {}
 unsafe impl<T: Sync> Sync for PooledBuffer<T> {}
 
+impl<T> core::fmt::Debug for PooledBuffer<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PooledBuffer")
+            .field("ptr", &self.ptr)
+            .field("len", &self.len)
+            .finish()
+    }
+}
+
 impl<T> PooledBuffer<T> {
     pub fn len(&self) -> usize {
         self.len

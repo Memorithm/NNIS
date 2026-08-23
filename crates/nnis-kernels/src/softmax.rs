@@ -15,7 +15,9 @@ use crate::reduction::{F32Reduction, F32ReductionWorkspace};
 use nnis_jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
 };
-use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
+use nnis_rt::{
+    Context, DeviceBuffer, NnisError, PooledBuffer, Result, Stream, StreamOrderedAllocator,
+};
 use std::sync::Arc;
 
 const SOFTMAX_SOURCE: &str = r#"
@@ -144,6 +146,128 @@ impl F32Softmax {
         }
     }
 
+    /// Compute the stable softmax with every scratch allocation taken from a
+    /// [`StreamOrderedAllocator`] and wait once: the reduction-tree workspace,
+    /// and both device-side scalars are stream-ordered pool allocations whose
+    /// drops enqueue cheap asynchronous frees after synchronization.
+    ///
+    /// This is the design-note pipeline case: identical GPU work to
+    /// [`Self::softmax`], but steady-state calls pay no synchronous
+    /// allocator cost.
+    pub fn softmax_pooled(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        allocator: &StreamOrderedAllocator,
+    ) -> Result<()> {
+        let workspace = self.reduction.pooled_workspace(allocator, input.len())?;
+        let max_scratch = allocator.alloc::<f32>(1)?;
+        let sum_scratch = allocator.alloc::<f32>(1)?;
+        // SAFETY: every buffer borrow remains live until synchronization
+        // below; the pooled temporaries drop only afterwards.
+        let enqueue_result = unsafe {
+            self.enqueue_softmax_pooled(
+                stream,
+                input,
+                output,
+                &max_scratch,
+                &sum_scratch,
+                &workspace,
+            )
+        };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue the complete four-stage softmax over pooled scratch without
+    /// synchronizing.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, the allocator's pool, and the workspace must
+    /// remain alive and otherwise untouched until the stream completes. The
+    /// workspace and scalar scratches may not be shared by overlapping
+    /// operations, including on other streams.
+    pub unsafe fn enqueue_softmax_pooled(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        max_scratch: &PooledBuffer<f32>,
+        sum_scratch: &PooledBuffer<f32>,
+        workspace: &F32ReductionWorkspace,
+    ) -> Result<()> {
+        self.validate_pooled_execution(stream, input, output, max_scratch, sum_scratch)?;
+        if input.is_empty() {
+            return Ok(());
+        }
+        // SAFETY: each stage retains its borrows under this method's contract;
+        // same-stream ordering guarantees each stage reads only prior-stage
+        // output.
+        unsafe {
+            self.reduction
+                .enqueue_max_ptr(stream, input, max_scratch.device_ptr(), workspace)?;
+            self.enqueue_exp_shift_ptr(
+                stream,
+                input,
+                output,
+                max_scratch.device_ptr(),
+                input.len(),
+            )?;
+            self.reduction
+                .enqueue_sum_ptr(stream, output, sum_scratch.device_ptr(), workspace)?;
+            self.enqueue_normalize_ptr(stream, output, sum_scratch.device_ptr())?;
+        }
+        Ok(())
+    }
+
+    fn validate_pooled_execution(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        max_scratch: &PooledBuffer<f32>,
+        sum_scratch: &PooledBuffer<f32>,
+    ) -> Result<()> {
+        if input.len() != output.len() {
+            return Err(NnisError::invalid_input(format!(
+                "softmax input has {} elements but output has {}",
+                input.len(),
+                output.len()
+            )));
+        }
+        for (name, scalar) in [("max_scratch", max_scratch), ("sum_scratch", sum_scratch)] {
+            if scalar.len() != 1 {
+                return Err(NnisError::invalid_input(format!(
+                    "softmax {name} holds {} elements; expected exactly 1",
+                    scalar.len()
+                )));
+            }
+        }
+        if max_scratch.device_ptr() == sum_scratch.device_ptr() {
+            return Err(NnisError::invalid_input(
+                "softmax max_scratch and sum_scratch must be distinct buffers",
+            ));
+        }
+        if !Arc::ptr_eq(self.context(), stream.ctx())
+            || !Arc::ptr_eq(self.context(), input.ctx())
+            || !Arc::ptr_eq(self.context(), output.ctx())
+            || !Arc::ptr_eq(self.context(), max_scratch.ctx())
+            || !Arc::ptr_eq(self.context(), sum_scratch.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "softmax stream, buffers, and kernels must share one context",
+            ));
+        }
+        Ok(())
+    }
+
     /// Enqueue the complete four-stage softmax without synchronizing.
     ///
     /// On return, `output` is scheduled to hold one probability per input
@@ -236,18 +360,37 @@ impl F32Softmax {
         output: &DeviceBuffer<f32>,
         max_value: &DeviceBuffer<f32>,
     ) -> Result<()> {
-        let elements = u64::try_from(input.len())
+        // SAFETY: typed wrapper over the pointer form; lifetimes owned by
+        // the enclosing operation.
+        unsafe {
+            self.enqueue_exp_shift_ptr(stream, input, output, max_value.device_ptr(), input.len())
+        }
+    }
+
+    /// # Safety
+    ///
+    /// `max_value_ptr` must name a live one-element `f32` allocation; see
+    /// the enclosing operation's documented lifetime contract.
+    unsafe fn enqueue_exp_shift_ptr(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        max_value_ptr: u64,
+        elements_len: usize,
+    ) -> Result<()> {
+        let elements = u64::try_from(elements_len)
             .map_err(|_| NnisError::invalid_input("softmax length exceeds u64::MAX"))?;
-        let mut arguments = KernelArgs::with_capacity(4, 3);
+        let mut arguments = KernelArgs::with_capacity(4, 2);
         arguments
             .push_buffer(input)
             .push_buffer(output)
-            .push_buffer(max_value)
+            .push(max_value_ptr)
             .push(elements);
         let launch = KernelLaunch::new(
             &self.exp_shift,
             stream,
-            LaunchConfig::for_num_elements(input.len(), self.block_size)?,
+            LaunchConfig::for_num_elements(elements_len, self.block_size)?,
         );
         // SAFETY: argument order/widths match `nnis_softmax_exp_shift_f32`;
         // the caller owns the asynchronous lifetime obligation.
@@ -264,13 +407,26 @@ impl F32Softmax {
         data: &DeviceBuffer<f32>,
         total: &DeviceBuffer<f32>,
     ) -> Result<()> {
+        // SAFETY: typed wrapper over the pointer form; lifetimes owned by
+        // the enclosing operation.
+        unsafe { self.enqueue_normalize_ptr(stream, data, total.device_ptr()) }
+    }
+
+    /// # Safety
+    ///
+    /// `total_ptr` must name a live one-element `f32` allocation; see the
+    /// enclosing operation's documented lifetime contract. Normalization
+    /// writes `data` in place.
+    unsafe fn enqueue_normalize_ptr(
+        &self,
+        stream: &Stream,
+        data: &DeviceBuffer<f32>,
+        total_ptr: u64,
+    ) -> Result<()> {
         let elements = u64::try_from(data.len())
             .map_err(|_| NnisError::invalid_input("softmax length exceeds u64::MAX"))?;
-        let mut arguments = KernelArgs::with_capacity(3, 2);
-        arguments
-            .push_buffer(data)
-            .push_buffer(total)
-            .push(elements);
+        let mut arguments = KernelArgs::with_capacity(3, 1);
+        arguments.push_buffer(data).push(total_ptr).push(elements);
         let launch = KernelLaunch::new(
             &self.normalize,
             stream,
@@ -392,6 +548,70 @@ mod tests {
                 "uniform mismatch at {index}: {value}"
             );
         }
+    }
+
+    #[test]
+    fn pooled_softmax_matches_oracle_across_sizes_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::new(&stream).unwrap();
+        let compiler = JitCompiler::new();
+        let softmax = F32Softmax::load(&context, &compiler).unwrap();
+
+        for &size in TEST_SIZES {
+            let host = host_values(size);
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, size).unwrap();
+            softmax
+                .softmax_pooled(&stream, &input, &output, &allocator)
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            let expected = reference_softmax(&host);
+            assert_eq!(actual.len(), expected.len());
+            for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+                let tolerance = 1.0e-6_f32.max((expected.abs() as f32) * 1.0e-5);
+                assert!(
+                    (actual - expected as f32).abs() <= tolerance,
+                    "pooled mismatch at {index} size {size}: {actual} != {expected}"
+                );
+            }
+        }
+
+        // Singleton through the pooled path must be exactly 1.0.
+        let input = DeviceBuffer::from_host(&context, &stream, &[7.5_f32]).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, 1).unwrap();
+        softmax
+            .softmax_pooled(&stream, &input, &output, &allocator)
+            .unwrap();
+        let value = output.to_vec(&stream).unwrap()[0];
+        assert!((value - 1.0).abs() <= 1.0e-7, "singleton: {value}");
+
+        // Undersized pooled workspace is rejected before any launch.
+        let small_allocator_input =
+            DeviceBuffer::from_host(&context, &stream, &host_values(64)).unwrap();
+        let small_output = DeviceBuffer::<f32>::new(&context, 64).unwrap();
+        let strict_allocator = StreamOrderedAllocator::new(&stream).unwrap();
+        let workspace = softmax
+            .reduction()
+            .pooled_workspace(&strict_allocator, 8)
+            .unwrap();
+        let max_scratch = strict_allocator.alloc::<f32>(1).unwrap();
+        let sum_scratch = strict_allocator.alloc::<f32>(1).unwrap();
+        let error = unsafe {
+            softmax.enqueue_softmax_pooled(
+                &stream,
+                &small_allocator_input,
+                &small_output,
+                &max_scratch,
+                &sum_scratch,
+                &workspace,
+            )
+        }
+        .unwrap_err();
+        assert!(error.to_string().contains("capacity is 8"), "{error}");
     }
 
     #[test]

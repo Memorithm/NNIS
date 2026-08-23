@@ -153,6 +153,22 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   exists, so tests assert the observable contract rather than one side of
   the implementation. fmt/clippy/check clean; 52 GPU tests passed.
 
+- Pooled-pipeline milestone (2026-08-23, branch `feature/pooled-softmax`,
+  PR workflow): `F32Softmax::softmax_pooled` runs the four-stage pipeline
+  with reduction workspace AND both scalars taken stream-ordered from a
+  `StreamOrderedAllocator`; `F32Reduction::pooled_workspace` +
+  pointer-form `enqueue_sum_ptr`/`enqueue_max_ptr` back it. Clean A/B at
+  three sizes (5 warmups, 50 iterations), all paths oracle-validated:
+  - 65,536 elements: sync-alloc 0.0528 ms vs pooled 0.0479 vs owned floor
+    0.0295 (pooled 1.10x over sync)
+  - 1,048,576: 0.3181 vs 0.1521 vs 0.1319 (pooled **2.09x** over sync)
+  - 16,777,216: 2.9602 vs 2.4959 vs 2.4756 (pooled 1.19x; within 0.8% of
+    the allocator-free floor)
+  Verdict per DESIGN_ALLOCATION_POOLING.md decision criteria: pooling
+  delivers a reproducible end-to-end win on the real multi-stage softmax
+  pipeline and lands within measurement noise of full pre-allocation.
+  fmt/clippy/check clean; 53 GPU tests passed.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
