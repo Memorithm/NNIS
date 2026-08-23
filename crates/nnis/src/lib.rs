@@ -61,6 +61,7 @@ pub struct Session {
     elementwise: F32Elementwise,
     reduction: F32Reduction,
     softmax: F32Softmax,
+    softmax_2d: F32Softmax2D,
 }
 
 impl Session {
@@ -82,6 +83,7 @@ impl Session {
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let reduction = F32Reduction::load(&context, &compiler)?;
         let softmax = F32Softmax::load(&context, &compiler)?;
+        let softmax_2d = F32Softmax2D::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -89,6 +91,7 @@ impl Session {
             elementwise,
             reduction,
             softmax,
+            softmax_2d,
         })
     }
 
@@ -114,6 +117,10 @@ impl Session {
 
     pub fn softmax(&self) -> &F32Softmax {
         &self.softmax
+    }
+
+    pub fn softmax_2d(&self) -> &F32Softmax2D {
+        &self.softmax_2d
     }
 }
 

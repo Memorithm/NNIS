@@ -264,6 +264,36 @@ impl F32Softmax2D {
         self.block_size
     }
 
+    /// Whether the fused single-kernel path can hold a row of `cols`
+    /// floats plus its reduction partials in dynamic shared memory.
+    pub fn fused_available(&self, cols: usize) -> bool {
+        let Ok(attributes) = self.fused.attributes() else {
+            return false;
+        };
+        self.fused_shared_memory(cols)
+            .map(|bytes| bytes <= attributes.max_dynamic_shared_memory_bytes as usize)
+            .unwrap_or(false)
+    }
+
+    /// Compute each row's stable softmax choosing the best available path
+    /// and wait once: the fused single kernel when the row fits dynamic
+    /// shared memory, otherwise the four-stage pipeline with freshly
+    /// allocated row-scalar scratch.
+    pub fn softmax_rows_dispatched(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<()> {
+        if self.fused_available(cols) {
+            return self.fused_softmax_rows(stream, input, output, rows, cols);
+        }
+        let workspace = self.workspace(stream.ctx(), rows)?;
+        self.softmax_rows(stream, input, output, rows, cols, &workspace)
+    }
+
     /// Allocate per-row scalar storage reusable up to `max_rows`.
     pub fn workspace(
         &self,
@@ -758,6 +788,44 @@ mod tests {
             .fused_softmax_rows(&stream, &input, &output, rows, cols)
             .unwrap_err();
         assert!(error.to_string().contains("shared-memory"), "{error}");
+    }
+
+    #[test]
+    fn dispatched_path_matches_oracle_and_selects_fused_when_possible() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let softmax = F32Softmax2D::load(&context, &compiler).unwrap();
+        assert!(softmax.fused_available(2_048));
+        // A row that cannot fit shared memory must still reduce correctly
+        // through the staged fallback.
+        assert!(!softmax.fused_available(20_000));
+        let stream = Stream::new(&context).unwrap();
+
+        for &(rows, cols, fused_expected) in &[
+            (5_usize, 2_048_usize, true),
+            (3_usize, 257_usize, true),
+            (2_usize, 20_000_usize, false),
+        ] {
+            let host = host_values(rows, cols);
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            let output = DeviceBuffer::<f32>::new(&context, rows * cols).unwrap();
+            softmax
+                .softmax_rows_dispatched(&stream, &input, &output, rows, cols)
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            let expected = reference_rows(&host, rows, cols);
+            for (index, (&actual, &expected)) in actual.iter().zip(&expected).enumerate() {
+                let tolerance = 1.0e-6_f32.max((expected.abs() as f32) * 1.0e-5);
+                assert!(
+                    (actual - expected as f32).abs() <= tolerance,
+                    "dispatched mismatch at {index} shape ({rows}, {cols}): {actual} != {expected}"
+                );
+            }
+            assert_eq!(fused_expected, softmax.fused_available(cols));
+        }
     }
 
     #[test]
