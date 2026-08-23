@@ -26,8 +26,8 @@ pub mod jit {
 pub mod kernels {
     pub use nnis_kernels::{
         F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
-        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32Softmax, F32Softmax2D,
-        F32Softmax2DWorkspace,
+        F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Softmax,
+        F32Softmax2D, F32Softmax2DWorkspace,
     };
 }
 
@@ -37,8 +37,8 @@ pub use jit::{
 };
 pub use kernels::{
     F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemv, F32LayerNorm,
-    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32Softmax, F32Softmax2D,
-    F32Softmax2DWorkspace,
+    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Softmax,
+    F32Softmax2D, F32Softmax2DWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -49,8 +49,8 @@ pub use runtime::{
 pub mod prelude {
     pub use crate::{
         CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise, F32Gemv,
-        F32Reduction, F32Softmax, F32Softmax2D, JitCompiler, KernelArgs, KernelLaunch,
-        LaunchConfig, Module, NnisError, Result, Session, Stream,
+        F32LayerNorm, F32Reduction, F32RmsNorm, F32Softmax, F32Softmax2D, JitCompiler, KernelArgs,
+        KernelLaunch, LaunchConfig, Module, NnisError, Result, Session, Stream,
     };
 }
 
@@ -66,6 +66,7 @@ pub struct Session {
     softmax_2d: F32Softmax2D,
     gemv: F32Gemv,
     layer_norm: F32LayerNorm,
+    rms_norm: F32RmsNorm,
 }
 
 impl Session {
@@ -90,6 +91,7 @@ impl Session {
         let softmax_2d = F32Softmax2D::load(&context, &compiler)?;
         let gemv = F32Gemv::load(&context, &compiler)?;
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
+        let rms_norm = F32RmsNorm::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
@@ -100,6 +102,7 @@ impl Session {
             softmax_2d,
             gemv,
             layer_norm,
+            rms_norm,
         })
     }
 
@@ -137,6 +140,10 @@ impl Session {
 
     pub fn layer_norm(&self) -> &F32LayerNorm {
         &self.layer_norm
+    }
+
+    pub fn rms_norm(&self) -> &F32RmsNorm {
+        &self.rms_norm
     }
 }
 
