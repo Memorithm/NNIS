@@ -5,8 +5,10 @@
 //! enqueue operations for callers that manage asynchronous buffer lifetimes.
 
 mod reduction;
+mod softmax;
 
 pub use reduction::{F32Reduction, F32ReductionWorkspace};
+pub use softmax::F32Softmax;
 
 use nnis_jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,

@@ -38,6 +38,38 @@ extern "C" __global__ void nnis_reduce_sum_f32(
         output[blockIdx.x] = partial[0];
     }
 }
+
+extern "C" __global__ void nnis_reduce_max_f32(
+    const float* input,
+    float* output,
+    unsigned long long elements
+) {
+    extern __shared__ float partial[];
+    const unsigned int lane = threadIdx.x;
+    const unsigned long long first =
+        ((unsigned long long)blockIdx.x * blockDim.x * 2) + lane;
+    const unsigned long long second = first + blockDim.x;
+
+    float value = __int_as_float(0xff800000);
+    if (first < elements) {
+        value = input[first];
+    }
+    if (second < elements) {
+        value = fmaxf(value, input[second]);
+    }
+    partial[lane] = value;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (lane < stride) {
+            partial[lane] = fmaxf(partial[lane], partial[lane + stride]);
+        }
+        __syncthreads();
+    }
+    if (lane == 0) {
+        output[blockIdx.x] = partial[0];
+    }
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
@@ -69,10 +101,14 @@ impl F32ReductionWorkspace {
     }
 }
 
-/// Context-bound, multi-pass `f32` sum reduction.
+/// Context-bound, multi-pass `f32` sum and max reductions.
+///
+/// Both operations share the same tree structure, so a workspace serves
+/// either one.
 #[derive(Debug)]
 pub struct F32Reduction {
     sum: Kernel,
+    max: Kernel,
     block_size: u32,
 }
 
@@ -100,11 +136,19 @@ impl F32Reduction {
             compiler.compile_cubin(REDUCTION_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let sum = module.get_function("nnis_reduce_sum_f32")?;
+        let max = module.get_function("nnis_reduce_max_f32")?;
         let attributes = sum.attributes()?;
+        let max_attributes = max.attributes()?;
         if block_size > attributes.max_threads_per_block {
             return Err(NnisError::invalid_input(format!(
                 "reduction block size {block_size} exceeds function limit {}",
                 attributes.max_threads_per_block
+            )));
+        }
+        if block_size > max_attributes.max_threads_per_block {
+            return Err(NnisError::invalid_input(format!(
+                "reduction block size {block_size} exceeds function limit {}",
+                max_attributes.max_threads_per_block
             )));
         }
         if shared_memory_bytes > attributes.max_dynamic_shared_memory_bytes {
@@ -113,7 +157,17 @@ impl F32Reduction {
                 attributes.max_dynamic_shared_memory_bytes
             )));
         }
-        Ok(Self { sum, block_size })
+        if shared_memory_bytes > max_attributes.max_dynamic_shared_memory_bytes {
+            return Err(NnisError::invalid_input(format!(
+                "reduction requires {shared_memory_bytes} shared-memory bytes; function limit is {}",
+                max_attributes.max_dynamic_shared_memory_bytes
+            )));
+        }
+        Ok(Self {
+            sum,
+            max,
+            block_size,
+        })
     }
 
     pub fn block_size(&self) -> u32 {
@@ -142,10 +196,7 @@ impl F32Reduction {
 
     /// Reduce an input and return its host scalar, waiting for completion.
     pub fn sum(&self, stream: &Stream, input: &DeviceBuffer<f32>) -> Result<f32> {
-        let workspace = self.workspace(input.ctx(), input.len())?;
-        let output = DeviceBuffer::<f32>::new(input.ctx(), 1)?;
-        self.sum_into(stream, input, &output, &workspace)?;
-        Ok(output.to_vec(stream)?[0])
+        self.sum_scalar(stream, input)
     }
 
     /// Reduce into a one-element device buffer and wait for completion.
@@ -158,20 +209,32 @@ impl F32Reduction {
     ) -> Result<()> {
         // SAFETY: all borrows remain live until synchronization below.
         let enqueue_result = unsafe { self.enqueue_sum(stream, input, output, workspace) };
-        let synchronize_result = stream.synchronize();
-        match enqueue_result {
-            Ok(()) => synchronize_result,
-            Err(error) => {
-                // Even a later-pass submission failure may follow successful
-                // asynchronous passes. Synchronization above retains every
-                // borrow through their completion before returning the cause.
-                let _ = synchronize_result;
-                Err(error)
-            }
-        }
+        Self::join(enqueue_result, stream.synchronize())
     }
 
-    /// Enqueue every reduction pass without synchronizing the stream.
+    /// Return the maximum element as a host scalar, waiting for completion.
+    /// An empty input yields `-infinity`, matching the kernel identity. `NaN`
+    /// inputs follow `fmaxf` semantics: non-NaN operands win.
+    pub fn max(&self, stream: &Stream, input: &DeviceBuffer<f32>) -> Result<f32> {
+        self.max_scalar(stream, input)
+    }
+
+    /// Reduce the maximum into a one-element device buffer and wait.
+    ///
+    /// An empty input leaves `output[0]` untouched.
+    pub fn max_into(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        workspace: &F32ReductionWorkspace,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe { self.enqueue_max(stream, input, output, workspace) };
+        Self::join(enqueue_result, stream.synchronize())
+    }
+
+    /// Enqueue every sum-reduction pass without synchronizing the stream.
     ///
     /// On return, `output[0]` is scheduled to receive the sum. For an empty
     /// input the scheduled result is `0.0`.
@@ -188,11 +251,47 @@ impl F32Reduction {
         output: &DeviceBuffer<f32>,
         workspace: &F32ReductionWorkspace,
     ) -> Result<()> {
+        // SAFETY: identical buffers and lifetime obligations as this method's
+        // documented contract; only the reduction operator differs.
+        unsafe { self.enqueue_tree(&self.sum, stream, input, output, workspace, TreeKind::Sum) }
+    }
+
+    /// Enqueue every max-reduction pass without synchronizing the stream.
+    ///
+    /// On return, `output[0]` is scheduled to receive the maximum. For an
+    /// empty input nothing is enqueued and `output[0]` is left untouched.
+    ///
+    /// # Safety
+    ///
+    /// Same obligations as [`F32Reduction::enqueue_sum`].
+    pub unsafe fn enqueue_max(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        workspace: &F32ReductionWorkspace,
+    ) -> Result<()> {
+        // SAFETY: identical buffers and lifetime obligations as `enqueue_sum`.
+        unsafe { self.enqueue_tree(&self.max, stream, input, output, workspace, TreeKind::Max) }
+    }
+
+    unsafe fn enqueue_tree(
+        &self,
+        kernel: &Kernel,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        workspace: &F32ReductionWorkspace,
+        kind: TreeKind,
+    ) -> Result<()> {
         self.validate_execution(stream, input, output, workspace)?;
         if input.is_empty() {
-            // SAFETY: the output and stream lifetime obligation is inherited by
-            // this method's contract.
-            return unsafe { output.zero_async(stream) };
+            if matches!(kind, TreeKind::Sum) {
+                // SAFETY: the output and stream lifetime obligation is
+                // inherited by this method's contract.
+                return unsafe { output.zero_async(stream) };
+            }
+            return Ok(());
         }
 
         let mut current = input;
@@ -210,7 +309,7 @@ impl F32Reduction {
             // SAFETY: buffers are distinct workspace/output allocations, all
             // passes are ordered on one stream, and caller owns the lifetime.
             unsafe {
-                self.enqueue_pass(stream, current, destination, current_elements)?;
+                self.enqueue_pass(kernel, stream, current, destination, current_elements)?;
             }
             if output_elements == 1 {
                 break;
@@ -261,8 +360,46 @@ impl F32Reduction {
         Ok(())
     }
 
+    /// Allocate scratch and scalar storage, run one sum reduction, and copy
+    /// the scalar back to the host.
+    fn sum_scalar(&self, stream: &Stream, input: &DeviceBuffer<f32>) -> Result<f32> {
+        let workspace = self.workspace(input.ctx(), input.len())?;
+        let output = DeviceBuffer::<f32>::new(input.ctx(), 1)?;
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe { self.enqueue_sum(stream, input, &output, &workspace) };
+        Self::join(enqueue_result, stream.synchronize())?;
+        Ok(output.to_vec(stream)?[0])
+    }
+
+    /// Allocate scratch and scalar storage, run one max reduction, and copy
+    /// the scalar back to the host.
+    fn max_scalar(&self, stream: &Stream, input: &DeviceBuffer<f32>) -> Result<f32> {
+        let workspace = self.workspace(input.ctx(), input.len())?;
+        let output = DeviceBuffer::<f32>::new(input.ctx(), 1)?;
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe { self.enqueue_max(stream, input, &output, &workspace) };
+        Self::join(enqueue_result, stream.synchronize())?;
+        Ok(output.to_vec(stream)?[0])
+    }
+
+    /// Synchronize after an enqueue result, always draining the stream so
+    /// submitted asynchronous work completes before any error is reported.
+    fn join(enqueue_result: Result<()>, synchronize_result: Result<()>) -> Result<()> {
+        match enqueue_result {
+            Ok(()) => synchronize_result,
+            Err(error) => {
+                // Even a later-pass submission failure may follow successful
+                // asynchronous passes. The synchronization above retains every
+                // borrow through their completion before returning the cause.
+                let _ = synchronize_result;
+                Err(error)
+            }
+        }
+    }
+
     unsafe fn enqueue_pass(
         &self,
+        kernel: &Kernel,
         stream: &Stream,
         input: &DeviceBuffer<f32>,
         output: &DeviceBuffer<f32>,
@@ -290,11 +427,19 @@ impl F32Reduction {
             .push_buffer(input)
             .push_buffer(output)
             .push(elements);
-        let launch = KernelLaunch::new(&self.sum, stream, config);
-        // SAFETY: argument order/widths match `nnis_reduce_sum_f32`; the
-        // enclosing operation owns the asynchronous lifetime obligation.
+        let launch = KernelLaunch::new(kernel, stream, config);
+        // SAFETY: argument order/widths match both reduction kernels, which
+        // share one signature; the enclosing operation owns the asynchronous
+        // lifetime obligation.
         unsafe { launch.launch(&mut arguments) }
     }
+}
+
+/// Reduction operator selector for the shared tree implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TreeKind {
+    Sum,
+    Max,
 }
 
 fn partial_count(elements: usize, block_size: u32) -> Result<usize> {
@@ -411,6 +556,63 @@ mod tests {
     }
 
     #[test]
+    fn max_matches_cpu_oracle_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let reduction = F32Reduction::load(&context, &compiler).unwrap();
+        let maximum = *TEST_SIZES.iter().max().unwrap();
+        let workspace = reduction.workspace(&context, maximum).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, 1).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &size in TEST_SIZES {
+            // The max tree never launches for an empty input and therefore
+            // leaves the destination untouched; that contract is asserted
+            // explicitly after this loop.
+            if size == 0 {
+                continue;
+            }
+            // Deterministic values with a wide dynamic range and an exact
+            // maximum placed at varying offsets.
+            let mut host: Vec<f32> = (0..size)
+                .map(|index| ((index % 61) as f32 - 30.0) * 0.5)
+                .collect();
+            if size > 0 {
+                let peak_index = (size * 13) % size;
+                host[peak_index] = 41.75;
+            }
+            let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
+            reduction
+                .max_into(&stream, &input, &output, &workspace)
+                .unwrap();
+            let actual = output.to_vec(&stream).unwrap()[0];
+            let expected = host.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            assert_eq!(
+                actual.to_bits(),
+                expected.to_bits(),
+                "exact max mismatch for {size} elements: {actual} != {expected}"
+            );
+            assert_eq!(reduction.max(&stream, &input).unwrap(), expected);
+        }
+
+        // Empty inputs leave the destination untouched for max.
+        let empty = DeviceBuffer::<f32>::new(&context, 0).unwrap();
+        let untouched = DeviceBuffer::from_host(&context, &stream, &[7.5_f32]).unwrap();
+        reduction
+            .max_into(&stream, &empty, &untouched, &workspace)
+            .unwrap();
+        assert_eq!(untouched.to_vec(&stream).unwrap()[0], 7.5);
+
+        // Negative-only inputs must not be clamped by any zero identity.
+        let negatives =
+            DeviceBuffer::from_host(&context, &stream, &[-4.5_f32, -1.25, -9.0]).unwrap();
+        assert_eq!(reduction.max(&stream, &negatives).unwrap(), -1.25);
+    }
+
+    #[test]
     fn reduction_rejects_invalid_shapes_and_workspace() {
         let Some(context) = gpu_context() else {
             eprintln!("skipped: no CUDA device");
@@ -432,6 +634,9 @@ mod tests {
         let wrong_output = DeviceBuffer::<f32>::new(&context, 2).unwrap();
         assert!(reduction
             .sum_into(&stream, &input, &wrong_output, &workspace)
+            .is_err());
+        assert!(reduction
+            .max_into(&stream, &input, &wrong_output, &workspace)
             .is_err());
     }
 }

@@ -26,7 +26,7 @@ pub mod jit {
 pub mod kernels {
     pub use nnis_kernels::{
         F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
-        F32ReductionWorkspace,
+        F32ReductionWorkspace, F32Softmax,
     };
 }
 
@@ -36,7 +36,7 @@ pub use jit::{
 };
 pub use kernels::{
     F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Reduction,
-    F32ReductionWorkspace,
+    F32ReductionWorkspace, F32Softmax,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -47,8 +47,8 @@ pub use runtime::{
 pub mod prelude {
     pub use crate::{
         CompileOptions, Context, Device, DeviceBuffer, DevicePod, Event, F32Elementwise,
-        F32Reduction, JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module, NnisError,
-        Result, Session, Stream,
+        F32Reduction, F32Softmax, JitCompiler, KernelArgs, KernelLaunch, LaunchConfig, Module,
+        NnisError, Result, Session, Stream,
     };
 }
 
@@ -60,6 +60,7 @@ pub struct Session {
     compiler: JitCompiler,
     elementwise: F32Elementwise,
     reduction: F32Reduction,
+    softmax: F32Softmax,
 }
 
 impl Session {
@@ -80,12 +81,14 @@ impl Session {
         let compiler = JitCompiler::new();
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let reduction = F32Reduction::load(&context, &compiler)?;
+        let softmax = F32Softmax::load(&context, &compiler)?;
         Ok(Self {
             context,
             stream,
             compiler,
             elementwise,
             reduction,
+            softmax,
         })
     }
 
@@ -107,6 +110,10 @@ impl Session {
 
     pub fn reduction(&self) -> &F32Reduction {
         &self.reduction
+    }
+
+    pub fn softmax(&self) -> &F32Softmax {
+        &self.softmax
     }
 }
 
@@ -141,5 +148,27 @@ mod tests {
             session.reduction().sum(session.stream(), &input).unwrap(),
             expected_sum
         );
+        let probabilities = DeviceBuffer::<f32>::new(session.context(), host.len()).unwrap();
+        session
+            .softmax()
+            .softmax(session.context(), session.stream(), &input, &probabilities)
+            .unwrap();
+        let actual = probabilities.to_vec(session.stream()).unwrap();
+        let maximum = host
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, |acc, value| acc.max(f64::from(value)));
+        let total: f64 = host
+            .iter()
+            .map(|&value| f64::from(value) - maximum)
+            .map(f64::exp)
+            .sum();
+        for (index, (&actual, &input)) in actual.iter().zip(&host).enumerate() {
+            let expected = ((f64::from(input) - maximum).exp() / total) as f32;
+            assert!(
+                (actual - expected).abs() <= 1.0e-5_f32.max(expected.abs() * 1.0e-5),
+                "softmax mismatch at {index}: {actual} != {expected}"
+            );
+        }
     }
 }

@@ -87,13 +87,25 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   `enqueue_sum`, exact ordered-tree bit-for-bit CPU oracle, forward-error-bound
   tolerance checks over 17 sizes (0..=1,000,003), invalid-shape/workspace
   rejection tests, CUDA-event benchmark example with pass count, traffic model,
-  and post-timing result validation. Workspace total: 28 tests passed with GPU
-  required.
+  and post-timing result validation.
+- `F32Reduction` extended with a second tree kernel `nnis_reduce_max_f32`
+  sharing one workspace: `max`, `max_into`, unsafe `enqueue_max`; fmaxf is
+  exact so tests assert bit-for-bit equality against a CPU max across all
+  boundary sizes; empty input leaves destination untouched (sum zeroes it).
+- Numerically stable `F32Softmax` shipped as a four-stage native async
+  pipeline on one stream with zero host roundtrips: device-side max ->
+  exp(input - max) -> device-side sum -> in-place normalize by the
+  device-resident total. Safe wrappers synchronize once; scalar intermediates
+  stay on device between stages. f64-oracle tests across sizes 0..=4,097,
+  singleton -> exactly 1.0, constant input -> uniform, invalid-shape and
+  undersized-workspace rejection, distinct-scratch validation; Session gained
+  a validated softmax path; CUDA-event benchmark example validates after
+  timing.
 
 ## Next task
-Numerically stable `f32` softmax building block that composes the reduction
-(max) and elementwise (affine/exp/scale) families; CPU oracle, boundary-size
-GPU tests, benchmark coverage.
+Clean full-size softmax benchmark at >=16 Mi elements recorded here; then
+evaluate row-batched (2-D) softmax for attention-style consumers (FLAT) or an
+allocation-pooling design note as the next optimization wave.
 
 ## Measured benchmarks (continued)
 - Clean reduction benchmark at `4a22f3c` (`git_dirty=false`), Thor CC 11.0,
@@ -148,6 +160,13 @@ Takeover run (2026-08-22):
   dirty-tree smoke run `NNIS_BENCH_ELEMENTS=1048576 NNIS_BENCH_WARMUPS=3
   NNIS_BENCH_ITERATIONS=10 cargo run --release -p nnis-bench --example
   reduction` (validated output; 3 passes; median 0.0342 ms).
+- Softmax milestone (2026-08-23): workspace fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 31 passed
+  (softmax oracle + rejection, max-reduction bit-exactness, Session softmax);
+  dirty-tree smoke `NNIS_BENCH_ELEMENTS=1048576 NNIS_BENCH_WARMUPS=3
+  NNIS_BENCH_ITERATIONS=10 cargo run --release -p nnis-bench --example
+  softmax`: median 0.132 ms, probability sum 0.99998, max element error
+  2.4e-11, validated.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
