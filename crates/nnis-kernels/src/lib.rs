@@ -16,6 +16,7 @@ mod reduction;
 mod rms_norm;
 mod rope;
 mod row_softmax;
+mod scatter;
 mod softmax;
 mod top_k;
 
@@ -31,6 +32,7 @@ pub use reduction::{F32Reduction, F32ReductionWorkspace};
 pub use rms_norm::F32RmsNorm;
 pub use rope::F32Rope;
 pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
+pub use scatter::{Bf16Scatter, F32Scatter};
 pub use softmax::F32Softmax;
 pub use top_k::{F32TopK, F32TopKWorkspace};
 
