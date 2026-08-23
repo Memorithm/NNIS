@@ -25,10 +25,11 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Attention,
-        F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv,
-        F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
-        F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
+        AttentionMask, Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
+        F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm,
+        F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
+        F32RmsNorm, F32Rope, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
+        F32TopKWorkspace,
     };
 }
 
@@ -37,10 +38,10 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Attention, F32Elementwise,
-    F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
-    F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
-    F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
+    AttentionMask, Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Attention,
+    F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv,
+    F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
+    F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
@@ -210,8 +211,9 @@ impl Session {
         kv_rows: usize,
         value_dim: usize,
         scale: f32,
+        mask: kernels::AttentionMask,
     ) -> Result<()> {
-        F32Attention::attention_composed(
+        self.attention.attention_composed(
             self.gemm(),
             self.elementwise(),
             self.softmax_2d(),
@@ -225,6 +227,7 @@ impl Session {
             kv_rows,
             value_dim,
             scale,
+            mask,
         )
     }
 }

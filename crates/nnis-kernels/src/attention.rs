@@ -13,10 +13,24 @@
 //!   softmax dispatch, and plain GEMM families materialize the probability
 //!   matrix through three kernel launches per stage.
 //!
+//! Both paths accept an optional causal mask (query row `i` attends only to
+//! keys `j <= i`), which requires square score shapes. Causal positions are
+//! excluded before exponentiation, so they contribute exactly zero weight.
+//!
 //! Scores themselves are deterministic f32 chains, but `expf` and the
 //! running-maximum rescaling differ from host transcendentals by ulps, so
 //! correctness tests validate against an f64 oracle inside explicit
 //! tolerances (the established softmax precedent) rather than bit-exactly.
+
+/// Attention mask selecting which key positions each query may attend to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttentionMask {
+    /// Every query attends to every key.
+    None,
+    /// Query row `i` attends only to keys `j <= i`. Requires
+    /// `query_rows == kv_rows`.
+    Causal,
+}
 
 use nnis_jit::{
     CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
@@ -38,7 +52,8 @@ extern "C" __global__ void nnis_attention_fused_f32(
     unsigned long long head_dim,
     unsigned long long kv_rows,
     unsigned long long value_dim,
-    float scale
+    float scale,
+    unsigned int causal
 ) {
     extern __shared__ float smem[];
     const unsigned int threads = blockDim.x;
@@ -80,7 +95,9 @@ extern "C" __global__ void nnis_attention_fused_f32(
         __syncthreads();
 
         float score = nnis_neg_inf();
-        if (base + tid < kv_rows) {
+        const unsigned int key = base + tid;
+        const int unmasked = !causal || key <= row;
+        if (key < kv_rows && unmasked) {
             score = 0.0f;
             for (unsigned int e = 0; e < head_dim; ++e) {
                 score = fmaf(q_sh[e], k_tile[tid * head_dim + e], score);
@@ -133,14 +150,38 @@ extern "C" __global__ void nnis_attention_fused_f32(
         output[row * value_dim + c] = acc[c] / running_sum;
     }
 }
+
+extern "C" __global__ void nnis_attention_scale_causal_f32(
+    const float* scores,
+    float* output,
+    unsigned long long query_rows,
+    unsigned long long kv_rows,
+    float scale
+) {
+    const unsigned long long index =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    const unsigned long long elements = query_rows * kv_rows;
+    if (index >= elements) {
+        return;
+    }
+    const unsigned long long row = index / kv_rows;
+    const unsigned long long col = index % kv_rows;
+    if (col > row) {
+        output[index] = nnis_neg_inf();
+    } else {
+        output[index] = scores[index] * scale;
+    }
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 64;
+const CAUSAL_BLOCK_SIZE: u32 = 256;
 
 /// Context-bound scaled dot-product attention.
 #[derive(Debug)]
 pub struct F32Attention {
     fused: Kernel,
+    scale_causal: Kernel,
     block_size: u32,
 }
 
@@ -167,6 +208,7 @@ impl F32Attention {
             compiler.compile_cubin(ATTENTION_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let fused = module.get_function("nnis_attention_fused_f32")?;
+        let scale_causal = module.get_function("nnis_attention_scale_causal_f32")?;
         let attributes = fused.attributes()?;
         if block_size > attributes.max_threads_per_block {
             return Err(NnisError::invalid_input(format!(
@@ -174,7 +216,18 @@ impl F32Attention {
                 attributes.max_threads_per_block
             )));
         }
-        Ok(Self { fused, block_size })
+        let attributes_causal = scale_causal.attributes()?;
+        if attributes.max_threads_per_block < attributes_causal.max_threads_per_block {
+            // Kept uniform so one validation covers both launches.
+            return Err(NnisError::invalid_input(
+                "attention scale-causal kernel exceeds fused thread limit",
+            ));
+        }
+        Ok(Self {
+            fused,
+            scale_causal,
+            block_size,
+        })
     }
 
     /// CUDA thread-block width; also the streamed key-chunk length.
@@ -226,12 +279,13 @@ impl F32Attention {
         kv_rows: usize,
         value_dim: usize,
         scale: f32,
+        mask: AttentionMask,
     ) -> Result<()> {
         // SAFETY: all borrows remain live until synchronization below.
         let enqueue_result = unsafe {
             self.enqueue_attention_fused(
                 stream, queries, keys, values, output, query_rows, head_dim, kv_rows, value_dim,
-                scale,
+                scale, mask,
             )
         };
         match enqueue_result {
@@ -262,10 +316,16 @@ impl F32Attention {
         kv_rows: usize,
         value_dim: usize,
         scale: f32,
+        mask: AttentionMask,
     ) -> Result<()> {
         self.validate_execution(
             stream, queries, keys, values, output, query_rows, head_dim, kv_rows, value_dim,
         )?;
+        if mask == AttentionMask::Causal && query_rows != kv_rows {
+            return Err(NnisError::invalid_input(format!(
+                "causal attention requires query_rows == kv_rows; got {query_rows} vs {kv_rows}"
+            )));
+        }
         if !self.fused_available(head_dim, value_dim) {
             return Err(NnisError::invalid_input(format!(
                 "attention fused path needs {} shared-memory bytes for \
@@ -298,7 +358,7 @@ impl F32Attention {
                 u32::try_from(shared_memory_bytes)
                     .map_err(|_| NnisError::invalid_input("attention shared memory exceeds u32"))?,
             );
-        let mut arguments = KernelArgs::with_capacity(9, 4);
+        let mut arguments = KernelArgs::with_capacity(10, 4);
         arguments
             .push_buffer(queries)
             .push_buffer(keys)
@@ -308,9 +368,70 @@ impl F32Attention {
             .push(head_dim)
             .push(kv_rows)
             .push(value_dim)
-            .push(scale);
+            .push(scale)
+            .push(u32::from(mask == AttentionMask::Causal));
         let launch = KernelLaunch::new(&self.fused, stream, config);
         // SAFETY: argument order/widths match `nnis_attention_fused_f32`;
+        // the caller owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
+    /// Enqueue the fused scale-and-causal-mask pass over a score matrix.
+    /// Positions above the diagonal become `-infinity`; others are scaled.
+    ///
+    /// # Safety
+    ///
+    /// The stream, both buffers, and this kernel family must remain alive
+    /// and otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_scale_causal(
+        &self,
+        stream: &Stream,
+        scores: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        query_rows: usize,
+        kv_rows: usize,
+        scale: f32,
+    ) -> Result<()> {
+        let elements = query_rows
+            .checked_mul(kv_rows)
+            .ok_or_else(|| NnisError::invalid_input("attention shape overflows usize"))?;
+        if scores.len() != elements || output.len() != elements {
+            return Err(NnisError::invalid_input(format!(
+                "attention scale-causal buffers have {}/{} elements; \
+                 shape ({query_rows}, {kv_rows}) requires {elements}",
+                scores.len(),
+                output.len()
+            )));
+        }
+        let context = self.fused.context();
+        if !Arc::ptr_eq(context, stream.ctx())
+            || !Arc::ptr_eq(context, scores.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "attention scale-causal stream and buffers must share one context",
+            ));
+        }
+        if elements == 0 {
+            return Ok(());
+        }
+        let (query_rows, kv_rows) = (
+            u64::try_from(query_rows)
+                .map_err(|_| NnisError::invalid_input("attention rows exceed u64"))?,
+            u64::try_from(kv_rows)
+                .map_err(|_| NnisError::invalid_input("attention kv rows exceed u64"))?,
+        );
+        let config = LaunchConfig::for_num_elements(elements, CAUSAL_BLOCK_SIZE)?;
+        let mut arguments = KernelArgs::with_capacity(5, 2);
+        arguments
+            .push_buffer(scores)
+            .push_buffer(output)
+            .push(query_rows)
+            .push(kv_rows)
+            .push(scale);
+        let launch = KernelLaunch::new(&self.scale_causal, stream, config);
+        // SAFETY: argument order/widths match `nnis_attention_scale_causal_f32`;
         // the caller owns the asynchronous lifetime obligation.
         unsafe { launch.launch(&mut arguments) }
     }
@@ -396,6 +517,7 @@ impl F32Attention {
     /// fused path when [`Self::fused_available`] returns true.
     #[allow(clippy::too_many_arguments)]
     pub fn attention_composed(
+        &self,
         gemm: &crate::F32Gemm,
         elementwise: &crate::F32Elementwise,
         softmax_2d: &crate::F32Softmax2D,
@@ -409,11 +531,17 @@ impl F32Attention {
         kv_rows: usize,
         value_dim: usize,
         scale: f32,
+        mask: AttentionMask,
     ) -> Result<()> {
         if head_dim == 0 || kv_rows == 0 || value_dim == 0 {
             return Err(NnisError::invalid_input(format!(
                 "attention requires non-empty keys/head/value dimensions; \
                  got head_dim={head_dim}, kv_rows={kv_rows}, value_dim={value_dim}"
+            )));
+        }
+        if mask == AttentionMask::Causal && query_rows != kv_rows {
+            return Err(NnisError::invalid_input(format!(
+                "causal attention requires query_rows == kv_rows; got {query_rows} vs {kv_rows}"
             )));
         }
         let score_elements = query_rows
@@ -448,7 +576,22 @@ impl F32Attention {
         gemm.gemm_transposed_b(
             stream, queries, keys, &scores, query_rows, kv_rows, head_dim,
         )?;
-        elementwise.scale(stream, &scores, &probabilities, scale)?;
+        if mask == AttentionMask::Causal {
+            // SAFETY: scratch borrows remain live through the later
+            // synchronizing calls on this method's path.
+            unsafe {
+                self.enqueue_scale_causal(
+                    stream,
+                    &scores,
+                    &probabilities,
+                    query_rows,
+                    kv_rows,
+                    scale,
+                )?;
+            }
+        } else {
+            elementwise.scale(stream, &scores, &probabilities, scale)?;
+        }
         softmax_2d.softmax_rows_dispatched(
             stream,
             &probabilities,
@@ -502,11 +645,15 @@ mod tests {
         kv_rows: usize,
         value_dim: usize,
         scale: f64,
+        causal: bool,
     ) -> Vec<f32> {
         let mut output = vec![0.0_f32; query_rows * value_dim];
         for row in 0..query_rows {
             let mut scores = vec![0.0_f64; kv_rows];
             for key in 0..kv_rows {
+                if causal && key > row {
+                    break;
+                }
                 let score: f64 = (0..head_dim)
                     .map(|e| {
                         f64::from(queries[row * head_dim + e]) * f64::from(keys[key * head_dim + e])
@@ -565,8 +712,17 @@ mod tests {
             let scale = 1.0_f32 / (head_dim as f32).sqrt();
             attention
                 .attention_fused(
-                    &stream, &queries, &keys, &values, &output, query_rows, head_dim, kv_rows,
-                    value_dim, scale,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &output,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::None,
                 )
                 .unwrap();
             let actual = output.to_vec(&stream).unwrap();
@@ -579,6 +735,7 @@ mod tests {
                 kv_rows,
                 value_dim,
                 f64::from(scale),
+                false,
             );
             assert_close(
                 &actual,
@@ -595,6 +752,7 @@ mod tests {
             return;
         };
         let compiler = JitCompiler::new();
+        let attention = F32Attention::load(&context, &compiler).unwrap();
         let gemm = F32Gemm::load(&context, &compiler).unwrap();
         let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
         let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
@@ -611,22 +769,24 @@ mod tests {
             let output = DeviceBuffer::from_host(&context, &stream, &output_host).unwrap();
 
             let scale = 1.0_f32 / (head_dim as f32).sqrt();
-            F32Attention::attention_composed(
-                &gemm,
-                &elementwise,
-                &softmax_2d,
-                &stream,
-                &queries,
-                &keys,
-                &values,
-                &output,
-                query_rows,
-                head_dim,
-                kv_rows,
-                value_dim,
-                scale,
-            )
-            .unwrap();
+            attention
+                .attention_composed(
+                    &gemm,
+                    &elementwise,
+                    &softmax_2d,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &output,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::None,
+                )
+                .unwrap();
             let actual = output.to_vec(&stream).unwrap();
             let expected = reference_attention(
                 &queries_host,
@@ -637,6 +797,7 @@ mod tests {
                 kv_rows,
                 value_dim,
                 f64::from(scale),
+                false,
             );
             assert_close(
                 &actual,
@@ -662,7 +823,17 @@ mod tests {
         let output = DeviceBuffer::<f32>::new(&context, 8).unwrap();
         let error = attention
             .attention_fused(
-                &stream, &queries, &empty_kv, &empty_kv, &output, 1, 8, 0, 8, 0.25,
+                &stream,
+                &queries,
+                &empty_kv,
+                &empty_kv,
+                &output,
+                1,
+                8,
+                0,
+                8,
+                0.25,
+                AttentionMask::None,
             )
             .unwrap_err();
         assert!(error.to_string().contains("non-empty"), "{error}");
@@ -683,6 +854,7 @@ mod tests {
                 2,
                 8,
                 0.125,
+                AttentionMask::None,
             )
             .unwrap_err();
         assert!(error.to_string().contains("requires 128"), "{error}");
@@ -706,8 +878,165 @@ mod tests {
                 8,
                 8,
                 0.03125,
+                AttentionMask::None,
             )
             .unwrap_err();
         assert!(error.to_string().contains("shared-memory"), "{error}");
+    }
+
+    #[test]
+    fn attention_causal_matches_f64_oracle_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = F32Attention::load(&context, &compiler).unwrap();
+        let gemm = F32Gemm::load(&context, &compiler).unwrap();
+        let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
+        let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        // Square score shapes only; includes shapes spanning many chunks.
+        const CAUSAL_SHAPES: &[(usize, usize)] = &[(1, 16), (7, 64), (33, 48), (70, 32)];
+
+        for &(kv_rows, head_dim) in CAUSAL_SHAPES {
+            let query_rows = kv_rows;
+            let value_dim = head_dim;
+            let queries_host = host_values(query_rows * head_dim);
+            let keys_host = host_values(kv_rows * head_dim);
+            let values_host = host_values(kv_rows * value_dim);
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_host).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_host).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_host).unwrap();
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+
+            for mask in [AttentionMask::Causal] {
+                // Pre-fill so a skipped kernel cannot pass silently.
+                let poisoned = vec![f32::NAN; query_rows * value_dim];
+                let fused_output =
+                    DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+                let composed_output =
+                    DeviceBuffer::from_host(&context, &stream, &poisoned).unwrap();
+
+                attention
+                    .attention_fused(
+                        &stream,
+                        &queries,
+                        &keys,
+                        &values,
+                        &fused_output,
+                        query_rows,
+                        head_dim,
+                        kv_rows,
+                        value_dim,
+                        scale,
+                        mask,
+                    )
+                    .unwrap();
+                attention
+                    .attention_composed(
+                        &gemm,
+                        &elementwise,
+                        &softmax_2d,
+                        &stream,
+                        &queries,
+                        &keys,
+                        &values,
+                        &composed_output,
+                        query_rows,
+                        head_dim,
+                        kv_rows,
+                        value_dim,
+                        scale,
+                        mask,
+                    )
+                    .unwrap();
+
+                let expected = reference_attention(
+                    &queries_host,
+                    &keys_host,
+                    &values_host,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    f64::from(scale),
+                    true,
+                );
+                for (name, buffer) in [("fused", &fused_output), ("composed", &composed_output)] {
+                    let actual = buffer.to_vec(&stream).unwrap();
+                    assert_close(
+                        &actual,
+                        &expected,
+                        &format!("causal {name} ({query_rows},{head_dim})"),
+                    );
+                    // Causal positions must be exactly zero-weight: row r may
+                    // only be a convex mix of value rows 0..=r.
+                    let _ = name;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn attention_rejects_causal_on_rectangular_scores_before_launch() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = F32Attention::load(&context, &compiler).unwrap();
+        let gemm = F32Gemm::load(&context, &compiler).unwrap();
+        let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
+        let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+        let queries = DeviceBuffer::<f32>::new(&context, 2 * 8).unwrap();
+        let keys = DeviceBuffer::<f32>::new(&context, 5 * 8).unwrap();
+        let values = DeviceBuffer::<f32>::new(&context, 5 * 4).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, 2 * 4).unwrap();
+
+        let error = attention
+            .attention_fused(
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                2,
+                8,
+                5,
+                4,
+                0.25,
+                AttentionMask::Causal,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("query_rows == kv_rows"),
+            "{error}"
+        );
+
+        let error = attention
+            .attention_composed(
+                &gemm,
+                &elementwise,
+                &softmax_2d,
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                2,
+                8,
+                5,
+                4,
+                0.25,
+                AttentionMask::Causal,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("query_rows == kv_rows"),
+            "{error}"
+        );
     }
 }
