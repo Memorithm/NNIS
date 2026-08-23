@@ -285,6 +285,52 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   Workflow note: PR #9 auto-merged before its docs commit landed, so that
   commit was cherry-picked onto this branch and lands through PR #10.
 
+- Transposed-B GEMM milestone (2026-08-23, branch `feature/gemm-nt`,
+  **PR #12 (merged)**): `gemm_transposed_b` computes `C = A * B^T` with `B`
+  stored row-major `(n x k)` - the `Q * K^T` score form without a
+  transposed copy. Same tile structure and explicit-FMA ascending-k chain;
+  oracle asserted bit-exact across the standard 8 shapes; `(n, k)` layout
+  validation and empty-dimension contracts match the plain GEMM.
+  fmt/clippy/check clean; workspace GPU suite green.
+
+- Attention milestone (2026-08-23, branch `feature/attention`, **PR #13**):
+  `F32Attention` ships scaled dot-product attention behind two paths:
+  - Fused single kernel `nnis_attention_fused_f32`: one block per query
+    row streams key/value chunks through dynamic shared memory with an
+    online running-max/sum softmax; the score matrix never exists in
+    global memory. NVRTC-safe bit-pattern `-inf` (no CUDA headers).
+    `fused_available(d, dv)` exposes the dynamic-shared budget check.
+  - Composed pipeline through existing families: gemm_transposed_b ->
+    elementwise scale -> dispatched row softmax -> gemm;
+    `Session::attention_composed` wires it from session kernels.
+  Correctness: expf/rescaling are not host-reproducible, so both paths are
+  validated against an f64 oracle inside explicit tolerances across five
+  shapes including multi-chunk and asymmetric heads (softmax precedent);
+  rejection tests cover empty kv_rows, short buffers, oversized heads.
+  Facade wired (`session.attention()`, `session.attention_composed()`).
+  fmt/clippy/check clean; workspace GPU suite green (76 tests).
+  Clean A/B at commit SHA `8752c1a` (`git_dirty=false`), Thor CC 11.0,
+  2048 query rows x head 64 vs 2048 kv x value 64, block 64, 20 warmups,
+  100 iterations, both outputs oracle-validated after timing (max err
+  ~7e-8 fused / ~9e-8 composed):
+  - Fused: 34.968191 ms median, stddev 1.609137 ms
+  - Composed: 2.672624 ms median, stddev 0.426706 ms
+  Verdict: COMPOSED is the default recommendation at practical shapes -
+  13x faster end-to-end. The fused path's ~33 KB shared footprint allows
+  only one block/SM at block=64, crushing occupancy; its retained value is
+  O(1) global-memory growth (no materialized score matrix) for long
+  sequences where sq x skv does not fit device memory. Recorded as an
+  honest negative result per project rules.
+
+- bf16-reduction flake ROOT-CAUSED and fixed in this wave: the intermittent
+  `bf16_sum_matches_ordered_cpu_oracle_on_gpu` failure always fired at size
+  0 under parallel test execution. `Bf16Reduction::sum` allocated an
+  uninitialized one-element output scalar while `enqueue_tree` no-ops on
+  empty input, so the returned "sum" was recycled device memory that
+  usually happened to be zero. Fixed by returning host-side `0.0`
+  immediately for empty inputs, mirroring `max`'s early `-inf` return
+  (`F32Reduction` already memset its scalar in the same situation).
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -292,13 +338,14 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete. GEMM (PRs #9/#10) extends the kernel set
-toward inference building blocks. Remaining candidates in priority order:
-1. Attention-shaped fused primitive (e.g., scaled dot-product attention for
-   small head dimensions) composing existing families.
-2. bf16 GEMM throughput work only if a downstream project needs it: the tile
-   sweep below shows the current tiling is issue/compute-bound, so gains
-   require vectorized loads/double buffering, not parameter tuning.
+All planned waves are complete. Attention (PR #13) is the newest family.
+Remaining candidates in priority order:
+1. Fused-attention occupancy work ONLY if long-sequence memory footprint
+   becomes a real requirement: the A/B below shows the current one-block-
+   per-row design is 13x slower than composed at practical shapes; levers
+   are smaller blocks, query-tile blocks, and warp-level reductions.
+2. bf16 attention variants once a downstream project pins numeric policy
+   for attention specifically.
 
 ## GEMM tile-size sweep (2026-08-23)
 `NNIS_BENCH_TILE` shipped for both GEMM benchmarks; clean forward/reverse
