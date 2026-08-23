@@ -220,8 +220,9 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   input bandwidth (2 B/elem), relative error 0.0 vs widened host sum.
   fmt/clippy clean; 62 GPU tests passed on Thor.
 
-- Top-k milestone (2026-08-23, branch `feature/top-k`, stacked on
-  `feature/bf16-reductions`): deterministic iterative selection - each of k
+- Top-k milestone (2026-08-23, branch `feature/top-k`, **PR #8** opened
+  directly against `main` after bf16-reductions landed as **PR #7
+  (merged)**): deterministic iterative selection - each of k
   rounds runs a multi-pass tree argmax (comparator: larger value wins,
   ties break toward the lower index at every level) over a private scratch
   copy, writes the pair to caller outputs, then a one-thread kernel masks
