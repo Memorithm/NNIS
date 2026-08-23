@@ -108,6 +108,13 @@ evaluate row-batched (2-D) softmax for attention-style consumers (FLAT) or an
 allocation-pooling design note as the next optimization wave.
 
 ## Measured benchmarks (continued)
+- Clean softmax benchmark at `0459ee4` (`git_dirty=false`), Thor CC 11.0,
+  16,777,216 f32 elements, block 256, four-stage pipeline, 20 warmups,
+  100 iterations: 2.462560 ms median, 2.434816 min, 2.541634 p95,
+  2.557857 p99, stddev 0.033968 ms; 218.227 GB/s derived traffic.
+  Post-timing validation: max element error 2.21e-12 against f64 oracle;
+  f32 probability-sum 0.9993 (expected f32 accumulation drift over 16.7M
+  elements). The pipeline is bandwidth-bound like elementwise scale.
 - Clean reduction benchmark at `4a22f3c` (`git_dirty=false`), Thor CC 11.0,
   16,777,216 f32 elements, block 256, 20 warmups, 100 iterations: 3 passes;
   0.477168 ms median, 0.465536 min, 0.541933 p95, 0.570264 p99, 141.190 GB/s
