@@ -126,13 +126,25 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   scratch otherwise; tested fused-selected, narrow, and oversized-row paths.
   `Session` now loads and exposes `softmax_2d`. Workspace total: 36 GPU tests.
 
+- `F32Gemv` shipped: `y = A*x` for row-major matrices, one block per row
+  with strided explicit-FMA accumulation and shared-memory tree reduction.
+  The CPU oracle replays the identical evaluation order via `mul_add`, so
+  GPU results are bit-exact regardless of compiler FMA contraction; an
+  independent f64 sum cross-checks every row. Ten boundary shapes,
+  invalid-shape rejection, facade/Session integration (`session.gemv()`),
+  and a validated event-timed benchmark example.
+
 ## Next task
-Allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`
-(stream-ordered `cuMemAllocFromPoolAsync` behind an opt-in
-`StreamOrderedAllocator`), starting with pooled flat-softmax scratch and an
-end-to-end A/B through the benchmark harness.
+LayerNorm building block (per-row mean/variance reductions reusing the tree
+pattern, fused normalize stage) following the F32Softmax2D template, or the
+allocation-pooling implementation per `docs/DESIGN_ALLOCATION_POOLING.md`.
 
 ## Measured benchmarks (continued)
+- Clean GEMV benchmark at `3e2893f` (`git_dirty=false`), Thor CC 11.0,
+  4096x4096 f32 matrix, block 256, 20 warmups, 100 iterations:
+  0.377824 ms median, 0.375520 min, stddev 0.009716 ms; 177.706 GB/s derived;
+  max absolute error 0.0 against the f64 reference on this data distribution
+  (the ordered oracle additionally matched bit-for-bit in tests).
 - Pinned vs pageable 64 MiB f32 transfers, clean tree, Thor CC 11.0,
   20 warmups, 100 iterations (`nnis-bench` example `transfers`, event-timed,
   both paths data-validated): H2D pinned 0.627344 ms vs pageable 0.711184 ms
@@ -240,6 +252,9 @@ Takeover run (2026-08-22):
   (stream-ordered pools, safety rationale, decision criteria); new event-timed
   `transfers` benchmark example measured pinned vs pageable. fmt/clippy/check
   clean, 36 GPU tests passed, all committed and pushed.
+- GEMV milestone (2026-08-23): fmt/clippy/check clean;
+  `NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets` = 38 passed;
+  committed `3e2893f`, pushed to origin main with clean benchmark record.
 - Clean `50e6d96` full-size block sweeps ran 20 warmups + 100 measurements per
   width in forward and reverse order; all 1,000 measured kernel outputs were
   validated. The command was `NNIS_BENCH_ELEMENTS=16777216
