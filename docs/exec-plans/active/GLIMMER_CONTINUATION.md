@@ -339,9 +339,23 @@ no longer allowed for code changes.
 
 ## Next task
 Chained implementation waves continue while candidates remain:
-1. Scalar tree argmax (greedy sampling) with top-k tie semantics.
-2. Embedding gather (f32 + bf16 tables) for token-id lookup.
-3. bf16 attention variants once a downstream project pins numeric policy.
+1. Embedding gather (f32 + bf16 tables) for token-id lookup.
+2. bf16 attention variants once a downstream project pins numeric policy.
+3. Dedicated argmax benchmark only if a sampling-heavy consumer asks.
+
+- Argmax milestone (2026-08-23, branch `feature/argmax`, **PR #17**):
+  `F32Reduction::argmax` / `argmax_into` + `F32ArgmaxWorkspace` - multi-pass
+  (value, index) tree reduction over two new kernels (first pass reads the
+  plain f32 input; later passes read pair arrays). Comparator matches
+  top-k exactly: larger value wins, ties break toward the lower index at
+  every level; all-tie inputs must select index zero. Empty input is
+  rejected (operation undefined); NaN outside the contract like top-k.
+  CPU oracle replays the identical two-per-lane + stride-halving order and
+  is asserted BIT-EXACT on value and exact on index across nine sizes up
+  to 4097 with duplicated values; winner cross-checked bit-for-bit against
+  `max()`. Shared-memory footprint is 12 bytes per lane (f32 + u64) and is
+  validated at load. fmt/clippy/check clean; workspace GPU suite green
+  (85 tests).
 
 - bf16 GEMM-NT milestone (2026-08-23, branch `feature/bf16-gemm-nt`,
   **PR #16**): `gemm_transposed_b` added to `Bf16Gemm` mirroring the f32
