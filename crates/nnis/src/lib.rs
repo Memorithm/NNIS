@@ -25,7 +25,7 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
+        Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
         F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope,
         F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
@@ -37,7 +37,7 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    Bf16Elementwise, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
+    Bf16Elementwise, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace, F32Elementwise,
     F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gemm, F32Gemv, F32LayerNorm,
     F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Softmax,
     F32Softmax2D, F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
@@ -71,6 +71,7 @@ pub struct Session {
     layer_norm: F32LayerNorm,
     rms_norm: F32RmsNorm,
     bf16_elementwise: Bf16Elementwise,
+    bf16_gemm: Bf16Gemm,
     bf16_reduction: Bf16Reduction,
     rope: F32Rope,
     top_k: F32TopK,
@@ -101,6 +102,7 @@ impl Session {
         let layer_norm = F32LayerNorm::load(&context, &compiler)?;
         let rms_norm = F32RmsNorm::load(&context, &compiler)?;
         let bf16_elementwise = Bf16Elementwise::load(&context, &compiler)?;
+        let bf16_gemm = Bf16Gemm::load(&context, &compiler)?;
         let bf16_reduction = Bf16Reduction::load(&context, &compiler)?;
         let rope = F32Rope::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
@@ -117,6 +119,7 @@ impl Session {
             layer_norm,
             rms_norm,
             bf16_elementwise,
+            bf16_gemm,
             bf16_reduction,
             rope,
             top_k,
@@ -169,6 +172,10 @@ impl Session {
 
     pub fn bf16_elementwise(&self) -> &Bf16Elementwise {
         &self.bf16_elementwise
+    }
+
+    pub fn bf16_gemm(&self) -> &Bf16Gemm {
+        &self.bf16_gemm
     }
 
     pub fn bf16_reduction(&self) -> &Bf16Reduction {

@@ -238,6 +238,53 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   55.592 GB/s derived (traffic = 4*(k+1)*n read + 8k written; 33 full
   scans). fmt/clippy clean; 65 GPU tests passed on Thor.
 
+- GEMM milestone (2026-08-23, branch `feature/gemm`, **PR #9**):
+  `F32Gemm` ships `C = A * B` for row-major f32 matrices as a tiled
+  shared-memory kernel - one block computes one `tile_side x tile_side`
+  output tile (default 16; any non-zero power of two whose square fits the
+  function block limit), tiles staged cooperatively in dynamic shared
+  memory with boundary guards for non-multiple sizes, gridDim.y column
+  blocks validated against CUDA's 65535 limit. Every output element is one
+  explicit-FMA chain over k in ascending order, so the CPU oracle replays
+  the identical order via `mul_add` and results are asserted BIT-EXACT
+  across 8 shapes (1x1x1 .. 128x96x129) plus an independent f64 tolerance
+  cross-check. Empty inner dimension zeroes the output; zero rows/columns
+  write nothing; rejection tests cover short operands, wrong-size outputs,
+  and invalid tiles (0, 24, 64). Facade wired (`session.gemm()`); event-
+  timed bench example validates after timing. fmt/clippy/check clean;
+  **68 GPU tests passed on Thor** (65 baseline + 3 new). Clean benchmark at
+  commit-time SHA `fbd5de5` (`git_dirty=false`), 2048^3, tile 16:
+  median 23.009296 ms, min 22.982271 ms, stddev 0.019898 ms;
+  746.6 GFLOP/s derived (2*M*N*K); max absolute error 0.0 vs the f64
+  oracle on this data distribution, post-timing validation passed.
+  Observability note: the pre-existing `bf16_sum` oracle test flaked once
+  under parallel execution during development; it passed in isolation and
+  in four subsequent full-suite runs - unchanged here, no action taken.
+
+- bf16 GEMM milestone (2026-08-23, branch `feature/bf16-gemm`, **PR #10**,
+  stacked on merged #9): `Bf16Gemm` applies the fixed numeric policy -
+  bf16 storage, f32 compute - to the tiled matrix multiply: packed-bf16
+  operands widen via pure bit shifts inside the shared-memory tiles,
+  accumulate in explicit-FMA chains over ascending k, and narrow once at
+  the final store with the same RNE bit-math used by the elementwise
+  family. CPU oracle replays widen -> FMA chain -> narrow exactly and is
+  asserted BIT-EXACT across 8 shapes up to 128x96x129; output pre-filled
+  with 0xFFFF so a skipped kernel cannot pass silently. Empty inner
+  dimension zeroes the output; rejection tests mirror F32Gemm plus invalid
+  tiles. Facade wired (`session.bf16_gemm()`); event-timed bench example
+  validates against an f64 widened-input oracle after timing.
+  fmt/clippy/check clean; **71 GPU tests passed on Thor** (68 + 3 new).
+  Clean benchmark at commit SHA `d33c3b5` (`git_dirty=false`), 2048^3:
+  median 22.999727 ms, min 22.991713 ms, stddev 0.004492 ms;
+  max absolute error 0.5 vs f64 over widened inputs (bf16 output
+  quantization), validated. Measured observation: identical median to the
+  f32 kernel despite half the operand traffic - this simple one-FMA-chain
+  tiling is issue/compute-bound on Thor, so narrower inputs alone do not
+  speed it up; vectorized loads/double buffering or larger tiles are the
+  candidate levers if GEMM throughput ever becomes a priority.
+  Workflow note: PR #9 auto-merged before its docs commit landed, so that
+  commit was cherry-picked onto this branch and lands through PR #10.
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -245,12 +292,14 @@ the full validation loop passes on the branch. Direct pushes to `main` are
 no longer allowed for code changes.
 
 ## Next task
-All planned waves are complete. Remaining candidates in priority order:
-1. Cross-stream pooled-buffer handoff via explicit event record/wait
-   (`share_with`) per step 3 of DESIGN_ALLOCATION_POOLING.md.
-2. Wire `StreamOrderedAllocator` into a real pipeline (flat softmax scratch)
-   behind an API that keeps today's safe defaults untouched.
-3. bf16/f16 elementwise + reduction kernels once a numeric policy is chosen.
+All planned waves are complete. GEMM (PR #9) extends the kernel set toward
+inference building blocks. Remaining candidates in priority order:
+1. bf16-storage/f32-compute GEMM following the established numeric policy
+   once the f32 GEMM lands.
+2. Attention-shaped fused primitive (e.g., scaled dot-product attention for
+   small head dimensions) composing existing families.
+3. Occupancy/tile-size sweep for `F32Gemm` via the block_size_sweep
+   pattern before considering deeper tiling work.
 
 ## Measured benchmarks (continued)
 - Clean pooling A/B at `4a51645` (`git_dirty=false`), Thor CC 11.0,

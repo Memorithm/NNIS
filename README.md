@@ -203,9 +203,11 @@ default; occupancy is useful launch guidance, not a substitute for measurement.
 ## Current scope
 
 Implemented standard kernels are `f32` vector addition, scaling, fused affine
-transformation, multi-pass sum/max tree reductions, stable flat softmax, and
+transformation, multi-pass sum/max tree reductions, stable flat softmax,
 stable row-batched softmax with a fused shared-memory kernel behind automatic
-dispatch. Near-term extension points include safe owned abstractions for
+dispatch, RMS/Layer normalization, matrix-vector products, tiled
+matrix-matrix products, rotary position embeddings, and deterministic top-k.
+Near-term extension points include safe owned abstractions for
 longer asynchronous pipelines and allocation pooling (see the
 [design note](docs/DESIGN_ALLOCATION_POOLING.md)). NNIS deliberately does not
 depend on PyTorch, TensorFlow, Candle, Burn, wgpu, or downstream projects.
