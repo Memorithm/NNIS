@@ -118,6 +118,13 @@ fused single-kernel row softmax for narrow rows to cut two full-matrix
 passes, or (b) allocation pooling design note deferred from Wave 7.
 
 ## Measured benchmarks (continued)
+- Clean row-softmax benchmark at `ab0da37` (`git_dirty=false`), Thor CC 11.0,
+  8192x2048 f32 (16,777,216 elements), block 256, four-stage pipeline,
+  20 warmups, 100 iterations: 2.507344 ms median, 2.485664 min, 2.587187 p95,
+  stddev 0.035823 ms; 160.590 GB/s derived; max element error 4.09e-8,
+  validated. Observation: slower per byte than flat softmax (218 GB/s)
+  because the staged pipeline moves six full-matrix streams; motivates the
+  fused shared-memory row kernel (one read + one write).
 - Clean softmax benchmark at `0459ee4` (`git_dirty=false`), Thor CC 11.0,
   16,777,216 f32 elements, block 256, four-stage pipeline, 20 warmups,
   100 iterations: 2.462560 ms median, 2.434816 min, 2.541634 p95,
