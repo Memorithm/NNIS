@@ -366,6 +366,24 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   latency at these shapes; fidelity is fully preserved (bit-identical to
   f32-on-widened-inputs). Honest negative on speed, recorded per rules.
 
+- Multi-head batched attention milestone (2026-08-23, branch
+  `feature/multihead-attention`, PR workflow): `attention_fused_multihead`
+  added to BOTH `F32Attention` and `Bf16Attention` - one launch covers a
+  packed `[heads][rows][dim]` layout (grid = heads x query_rows, each
+  block decodes its (head, row) pair and offsets base pointers; heads
+  passed as u32, per-head dims as u64). Per-head trajectory identical to
+  the single-head kernels, so tests assert BIT-EXACT equality between the
+  batched output and looping single-head calls per head across four
+  shapes up to 4 heads (distinct per-head seeds catch cross-head mixing),
+  plus causal batched-vs-per-head bit-exactness on square shapes and
+  rejections: zero heads ("at least one head"), short packed buffers
+  ("<H> heads" in message), rectangular causal, oversized heads.
+  No dedicated benchmark: per-head arithmetic is unchanged (bit-exact by
+  construction) so throughput matches H single-head launches minus host
+  launch overhead; the fused occupancy verdict stands unchanged. Facade
+  needs no change (family methods exposed via session accessors).
+  fmt/clippy/check clean; **99 GPU tests passed on Thor** (93 + 6 new).
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -377,8 +395,9 @@ Chained implementation waves continue while candidates remain:
 1. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
    bandwidth-bound patterns already characterized by siblings.
 2. Candidate follow-ups if downstream demand appears: bf16 score
-   materialization variant (quantized-logit policy), multi-head batched
-   attention wrapper, vectorized GEMM loads (see PR #10 observation).- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+   materialization variant (quantized-logit policy), vectorized GEMM loads
+   (see PR #10 observation). Multi-head batched fused attention shipped in
+   the wave below.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
   README current-scope list now covers every family through scatter;
   ARCHITECTURE gained Attention (fused/composed + causal contract + honest
   A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics
