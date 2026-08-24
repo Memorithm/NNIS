@@ -29,7 +29,9 @@
 //! family evaluated on the same widened inputs BIT-FOR-BIT after one host
 //! round-to-nearest-even narrowing; tests assert both properties.
 
-use crate::{AttentionMask, Bf16Elementwise, F32Attention, F32Elementwise, F32Gemm, F32Softmax2D};
+use crate::{
+    AttentionMask, Bf16Elementwise, Bf16Gemm, F32Attention, F32Elementwise, F32Gemm, F32Softmax2D,
+};
 use nnis_jit::{
     CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
 };
@@ -748,6 +750,104 @@ impl Bf16Attention {
         Ok(())
     }
 
+    /// Composed bf16 attention with fully quantized intermediates and wait
+    /// for completion - the opt-in opposite of [`Self::attention_composed`].
+    ///
+    /// Policy: scores are materialized as bf16 by
+    /// [`Bf16Gemm::gemm_transposed_b`] (f32 accumulate, one RNE narrow),
+    /// widened for the f32 scale/mask/softmax stages in place, narrowed
+    /// back to bf16, and multiplied against packed-bf16 values by
+    /// [`Bf16Gemm::gemm`]. Both the logits and the probabilities therefore
+    /// carry bf16 rounding BEFORE exponentiation and accumulation; expect
+    /// visibly larger error than the default composed path. The score
+    /// scratch also shrinks from two f32 buffers to one bf16 + one f32
+    /// buffer, and the materialized probability map is inspectable at
+    /// packed-bf16 width.
+    #[allow(clippy::too_many_arguments)]
+    pub fn attention_composed_quantized(
+        &self,
+        conversions: &Bf16Elementwise,
+        attention: &F32Attention,
+        bf16_gemm: &Bf16Gemm,
+        elementwise: &F32Elementwise,
+        softmax_2d: &F32Softmax2D,
+        stream: &Stream,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: AttentionMask,
+    ) -> Result<()> {
+        self.validate_execution(
+            stream, queries, keys, values, output, query_rows, head_dim, kv_rows, value_dim,
+        )?;
+        if mask == AttentionMask::Causal && query_rows != kv_rows {
+            return Err(NnisError::invalid_input(format!(
+                "causal attention requires query_rows == kv_rows; got {query_rows} vs {kv_rows}"
+            )));
+        }
+        if query_rows == 0 {
+            return Ok(());
+        }
+        let context = self.fused.context();
+        let score_elements = query_rows
+            .checked_mul(kv_rows)
+            .ok_or_else(|| NnisError::invalid_input("bf16 attention shape overflows usize"))?;
+        // Reused twice: bf16 logits first, then the narrowed probabilities.
+        let packed_scores = DeviceBuffer::<u16>::new(context, score_elements)?;
+        let wide_probs = DeviceBuffer::<f32>::new(context, score_elements)?;
+
+        bf16_gemm.gemm_transposed_b(
+            stream,
+            queries,
+            keys,
+            &packed_scores,
+            query_rows,
+            kv_rows,
+            head_dim,
+        )?;
+        conversions.widen(stream, &packed_scores, &wide_probs)?;
+        if mask == AttentionMask::Causal {
+            // SAFETY: both borrows remain live through the synchronizing
+            // call below; the kernel writes each index from its own read.
+            unsafe {
+                attention.enqueue_scale_causal(
+                    stream,
+                    &wide_probs,
+                    &wide_probs,
+                    query_rows,
+                    kv_rows,
+                    scale,
+                )?;
+            }
+            stream.synchronize()?;
+        } else {
+            elementwise.scale(stream, &wide_probs, &wide_probs, scale)?;
+        }
+        softmax_2d.softmax_rows_dispatched(
+            stream,
+            &wide_probs,
+            &wide_probs,
+            query_rows,
+            kv_rows,
+        )?;
+        conversions.narrow(stream, &wide_probs, &packed_scores)?;
+        bf16_gemm.gemm(
+            stream,
+            &packed_scores,
+            values,
+            output,
+            query_rows,
+            value_dim,
+            kv_rows,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn validate_multihead_execution(
         &self,
@@ -1402,6 +1502,272 @@ mod tests {
             error.to_string().contains("query_rows == kv_rows"),
             "{error}"
         );
+    }
+
+    /// Replays the fully quantized policy exactly: bit-exact bf16 GEMM-NT
+    /// logit chain, f64 stable softmax over the widened bf16 logits, f64
+    /// probability/value product over widened bf16 values, one final RNE
+    /// narrowing.
+    #[allow(clippy::too_many_arguments)]
+    fn quantized_reference(
+        queries_bits: &[u16],
+        keys_bits: &[u16],
+        values_bits: &[u16],
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f64,
+        causal: bool,
+    ) -> Vec<u16> {
+        let mut output = vec![0_u16; query_rows * value_dim];
+        for row in 0..query_rows {
+            let mut scores = vec![0.0_f64; kv_rows];
+            for key in 0..kv_rows {
+                if causal && key > row {
+                    break;
+                }
+                let logit = (0..head_dim).fold(0.0_f32, |value, depth| {
+                    bf16_bits_to_f32(queries_bits[row * head_dim + depth])
+                        .mul_add(bf16_bits_to_f32(keys_bits[key * head_dim + depth]), value)
+                });
+                scores[key] = f64::from(bf16_bits_to_f32(f32_to_bf16_rne(logit))) * scale;
+            }
+            // Masked positions must contribute exactly zero weight, like the
+            // kernel's pre-exponentiation -infinity exclusion.
+            if causal && row + 1 < kv_rows {
+                for score in scores[row + 1..].iter_mut() {
+                    *score = f64::NEG_INFINITY;
+                }
+            }
+            let max_score = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let weights: Vec<f64> = scores.iter().map(|&s| (s - max_score).exp()).collect();
+            let total: f64 = weights.iter().sum();
+            // The device narrows its normalized f32 probabilities to bf16
+            // before the final GEMM; replay that quantization exactly.
+            let packed_weights: Vec<f64> = weights
+                .iter()
+                .map(|&weight| {
+                    f64::from(bf16_bits_to_f32(f32_to_bf16_rne((weight / total) as f32)))
+                })
+                .collect();
+            for col in 0..value_dim {
+                let value: f64 = (0..kv_rows)
+                    .map(|key| {
+                        packed_weights[key]
+                            * f64::from(bf16_bits_to_f32(values_bits[key * value_dim + col]))
+                    })
+                    .sum();
+                output[row * value_dim + col] = f32_to_bf16_rne(value as f32);
+            }
+        }
+        output
+    }
+
+    #[test]
+    fn bf16_attention_composed_quantized_matches_quantized_oracle_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = Bf16Attention::load(&context, &compiler).unwrap();
+        let conversions = Bf16Elementwise::load(&context, &compiler).unwrap();
+        let f32_attention = F32Attention::load(&context, &compiler).unwrap();
+        let bf16_gemm = crate::Bf16Gemm::load(&context, &compiler).unwrap();
+        let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
+        let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &(query_rows, head_dim, kv_rows, value_dim) in SHAPES {
+            let queries_bits = to_bits(&host_values(query_rows * head_dim));
+            let keys_bits = to_bits(&host_values(kv_rows * head_dim));
+            let values_bits = to_bits(&host_values(kv_rows * value_dim));
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_bits).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_bits).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_bits).unwrap();
+            let poisoned = vec![0xFFFF_u16; query_rows * value_dim];
+            let output = DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+            attention
+                .attention_composed_quantized(
+                    &conversions,
+                    &f32_attention,
+                    &bf16_gemm,
+                    &elementwise,
+                    &softmax_2d,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &output,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::None,
+                )
+                .unwrap();
+            let actual_bits = output.to_vec(&stream).unwrap();
+            let expected_bits = quantized_reference(
+                &queries_bits,
+                &keys_bits,
+                &values_bits,
+                query_rows,
+                head_dim,
+                kv_rows,
+                value_dim,
+                f64::from(scale),
+                false,
+            );
+            let mut max_difference = 0.0_f64;
+            for index in 0..actual_bits.len() {
+                let actual = f64::from(bf16_bits_to_f32(actual_bits[index]));
+                let oracle = f64::from(bf16_bits_to_f32(expected_bits[index]));
+                let difference = (actual - oracle).abs();
+                max_difference = max_difference.max(difference);
+                let tolerance = oracle_tolerance(oracle);
+                assert!(
+                    difference <= tolerance,
+                    "quantized ({query_rows},{head_dim},{kv_rows},{value_dim}) mismatch at \
+                     {index}: {actual} vs {oracle}, tolerance {tolerance}"
+                );
+            }
+            eprintln!(
+                "quantized ({query_rows},{head_dim},{kv_rows},{value_dim}): \
+                 max element error {max_difference:.3e} vs quantized f64 oracle"
+            );
+        }
+    }
+
+    #[test]
+    fn bf16_attention_composed_quantized_causal_and_rejections() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = Bf16Attention::load(&context, &compiler).unwrap();
+        let conversions = Bf16Elementwise::load(&context, &compiler).unwrap();
+        let f32_attention = F32Attention::load(&context, &compiler).unwrap();
+        let bf16_gemm = crate::Bf16Gemm::load(&context, &compiler).unwrap();
+        let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
+        let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        const CAUSAL_SHAPES: &[(usize, usize)] = &[(7, 64), (33, 48)];
+        for &(rows, head_dim) in CAUSAL_SHAPES {
+            let value_dim = head_dim;
+            let queries_bits = to_bits(&host_values(rows * head_dim));
+            let keys_bits = to_bits(&host_values(rows * head_dim));
+            let values_bits = to_bits(&host_values(rows * value_dim));
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_bits).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_bits).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_bits).unwrap();
+            let poisoned = vec![0xFFFF_u16; rows * value_dim];
+            let output = DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+            attention
+                .attention_composed_quantized(
+                    &conversions,
+                    &f32_attention,
+                    &bf16_gemm,
+                    &elementwise,
+                    &softmax_2d,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &output,
+                    rows,
+                    head_dim,
+                    rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::Causal,
+                )
+                .unwrap();
+            let actual_bits = output.to_vec(&stream).unwrap();
+            let expected_bits = quantized_reference(
+                &queries_bits,
+                &keys_bits,
+                &values_bits,
+                rows,
+                head_dim,
+                rows,
+                value_dim,
+                f64::from(scale),
+                true,
+            );
+            for index in 0..actual_bits.len() {
+                let difference = (f64::from(bf16_bits_to_f32(actual_bits[index]))
+                    - f64::from(bf16_bits_to_f32(expected_bits[index])))
+                .abs();
+                let tolerance = oracle_tolerance(f64::from(bf16_bits_to_f32(expected_bits[index])));
+                assert!(
+                    difference <= tolerance,
+                    "quantized causal ({rows},{head_dim}) mismatch at {index}: \
+                     tolerance {tolerance}"
+                );
+            }
+        }
+
+        // Rectangular causal shapes stay rejected before launch.
+        let queries = DeviceBuffer::<u16>::new(&context, 2 * 8).unwrap();
+        let keys = DeviceBuffer::<u16>::new(&context, 5 * 8).unwrap();
+        let values = DeviceBuffer::<u16>::new(&context, 5 * 4).unwrap();
+        let output = DeviceBuffer::<u16>::new(&context, 2 * 4).unwrap();
+        let error = attention
+            .attention_composed_quantized(
+                &conversions,
+                &f32_attention,
+                &bf16_gemm,
+                &elementwise,
+                &softmax_2d,
+                &stream,
+                &queries,
+                &keys,
+                &values,
+                &output,
+                2,
+                8,
+                5,
+                4,
+                0.25,
+                AttentionMask::Causal,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("query_rows == kv_rows"),
+            "{error}"
+        );
+
+        // Short packed buffers stay rejected before launch.
+        let short_keys = DeviceBuffer::<u16>::new(&context, 39).unwrap(); // needs 40
+        let error = attention
+            .attention_composed_quantized(
+                &conversions,
+                &f32_attention,
+                &bf16_gemm,
+                &elementwise,
+                &softmax_2d,
+                &stream,
+                &queries,
+                &short_keys,
+                &values,
+                &output,
+                2,
+                8,
+                5,
+                4,
+                0.25,
+                AttentionMask::None,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("requires 40"), "{error}");
     }
 
     /// (heads, query_rows, head_dim, kv_rows, value_dim).

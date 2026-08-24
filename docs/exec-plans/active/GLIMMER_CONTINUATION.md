@@ -384,6 +384,30 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   needs no change (family methods exposed via session accessors).
   fmt/clippy/check clean; **99 GPU tests passed on Thor** (93 + 6 new).
 
+- bf16 quantized-scores variant milestone (2026-08-23, branch
+  `feature/bf16-quantized-scores`, stacked PR workflow):
+  `Bf16Attention::attention_composed_quantized` - the opt-in OPPOSITE of
+  the default composed policy: bf16 GEMM-NT logits -> widen -> in-place
+  f32 scale/mask (reuses F32Attention's scale_causal kernel) ->
+  dispatched row softmax in place -> RNE narrow (reuses the logits
+  buffer) -> plain Bf16Gemm against packed values. Zero new CUDA
+  kernels. Logits AND probabilities carry bf16 rounding before
+  exponentiation/accumulation - documented as visibly lossier than the
+  default; its value is inspectable packed-bf16 attention maps and a
+  smaller score scratch (6 B vs 8 B per score element peak).
+  Correctness: oracle replays the EXACT quantization sequence (bit-exact
+  GEMM-NT chain, f64 softmax, replayed prob narrowing, f64 PV, final
+  narrow); asserted across five shapes plus two causal shapes with max
+  element error 1.19e-7 - effectively bit-exact. Two oracle bugs found
+  and fixed during development (recorded for the debugging archive):
+  (1) converting bf16 BITS via f64::from(u16) instead of re-widening to
+  f32 turned negative logits into huge unsigned integers and silently
+  moved the argmax (device was right); (2) the causal replay left masked
+  scores at 0.0 instead of -inf, adding phantom weight from future keys.
+  Rejection tests: rectangular causal, short packed buffers through the
+  new entry point. fmt/clippy/check clean; **101 GPU tests passed on
+  Thor** (99 + 2 new).
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -394,10 +418,20 @@ no longer allowed for code changes.
 Chained implementation waves continue while candidates remain:
 1. Dedicated benchmarks only if consumers ask; scatter/gather/argmax are
    bandwidth-bound patterns already characterized by siblings.
-2. Candidate follow-ups if downstream demand appears: bf16 score
-   materialization variant (quantized-logit policy), vectorized GEMM loads
-   (see PR #10 observation). Multi-head batched fused attention shipped in
-   the wave below.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+2. Vectorized GEMM loads - ASSESSED 2026-08-23, deferred to a dedicated
+   session by design, not laziness: proper vector staging does not fit
+   the existing tile structure. Widening the per-thread load to uint4
+   (8 bf16) multiplies the k-chunk per tile iteration by 8 and the
+   shared-memory A/B footprint with it (~16x at tile 16), blowing the
+   dynamic-shared budget; cooperative sub-vector redistribution keeps
+   the footprint but rewrites the validated staging loops outright.
+   Evidence is genuinely mixed: the pipeline is issue-bound, so 4x
+   fewer load instructions could free issue slots for FMAs, yet PR #10
+   showed halving operand traffic changed nothing. A faithful attempt
+   needs new kernels + bit-exact oracle replay + full sweep benchmarks;
+   do not start it late in a session. Multi-head batched fused attention
+   (PR #22) and the bf16 quantized-scores opt-in variant (PR #23)
+   shipped earlier this session.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
   README current-scope list now covers every family through scatter;
   ARCHITECTURE gained Attention (fused/composed + causal contract + honest
   A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics
