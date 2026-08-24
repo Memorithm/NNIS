@@ -25,7 +25,8 @@ pub mod jit {
 /// Reusable NNIS native kernel families.
 pub mod kernels {
     pub use nnis_kernels::{
-        AttentionMask, Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
+        bf16_layer_normalize_rows_dispatched, bf16_rms_normalize_rows_dispatched, AttentionMask,
+        Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
         Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
         F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
@@ -39,10 +40,11 @@ pub use jit::{
     Module, OccupancyRecommendation,
 };
 pub use kernels::{
-    AttentionMask, Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
-    Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks,
-    F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace,
-    F32Reduction, F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
+    bf16_layer_normalize_rows_dispatched, bf16_rms_normalize_rows_dispatched, AttentionMask,
+    Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
+    Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
+    F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
+    F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
     F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
@@ -338,6 +340,58 @@ impl Session {
             value_dim,
             scale,
             mask,
+        )
+    }
+
+    /// Normalize packed-bf16 rows with RMS statistics through this
+    /// session's kernels and wait once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bf16_rms_norm(
+        &self,
+        input: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        rows: usize,
+        cols: usize,
+        epsilon: f32,
+        gamma: f32,
+    ) -> Result<()> {
+        kernels::bf16_rms_normalize_rows_dispatched(
+            self.bf16_elementwise(),
+            self.rms_norm(),
+            &self.stream,
+            input,
+            output,
+            rows,
+            cols,
+            epsilon,
+            gamma,
+        )
+    }
+
+    /// Normalize packed-bf16 rows with full layer statistics through this
+    /// session's kernels and wait once.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bf16_layer_norm(
+        &self,
+        input: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        rows: usize,
+        cols: usize,
+        epsilon: f32,
+        gamma: f32,
+        beta: f32,
+    ) -> Result<()> {
+        kernels::bf16_layer_normalize_rows_dispatched(
+            self.bf16_elementwise(),
+            self.layer_norm(),
+            &self.stream,
+            input,
+            output,
+            rows,
+            cols,
+            epsilon,
+            gamma,
+            beta,
         )
     }
 
