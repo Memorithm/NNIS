@@ -134,6 +134,126 @@ extern "C" __global__ void nnis_bf16_gemm_nt_f32acc(
         output[row * n + col] = f32_to_bf16_bits(value);
     }
 }
+
+extern "C" __global__ void nnis_bf16_gemm_batched_f32acc(
+    const unsigned short* matrix_a,
+    const unsigned short* matrix_b,
+    unsigned short* output,
+    unsigned int batches,
+    unsigned long long m,
+    unsigned long long n,
+    unsigned long long k
+) {
+    extern __shared__ float tile[];
+    const unsigned int tile_side = blockDim.x;
+    float* tile_a = tile;
+    float* tile_b = tile + tile_side * tile_side;
+
+    // One gridDim.z layer owns one packed [batches][m][n] product.
+    const unsigned long long batch = blockIdx.z;
+    matrix_a += batch * m * k;
+    matrix_b += batch * k * n;
+    output += batch * m * n;
+
+    const unsigned int tx = threadIdx.x;
+    const unsigned int ty = threadIdx.y;
+    const unsigned long long row =
+        (unsigned long long)blockIdx.x * blockDim.x + ty;
+    const unsigned long long col =
+        (unsigned long long)blockIdx.y * blockDim.y + tx;
+
+    float value = 0.0f;
+    for (unsigned long long tile_start = 0; tile_start < k;
+         tile_start += tile_side) {
+        const unsigned long long a_col = tile_start + tx;
+        if (row < m && a_col < k) {
+            tile_a[ty * tile_side + tx] =
+                bf16_bits_to_f32(matrix_a[row * k + a_col]);
+        } else {
+            tile_a[ty * tile_side + tx] = 0.0f;
+        }
+        const unsigned long long b_row = tile_start + ty;
+        if (b_row < k && col < n) {
+            tile_b[ty * tile_side + tx] =
+                bf16_bits_to_f32(matrix_b[b_row * n + col]);
+        } else {
+            tile_b[ty * tile_side + tx] = 0.0f;
+        }
+        __syncthreads();
+        for (unsigned int depth = 0; depth < tile_side; ++depth) {
+            value = fmaf(
+                tile_a[ty * tile_side + depth],
+                tile_b[depth * tile_side + tx],
+                value
+            );
+        }
+        __syncthreads();
+    }
+    if (row < m && col < n) {
+        output[row * n + col] = f32_to_bf16_bits(value);
+    }
+}
+
+extern "C" __global__ void nnis_bf16_gemm_nt_batched_f32acc(
+    const unsigned short* matrix_a,
+    const unsigned short* matrix_b,
+    unsigned short* output,
+    unsigned int batches,
+    unsigned long long m,
+    unsigned long long n,
+    unsigned long long k
+) {
+    extern __shared__ float tile[];
+    const unsigned int tile_side = blockDim.x;
+    float* tile_a = tile;
+    float* tile_b = tile + tile_side * tile_side;
+
+    // One gridDim.z layer owns one packed [batches][m][n] product over
+    // [batches][n][k] transposed-B operands.
+    const unsigned long long batch = blockIdx.z;
+    matrix_a += batch * m * k;
+    matrix_b += batch * n * k;
+    output += batch * m * n;
+
+    const unsigned int tx = threadIdx.x;
+    const unsigned int ty = threadIdx.y;
+    const unsigned long long row =
+        (unsigned long long)blockIdx.x * blockDim.x + ty;
+    const unsigned long long col =
+        (unsigned long long)blockIdx.y * blockDim.y + tx;
+
+    float value = 0.0f;
+    for (unsigned long long tile_start = 0; tile_start < k;
+         tile_start += tile_side) {
+        const unsigned long long a_col = tile_start + tx;
+        if (row < m && a_col < k) {
+            tile_a[ty * tile_side + tx] =
+                bf16_bits_to_f32(matrix_a[row * k + a_col]);
+        } else {
+            tile_a[ty * tile_side + tx] = 0.0f;
+        }
+        // B stored row-major (n x k): B^T[e][col] = B[col][e].
+        const unsigned long long depth = tile_start + ty;
+        if (col < n && depth < k) {
+            tile_b[ty * tile_side + tx] =
+                bf16_bits_to_f32(matrix_b[col * k + depth]);
+        } else {
+            tile_b[ty * tile_side + tx] = 0.0f;
+        }
+        __syncthreads();
+        for (unsigned int d2 = 0; d2 < tile_side; ++d2) {
+            value = fmaf(
+                tile_a[ty * tile_side + d2],
+                tile_b[d2 * tile_side + tx],
+                value
+            );
+        }
+        __syncthreads();
+    }
+    if (row < m && col < n) {
+        output[row * n + col] = f32_to_bf16_bits(value);
+    }
+}
 "#;
 
 const DEFAULT_TILE_SIDE: u32 = 16;
@@ -145,6 +265,8 @@ const MAX_GRID_Y_BLOCKS: u64 = 65_535;
 pub struct Bf16Gemm {
     gemm: Kernel,
     gemm_nt: Kernel,
+    gemm_batched: Kernel,
+    gemm_nt_batched: Kernel,
     tile_side: u32,
 }
 
@@ -174,6 +296,8 @@ impl Bf16Gemm {
         let module = Module::load(context, &code)?;
         let gemm = module.get_function("nnis_bf16_gemm_f32acc")?;
         let gemm_nt = module.get_function("nnis_bf16_gemm_nt_f32acc")?;
+        let gemm_batched = module.get_function("nnis_bf16_gemm_batched_f32acc")?;
+        let gemm_nt_batched = module.get_function("nnis_bf16_gemm_nt_batched_f32acc")?;
         let attributes = gemm.attributes()?;
         let attributes_nt = gemm_nt.attributes()?;
         let threads_per_block = u64::from(tile_side)
@@ -207,9 +331,33 @@ impl Bf16Gemm {
                 attributes_nt.max_dynamic_shared_memory_bytes
             )));
         }
+        for (name, function) in [
+            ("bf16 gemm-batched", &gemm_batched),
+            ("bf16 gemm-nt-batched", &gemm_nt_batched),
+        ] {
+            let batched_attributes = function.attributes()?;
+            if threads_per_block > u64::from(batched_attributes.max_threads_per_block) {
+                return Err(NnisError::invalid_input(format!(
+                    "{name} tile side {tile_side} implies {threads_per_block} threads; \
+                     function limit is {}",
+                    batched_attributes.max_threads_per_block
+                )));
+            }
+            if shared_memory_bytes as usize
+                > batched_attributes.max_dynamic_shared_memory_bytes as usize
+            {
+                return Err(NnisError::invalid_input(format!(
+                    "{name} requires {shared_memory_bytes} shared-memory bytes; \
+                     function limit is {}",
+                    batched_attributes.max_dynamic_shared_memory_bytes
+                )));
+            }
+        }
         Ok(Self {
             gemm,
             gemm_nt,
+            gemm_batched,
+            gemm_nt_batched,
             tile_side,
         })
     }
@@ -337,6 +485,206 @@ impl Bf16Gemm {
         unsafe { launch.launch(&mut arguments) }
     }
 
+    /// Compute one transposed-B product per packed batch and wait.
+    ///
+    /// Layout: `matrix_a` holds `batches * m * k`, `matrix_b` holds
+    /// `batches * n * k`, and `output` receives `batches * m * n`, each
+    /// batch contiguous packed-bf16. One launch covers every batch via
+    /// gridDim.z with a per-batch trajectory identical to
+    /// [`Self::gemm_transposed_b`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn gemm_transposed_b_batched(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<u16>,
+        matrix_b: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        batches: usize,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe {
+            self.enqueue_gemm_transposed_b_batched(
+                stream, matrix_a, matrix_b, output, batches, m, n, k,
+            )
+        };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue the batched transposed-B GEMM without synchronizing the
+    /// stream.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, and this kernel must remain alive and
+    /// otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_gemm_transposed_b_batched(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<u16>,
+        matrix_b: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        batches: usize,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        let grid_z = Self::validate_batched_execution(
+            stream, matrix_a, matrix_b, output, batches, m, n, k, true,
+        )?;
+        if m == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            // SAFETY: the output lifetime obligation is documented above.
+            return unsafe { output.zero_async(stream) };
+        }
+        let shared_memory_bytes = Self::shared_memory_bytes(self.tile_side)?;
+        let grid_x = u32::try_from(m.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("bf16 batched gemm-nt exceeds u32 row blocks"))?;
+        let grid_y = u64::try_from(n.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("bf16 batched gemm-nt columns exceed u64"))?;
+        if grid_y > MAX_GRID_Y_BLOCKS {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm-nt requires {grid_y} column blocks; \
+                 gridDim.y limit is {MAX_GRID_Y_BLOCKS}"
+            )));
+        }
+        let (m, n, k) = (
+            u64::try_from(m)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm-nt m exceeds u64"))?,
+            u64::try_from(n)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm-nt n exceeds u64"))?,
+            u64::try_from(k)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm-nt k exceeds u64"))?,
+        );
+        let config = LaunchConfig::new(
+            Dim3::new(grid_x, grid_y as u32, grid_z),
+            Dim3::new(self.tile_side, self.tile_side, 1),
+        )
+        .with_dynamic_shared_memory(shared_memory_bytes);
+        let mut arguments = KernelArgs::with_capacity(7, 4);
+        arguments
+            .push_buffer(matrix_a)
+            .push_buffer(matrix_b)
+            .push_buffer(output)
+            .push(u32::try_from(batches).expect("validated within gridDim.z limit"))
+            .push(m)
+            .push(n)
+            .push(k);
+        let launch = KernelLaunch::new(&self.gemm_nt_batched, stream, config);
+        // SAFETY: argument order/widths match `nnis_bf16_gemm_nt_batched_f32acc`;
+        // the caller owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
+    /// Compute one product per packed batch and wait.
+    ///
+    /// Layout: `matrix_a` holds `batches * m * k`, `matrix_b` holds
+    /// `batches * k * n`, and `output` receives `batches * m * n`, each
+    /// batch contiguous packed-bf16. One launch covers every batch via
+    /// gridDim.z with a per-batch trajectory identical to [`Self::gemm`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn gemm_batched(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<u16>,
+        matrix_b: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        batches: usize,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result = unsafe {
+            self.enqueue_gemm_batched(stream, matrix_a, matrix_b, output, batches, m, n, k)
+        };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue the batched GEMM without synchronizing the stream.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, and this kernel must remain alive and
+    /// otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_gemm_batched(
+        &self,
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<u16>,
+        matrix_b: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        batches: usize,
+        m: usize,
+        n: usize,
+        k: usize,
+    ) -> Result<()> {
+        let grid_z = Self::validate_batched_execution(
+            stream, matrix_a, matrix_b, output, batches, m, n, k, false,
+        )?;
+        if m == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            // SAFETY: the output lifetime obligation is documented above.
+            return unsafe { output.zero_async(stream) };
+        }
+        let shared_memory_bytes = Self::shared_memory_bytes(self.tile_side)?;
+        let grid_x = u32::try_from(m.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("bf16 batched gemm exceeds u32 row blocks"))?;
+        let grid_y = u64::try_from(n.div_ceil(self.tile_side as usize))
+            .map_err(|_| NnisError::invalid_input("bf16 batched gemm column blocks exceed u64"))?;
+        if grid_y > MAX_GRID_Y_BLOCKS {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm requires {grid_y} column blocks; \
+                 gridDim.y limit is {MAX_GRID_Y_BLOCKS}"
+            )));
+        }
+        let (m, n, k) = (
+            u64::try_from(m)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm m exceeds u64"))?,
+            u64::try_from(n)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm n exceeds u64"))?,
+            u64::try_from(k)
+                .map_err(|_| NnisError::invalid_input("bf16 batched gemm k exceeds u64"))?,
+        );
+        let config = LaunchConfig::new(
+            Dim3::new(grid_x, grid_y as u32, grid_z),
+            Dim3::new(self.tile_side, self.tile_side, 1),
+        )
+        .with_dynamic_shared_memory(shared_memory_bytes);
+        let mut arguments = KernelArgs::with_capacity(7, 4);
+        arguments
+            .push_buffer(matrix_a)
+            .push_buffer(matrix_b)
+            .push_buffer(output)
+            .push(u32::try_from(batches).expect("validated within gridDim.z limit"))
+            .push(m)
+            .push(n)
+            .push(k);
+        let launch = KernelLaunch::new(&self.gemm_batched, stream, config);
+        // SAFETY: argument order/widths match `nnis_bf16_gemm_batched_f32acc`;
+        // the caller owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
     /// Enqueue the GEMM without synchronizing the stream.
     ///
     /// # Safety
@@ -454,6 +802,82 @@ impl Bf16Gemm {
             .and_then(|threads| threads.checked_mul(2))
             .and_then(|floats| floats.checked_mul(std::mem::size_of::<f32>() as u32))
             .ok_or_else(|| NnisError::invalid_input("bf16 gemm shared-memory size overflows"))
+    }
+
+    /// Shared batched-shape validation; returns the validated gridDim.z
+    /// block count. `transposed_b` selects whether each `matrix_b` batch is
+    /// stored `(n, k)` (score form) or `(k, n)`.
+    #[allow(clippy::too_many_arguments)]
+    fn validate_batched_execution(
+        stream: &Stream,
+        matrix_a: &DeviceBuffer<u16>,
+        matrix_b: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        batches: usize,
+        m: usize,
+        n: usize,
+        k: usize,
+        transposed_b: bool,
+    ) -> Result<u32> {
+        if batches == 0 {
+            return Err(NnisError::invalid_input(
+                "bf16 gemm requires at least one batch",
+            ));
+        }
+        if batches > MAX_GRID_Y_BLOCKS as usize {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm requires {batches} batch blocks; \
+                 gridDim.z limit is {MAX_GRID_Y_BLOCKS}"
+            )));
+        }
+        let expected_a = batches
+            .checked_mul(m)
+            .and_then(|elements| elements.checked_mul(k))
+            .ok_or_else(|| NnisError::invalid_input("bf16 batched gemm shape overflows usize"))?;
+        let expected_b = if transposed_b {
+            batches
+                .checked_mul(n)
+                .and_then(|elements| elements.checked_mul(k))
+        } else {
+            batches
+                .checked_mul(k)
+                .and_then(|elements| elements.checked_mul(n))
+        }
+        .ok_or_else(|| NnisError::invalid_input("bf16 batched gemm shape overflows usize"))?;
+        let expected_output = batches
+            .checked_mul(m)
+            .and_then(|elements| elements.checked_mul(n))
+            .ok_or_else(|| NnisError::invalid_input("bf16 batched gemm shape overflows usize"))?;
+        if matrix_a.len() != expected_a {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm matrix_a has {} elements; {batches} batches of \
+                 shape ({m}, {k}) requires {expected_a}",
+                matrix_a.len()
+            )));
+        }
+        if matrix_b.len() != expected_b {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm matrix_b has {} elements; {batches} batches require {expected_b}",
+                matrix_b.len()
+            )));
+        }
+        if output.len() != expected_output {
+            return Err(NnisError::invalid_input(format!(
+                "bf16 batched gemm output has {} elements; {batches} batches of \
+                 shape ({m}, {n}) requires {expected_output}",
+                output.len()
+            )));
+        }
+        let context = stream.ctx();
+        if !Arc::ptr_eq(context, matrix_a.ctx())
+            || !Arc::ptr_eq(context, matrix_b.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "bf16 batched gemm stream and buffers must share one context",
+            ));
+        }
+        Ok(batches as u32)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -709,6 +1133,153 @@ mod tests {
             .unwrap_err();
         assert!(
             error.to_string().contains("shape (3, 3) requires 9"),
+            "{error}"
+        );
+    }
+
+    /// Per-batch variant with distinct seeds so cross-batch mixing cannot
+    /// pass silently.
+    fn host_batch_a(batch: usize, rows: usize, cols: usize) -> Vec<f32> {
+        (0..rows * cols)
+            .map(|index| {
+                (((index * 13 % 97) as f32 - 48.0) * 0.0625)
+                    + (((index + batch * 37) % 5) as f32 - 2.0)
+            })
+            .collect()
+    }
+
+    fn host_batch_b(batch: usize, rows: usize, cols: usize) -> Vec<f32> {
+        (0..rows * cols)
+            .map(|index| ((index * 29 % 61) as f32 - 30.0) * (0.125 + batch as f32 * 0.03125))
+            .collect()
+    }
+
+    #[test]
+    fn bf16_gemm_batched_bit_matches_per_batch_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let gemm = Bf16Gemm::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        const BATCHED_SHAPES: &[(usize, usize, usize, usize)] =
+            &[(1, 1, 1, 1), (2, 3, 4, 5), (3, 17, 31, 33), (2, 32, 48, 65)];
+
+        for &(batches, m, n, k) in BATCHED_SHAPES {
+            let mut a_host: Vec<u16> = Vec::with_capacity(batches * m * k);
+            let mut b_host: Vec<u16> = Vec::with_capacity(batches * k * n);
+            let mut bt_host: Vec<u16> = Vec::with_capacity(batches * n * k);
+            for batch in 0..batches {
+                a_host.extend(to_bits(&host_batch_a(batch, m, k)));
+                b_host.extend(to_bits(&host_batch_b(batch, k, n)));
+                bt_host.extend(to_bits(&host_batch_b(batch + 11, n, k)));
+            }
+            let matrix_a = DeviceBuffer::from_host(&context, &stream, &a_host).unwrap();
+            let matrix_b = DeviceBuffer::from_host(&context, &stream, &b_host).unwrap();
+            let matrix_bt = DeviceBuffer::from_host(&context, &stream, &bt_host).unwrap();
+            let output =
+                DeviceBuffer::from_host(&context, &stream, &vec![0xFFFF_u16; batches * m * n])
+                    .unwrap();
+            let output_nt =
+                DeviceBuffer::from_host(&context, &stream, &vec![0xFFFF_u16; batches * m * n])
+                    .unwrap();
+
+            gemm.gemm_batched(&stream, &matrix_a, &matrix_b, &output, batches, m, n, k)
+                .unwrap();
+            gemm.gemm_transposed_b_batched(
+                &stream, &matrix_a, &matrix_bt, &output_nt, batches, m, n, k,
+            )
+            .unwrap();
+            let actual = output.to_vec(&stream).unwrap();
+            let actual_nt = output_nt.to_vec(&stream).unwrap();
+
+            for batch in 0..batches {
+                // Per-batch reference through the validated single kernels;
+                // identical arithmetic must reproduce identical bits.
+                let head_a = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&host_batch_a(batch, m, k)),
+                )
+                .unwrap();
+                let head_b = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&host_batch_b(batch, k, n)),
+                )
+                .unwrap();
+                let head_bt = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &to_bits(&host_batch_b(batch + 11, n, k)),
+                )
+                .unwrap();
+                let head_out =
+                    DeviceBuffer::from_host(&context, &stream, &vec![0xFFFF_u16; m * n]).unwrap();
+                gemm.gemm(&stream, &head_a, &head_b, &head_out, m, n, k)
+                    .unwrap();
+                let head_actual = head_out.to_vec(&stream).unwrap();
+
+                let head_out_nt =
+                    DeviceBuffer::from_host(&context, &stream, &vec![0xFFFF_u16; m * n]).unwrap();
+                gemm.gemm_transposed_b(&stream, &head_a, &head_bt, &head_out_nt, m, n, k)
+                    .unwrap();
+                let head_actual_nt = head_out_nt.to_vec(&stream).unwrap();
+
+                for index in 0..m * n {
+                    assert_eq!(
+                        actual[batch * m * n + index],
+                        head_actual[index],
+                        "bf16 batched plain {batches}b mismatch at batch {batch} element \
+                         {index} shape ({m},{n},{k})"
+                    );
+                    assert_eq!(
+                        actual_nt[batch * m * n + index],
+                        head_actual_nt[index],
+                        "bf16 batched nt {batches}b mismatch at batch {batch} element {index} \
+                         shape ({m},{n},{k})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bf16_gemm_batched_rejects_invalid_batches_and_shapes_before_launch() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let gemm = Bf16Gemm::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        // Zero batches is outside the contract.
+        let one = DeviceBuffer::<u16>::new(&context, 1).unwrap();
+        let error = gemm
+            .gemm_batched(&stream, &one, &one, &one, 0, 1, 1, 1)
+            .unwrap_err();
+        assert!(error.to_string().contains("at least one batch"), "{error}");
+
+        // The gridDim.z limit is enforced before launch.
+        let big = DeviceBuffer::<u16>::new(&context, 65_536).unwrap();
+        let out_big = DeviceBuffer::<u16>::new(&context, 65_536).unwrap();
+        let error = gemm
+            .gemm_batched(&stream, &big, &big, &out_big, 65_536, 1, 1, 1)
+            .unwrap_err();
+        assert!(error.to_string().contains("gridDim.z limit"), "{error}");
+
+        // Short packed operand rejected with the batch count in the message.
+        let short_a = DeviceBuffer::<u16>::new(&context, 2 * 2 * 3 - 1).unwrap(); // needs 12
+        let b = DeviceBuffer::<u16>::new(&context, 2 * 3 * 4).unwrap(); // needs 24
+        let out = DeviceBuffer::<u16>::new(&context, 2 * 2 * 4).unwrap(); // needs 16
+        let error = gemm
+            .gemm_batched(&stream, &short_a, &b, &out, 2, 2, 4, 3)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("2 batches of shape (2, 3)"),
             "{error}"
         );
     }
