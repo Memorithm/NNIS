@@ -408,6 +408,46 @@ Turn validated CUDA foundation into usable NVIDIA-native inference substrate.
   new entry point. fmt/clippy/check clean; **101 GPU tests passed on
   Thor** (99 + 2 new).
 
+- Batched GEMM milestone (2026-08-23, branch `feature/batched-gemm`,
+  stacked PR workflow): `gemm_batched` + `gemm_transposed_b_batched`
+  added to BOTH `F32Gemm` and `Bf16Gemm` - one launch computes one
+  product per packed [batches][rows][cols] layer via gridDim.z (limit
+  65535 validated pre-launch; batch count also bounds-checkable with
+  affordable 1x1x1 allocations). Per-block decode + base-pointer offset;
+  trajectory identical to the single-matrix kernels, so tests assert
+  BIT-EXACT equality vs looping singles across four shapes up to four
+  batches, both variants, both dtypes. fmt/clippy/check clean; 105 GPU
+  tests.
+
+- Multi-head composed attention milestone (2026-08-23, same branch):
+  `attention_composed_multihead` on both families - one batched pipeline:
+  batched GEMM-NT scores -> in-place elementwise scale OR a NEW packed
+  causal kernel (`nnis_attention_scale_causal_multihead_f32`, decodes the
+  within-head row via `(index/kv_rows) % query_rows`) -> dispatched row
+  softmax over heads*query_rows INDEPENDENT rows unchanged -> batched
+  GEMM for P*V. One score-sized scratch instead of two. bf16 wrapper =
+  exact widening -> f32 pipeline -> one narrowing (zero extra kernels).
+  Tests: BIT-EXACT vs looping per-head composed calls across the
+  multi-head shapes plus two square causal shapes, both dtypes.
+  Facade wired (`session.attention_composed_multihead()`,
+  `session.bf16_attention_composed_multihead()`). fmt/clippy/check
+  clean; **107 GPU tests passed on Thor** (105 + 2 new).
+
+- bf16 norm twins milestone (2026-08-23, same branch): packed-bf16
+  RMSNorm + LayerNorm shipped as pure composition functions in
+  `bf16_norms.rs` (`bf16_rms_normalize_rows_dispatched`,
+  `bf16_layer_normalize_rows_dispatched`) - exact widening -> the
+  validated f32 dispatched normalize (fused when the row fits shared
+  memory, staged otherwise; cols=16384 test exercises both) -> one RNE
+  narrowing. Zero new CUDA kernels, matching the composed-bf16-attention
+  precedent. Tests assert BIT-EXACT equality vs widen->f32-family->
+  host-narrow replay plus f64 oracle tolerances (RMS and full
+  mean/variance with gamma/beta) across four shapes including the staged
+  fallback; rejections cover empty shapes, short outputs, and foreign
+  contexts. Facade wired (`session.bf16_rms_norm()`,
+  `session.bf16_layer_norm()`). fmt/clippy/check clean; **109 GPU tests
+  passed on Thor** (107 + 2 new).
+
 ## Workflow rule (2026-08-23, owner decision)
 Pull requests are mandatory from now on: every wave lands on a
 `feature/<name>` branch and reaches `main` only through a GitHub PR after
@@ -429,9 +469,12 @@ Chained implementation waves continue while candidates remain:
    fewer load instructions could free issue slots for FMAs, yet PR #10
    showed halving operand traffic changed nothing. A faithful attempt
    needs new kernels + bit-exact oracle replay + full sweep benchmarks;
-   do not start it late in a session. Multi-head batched fused attention
-   (PR #22) and the bf16 quantized-scores opt-in variant (PR #23)
-   shipped earlier this session.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
+   do not start it late in a session.
+3. bf16 twins for the remaining f32-only families: RMSNorm/LayerNorm
+   SHIPPED in the wave below (pure widen->dispatch->narrow composition);
+   Softmax/Softmax2D, RoPE, Gemv, TopK remain on the same template.
+   Batched GEMMs and multi-head fused+composed attention shipped in the
+   waves below.- Documentation sweep (2026-08-23, branch `feature/docs-sweep`, **PR #20**):
   README current-scope list now covers every family through scatter;
   ARCHITECTURE gained Attention (fused/composed + causal contract + honest
   A/B verdict) and Gather/Scatter sections, plus the argmax tie semantics

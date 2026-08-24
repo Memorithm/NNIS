@@ -289,10 +289,31 @@ extern "C" __global__ void nnis_attention_scale_causal_f32(
         output[index] = scores[index] * scale;
     }
 }
+extern "C" __global__ void nnis_attention_scale_causal_multihead_f32(
+    const float* scores,
+    float* output,
+    unsigned long long elements,
+    unsigned long long query_rows,
+    unsigned long long kv_rows,
+    float scale
+) {
+    const unsigned long long index =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= elements) {
+        return;
+    }
+    // Packed [heads][query_rows][kv_rows]: the causal row repeats per head.
+    const unsigned long long col = index % kv_rows;
+    const unsigned long long row = (index / kv_rows) % query_rows;
+    if (col > row) {
+        output[index] = nnis_neg_inf();
+    } else {
+        output[index] = scores[index] * scale;
+    }
+}
 "#;
-
-const DEFAULT_BLOCK_SIZE: u32 = 64;
 const CAUSAL_BLOCK_SIZE: u32 = 256;
+const DEFAULT_BLOCK_SIZE: u32 = 64;
 
 /// Context-bound scaled dot-product attention.
 #[derive(Debug)]
@@ -300,6 +321,7 @@ pub struct F32Attention {
     fused: Kernel,
     fused_multihead: Kernel,
     scale_causal: Kernel,
+    scale_causal_multihead: Kernel,
     block_size: u32,
 }
 
@@ -328,6 +350,8 @@ impl F32Attention {
         let fused = module.get_function("nnis_attention_fused_f32")?;
         let fused_multihead = module.get_function("nnis_attention_fused_multihead_f32")?;
         let scale_causal = module.get_function("nnis_attention_scale_causal_f32")?;
+        let scale_causal_multihead =
+            module.get_function("nnis_attention_scale_causal_multihead_f32")?;
         let attributes = fused.attributes()?;
         if block_size > attributes.max_threads_per_block {
             return Err(NnisError::invalid_input(format!(
@@ -346,6 +370,7 @@ impl F32Attention {
             fused,
             fused_multihead,
             scale_causal,
+            scale_causal_multihead,
             block_size,
         })
     }
@@ -624,6 +649,171 @@ impl F32Attention {
         let launch = KernelLaunch::new(&self.fused_multihead, stream, config);
         // SAFETY: argument order/widths match
         // `nnis_attention_fused_multihead_f32`; the caller owns the
+        // asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
+    /// Composed scaled dot-product attention over packed multi-head inputs
+    /// and wait for completion.
+    ///
+    /// Layout matches [`Self::attention_fused_multihead`]: every buffer
+    /// holds `[heads][rows][dim]` contiguously. One batched pipeline runs
+    /// end-to-end - transposed-B GEMM per head via gridDim.z, an in-place
+    /// elementwise scale (with causal masking from a packed-layout variant
+    /// of the single-head kernel), a row softmax whose rows are
+    /// independent so `heads * query_rows` rows run unchanged, and a
+    /// batched GEMM against the per-head values. The score scratch is one
+    /// buffer instead of two; per-head results are identical to looping
+    /// [`Self::attention_composed`], which tests assert bit-for-bit.
+    #[allow(clippy::too_many_arguments)]
+    pub fn attention_composed_multihead(
+        &self,
+        gemm: &crate::F32Gemm,
+        elementwise: &crate::F32Elementwise,
+        softmax_2d: &crate::F32Softmax2D,
+        stream: &Stream,
+        queries: &DeviceBuffer<f32>,
+        keys: &DeviceBuffer<f32>,
+        values: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: AttentionMask,
+    ) -> Result<()> {
+        self.validate_multihead_execution(
+            stream, queries, keys, values, output, num_heads, query_rows, head_dim, kv_rows,
+            value_dim,
+        )?;
+        if mask == AttentionMask::Causal && query_rows != kv_rows {
+            return Err(NnisError::invalid_input(format!(
+                "causal attention requires query_rows == kv_rows; got {query_rows} vs {kv_rows}"
+            )));
+        }
+        if query_rows == 0 {
+            return Ok(());
+        }
+        let score_elements = num_heads
+            .checked_mul(query_rows)
+            .and_then(|rows| rows.checked_mul(kv_rows))
+            .ok_or_else(|| NnisError::invalid_input("attention shape overflows usize"))?;
+        let context = stream.ctx();
+        let probabilities = DeviceBuffer::<f32>::new(context, score_elements)?;
+
+        gemm.gemm_transposed_b_batched(
+            stream,
+            queries,
+            keys,
+            &probabilities,
+            num_heads,
+            query_rows,
+            kv_rows,
+            head_dim,
+        )?;
+        if mask == AttentionMask::Causal {
+            // SAFETY: the probability borrow remains live through the
+            // synchronizing call below; each index is written from its own
+            // read.
+            unsafe {
+                self.enqueue_scale_causal_multihead(
+                    stream,
+                    &probabilities,
+                    &probabilities,
+                    score_elements,
+                    query_rows,
+                    kv_rows,
+                    scale,
+                )?;
+            }
+            stream.synchronize()?;
+        } else {
+            // In-place scaling is safe: each element is read and written by
+            // exactly one thread at its own index.
+            elementwise.scale(stream, &probabilities, &probabilities, scale)?;
+        }
+        softmax_2d.softmax_rows_dispatched(
+            stream,
+            &probabilities,
+            &probabilities,
+            num_heads * query_rows,
+            kv_rows,
+        )?;
+        gemm.gemm_batched(
+            stream,
+            &probabilities,
+            values,
+            output,
+            num_heads,
+            query_rows,
+            value_dim,
+            kv_rows,
+        )
+    }
+
+    /// Enqueue the fused scale-and-causal-mask pass over a packed
+    /// multi-head score matrix without synchronizing the stream. Positions
+    /// above the within-head diagonal become `-infinity`; others are
+    /// scaled.
+    ///
+    /// # Safety
+    ///
+    /// The stream, both buffers, and this kernel family must remain alive
+    /// and otherwise untouched until the stream completes.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn enqueue_scale_causal_multihead(
+        &self,
+        stream: &Stream,
+        scores: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        elements: usize,
+        query_rows: usize,
+        kv_rows: usize,
+        scale: f32,
+    ) -> Result<()> {
+        if scores.len() != elements || output.len() != elements {
+            return Err(NnisError::invalid_input(format!(
+                "attention multi-head scale-causal buffers have {}/{} elements; \
+                 requires {elements}",
+                scores.len(),
+                output.len()
+            )));
+        }
+        let context = self.fused.context();
+        if !Arc::ptr_eq(context, stream.ctx())
+            || !Arc::ptr_eq(context, scores.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "attention multi-head scale-causal stream and buffers must share one context",
+            ));
+        }
+        if elements == 0 {
+            return Ok(());
+        }
+        let total_elements = elements;
+        let (elements, query_rows, kv_rows) = (
+            u64::try_from(elements)
+                .map_err(|_| NnisError::invalid_input("attention elements exceed u64"))?,
+            u64::try_from(query_rows)
+                .map_err(|_| NnisError::invalid_input("attention rows exceed u64"))?,
+            u64::try_from(kv_rows)
+                .map_err(|_| NnisError::invalid_input("attention kv rows exceed u64"))?,
+        );
+        let config = LaunchConfig::for_num_elements(total_elements, CAUSAL_BLOCK_SIZE)?;
+        let mut arguments = KernelArgs::with_capacity(6, 2);
+        arguments
+            .push_buffer(scores)
+            .push_buffer(output)
+            .push(elements)
+            .push(query_rows)
+            .push(kv_rows)
+            .push(scale);
+        let launch = KernelLaunch::new(&self.scale_causal_multihead, stream, config);
+        // SAFETY: argument order/widths match
+        // `nnis_attention_scale_causal_multihead_f32`; the caller owns the
         // asynchronous lifetime obligation.
         unsafe { launch.launch(&mut arguments) }
     }
@@ -1581,6 +1771,208 @@ mod tests {
                         actual.to_bits(),
                         head_actual[index].to_bits(),
                         "causal multihead {heads}h bit mismatch at head {head} element {index}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn attention_composed_multihead_bit_matches_per_head_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = F32Attention::load(&context, &compiler).unwrap();
+        let gemm = F32Gemm::load(&context, &compiler).unwrap();
+        let elementwise = F32Elementwise::load(&context, &compiler).unwrap();
+        let softmax_2d = F32Softmax2D::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        for &(heads, query_rows, head_dim, kv_rows, value_dim) in MULTIHEAD_SHAPES {
+            let mut queries_host = Vec::with_capacity(heads * query_rows * head_dim);
+            let mut keys_host = Vec::with_capacity(heads * kv_rows * head_dim);
+            let mut values_host = Vec::with_capacity(heads * kv_rows * value_dim);
+            for head in 0..heads {
+                queries_host.extend(multihead_values(head, query_rows * head_dim));
+                keys_host.extend(multihead_values(head + 97, kv_rows * head_dim));
+                values_host.extend(multihead_values(head + 193, kv_rows * value_dim));
+            }
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_host).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_host).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_host).unwrap();
+            let poisoned = vec![f32::NAN; heads * query_rows * value_dim];
+            let batched_output =
+                DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+            attention
+                .attention_composed_multihead(
+                    &gemm,
+                    &elementwise,
+                    &softmax_2d,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &batched_output,
+                    heads,
+                    query_rows,
+                    head_dim,
+                    kv_rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::None,
+                )
+                .unwrap();
+            let batched_actual = batched_output.to_vec(&stream).unwrap();
+
+            for head in 0..heads {
+                let head_queries = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head, query_rows * head_dim),
+                )
+                .unwrap();
+                let head_keys = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head + 97, kv_rows * head_dim),
+                )
+                .unwrap();
+                let head_values = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head + 193, kv_rows * value_dim),
+                )
+                .unwrap();
+                let head_output = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &vec![f32::NAN; query_rows * value_dim],
+                )
+                .unwrap();
+                attention
+                    .attention_composed(
+                        &gemm,
+                        &elementwise,
+                        &softmax_2d,
+                        &stream,
+                        &head_queries,
+                        &head_keys,
+                        &head_values,
+                        &head_output,
+                        query_rows,
+                        head_dim,
+                        kv_rows,
+                        value_dim,
+                        scale,
+                        AttentionMask::None,
+                    )
+                    .unwrap();
+                let head_actual = head_output.to_vec(&stream).unwrap();
+                let range = head * query_rows * value_dim..(head + 1) * query_rows * value_dim;
+                for index in 0..query_rows * value_dim {
+                    assert_eq!(
+                        batched_actual[range.start + index].to_bits(),
+                        head_actual[index].to_bits(),
+                        "composed multihead {heads}h bit mismatch at head {head} element \
+                         {index} shape ({query_rows},{head_dim},{kv_rows},{value_dim})"
+                    );
+                }
+            }
+        }
+
+        // Causal square shapes: same bit-exact contract.
+        const CAUSAL_HEADS_SHAPES: &[(usize, usize, usize)] = &[(2, 7, 64), (3, 33, 48)];
+        for &(heads, rows, head_dim) in CAUSAL_HEADS_SHAPES {
+            let value_dim = head_dim;
+            let mut queries_host = Vec::with_capacity(heads * rows * head_dim);
+            let mut keys_host = Vec::with_capacity(heads * rows * head_dim);
+            let mut values_host = Vec::with_capacity(heads * rows * value_dim);
+            for head in 0..heads {
+                queries_host.extend(multihead_values(head, rows * head_dim));
+                keys_host.extend(multihead_values(head + 97, rows * head_dim));
+                values_host.extend(multihead_values(head + 193, rows * value_dim));
+            }
+            let queries = DeviceBuffer::from_host(&context, &stream, &queries_host).unwrap();
+            let keys = DeviceBuffer::from_host(&context, &stream, &keys_host).unwrap();
+            let values = DeviceBuffer::from_host(&context, &stream, &values_host).unwrap();
+            let poisoned = vec![f32::NAN; heads * rows * value_dim];
+            let batched_output =
+                DeviceBuffer::from_host(&context, &stream, &poisoned.clone()).unwrap();
+            let scale = 1.0_f32 / (head_dim as f32).sqrt();
+
+            attention
+                .attention_composed_multihead(
+                    &gemm,
+                    &elementwise,
+                    &softmax_2d,
+                    &stream,
+                    &queries,
+                    &keys,
+                    &values,
+                    &batched_output,
+                    heads,
+                    rows,
+                    head_dim,
+                    rows,
+                    value_dim,
+                    scale,
+                    AttentionMask::Causal,
+                )
+                .unwrap();
+            let batched_actual = batched_output.to_vec(&stream).unwrap();
+
+            for head in 0..heads {
+                let head_queries = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head, rows * head_dim),
+                )
+                .unwrap();
+                let head_keys = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head + 97, rows * head_dim),
+                )
+                .unwrap();
+                let head_values = DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &multihead_values(head + 193, rows * value_dim),
+                )
+                .unwrap();
+                let head_output =
+                    DeviceBuffer::from_host(&context, &stream, &vec![f32::NAN; rows * value_dim])
+                        .unwrap();
+                attention
+                    .attention_composed(
+                        &gemm,
+                        &elementwise,
+                        &softmax_2d,
+                        &stream,
+                        &head_queries,
+                        &head_keys,
+                        &head_values,
+                        &head_output,
+                        rows,
+                        head_dim,
+                        rows,
+                        value_dim,
+                        scale,
+                        AttentionMask::Causal,
+                    )
+                    .unwrap();
+                let head_actual = head_output.to_vec(&stream).unwrap();
+                let range = head * rows * value_dim..(head + 1) * rows * value_dim;
+                for index in 0..rows * value_dim {
+                    assert_eq!(
+                        batched_actual[range.start + index].to_bits(),
+                        head_actual[index].to_bits(),
+                        "causal composed multihead {heads}h bit mismatch at head {head} \
+                         element {index}"
                     );
                 }
             }
