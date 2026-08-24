@@ -303,6 +303,81 @@ impl Session {
             mask,
         )
     }
+
+    /// Composed scaled dot-product attention over packed multi-head inputs:
+    /// one batched pipeline (batched GEMM-NT, in-place scale/causal mask,
+    /// row softmax over every head, batched GEMM).
+    #[allow(clippy::too_many_arguments)]
+    pub fn attention_composed_multihead(
+        &self,
+        queries: &DeviceBuffer<f32>,
+        keys: &DeviceBuffer<f32>,
+        values: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: kernels::AttentionMask,
+    ) -> Result<()> {
+        self.attention.attention_composed_multihead(
+            self.gemm(),
+            self.elementwise(),
+            self.softmax_2d(),
+            &self.stream,
+            queries,
+            keys,
+            values,
+            output,
+            num_heads,
+            query_rows,
+            head_dim,
+            kv_rows,
+            value_dim,
+            scale,
+            mask,
+        )
+    }
+
+    /// Composed packed-bf16 multi-head attention: exact widening of every
+    /// operand, the batched f32 pipeline above, one final RNE narrowing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bf16_attention_composed_multihead(
+        &self,
+        queries: &DeviceBuffer<u16>,
+        keys: &DeviceBuffer<u16>,
+        values: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        num_heads: usize,
+        query_rows: usize,
+        head_dim: usize,
+        kv_rows: usize,
+        value_dim: usize,
+        scale: f32,
+        mask: kernels::AttentionMask,
+    ) -> Result<()> {
+        self.bf16_attention.attention_composed_multihead(
+            self.bf16_elementwise(),
+            self.attention(),
+            self.gemm(),
+            self.elementwise(),
+            self.softmax_2d(),
+            &self.stream,
+            queries,
+            keys,
+            values,
+            output,
+            num_heads,
+            query_rows,
+            head_dim,
+            kv_rows,
+            value_dim,
+            scale,
+            mask,
+        )
+    }
 }
 
 #[cfg(test)]
