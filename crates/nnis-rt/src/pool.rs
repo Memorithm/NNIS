@@ -6,9 +6,7 @@
 //! therefore respects program order without any host synchronization once
 //! outstanding work completes.
 //!
-//! Cross-stream handoff is intentionally not exposed yet; see
-//! `docs/DESIGN_ALLOCATION_POOLING.md` for the event-record design that must
-//! precede it. The pool handle itself lives for the process: destroying a
+//! The pool handle itself lives for the process: destroying a
 //! pool requires every allocation to be freed first, which cannot be proven
 //! locally once frees become stream work. This mirrors NNIS's existing
 //! process-lifetime library-ownership rule.
@@ -288,13 +286,22 @@ impl<T> PooledBuffer<T> {
         self.consumers.lock().unwrap().len()
     }
 
-    fn ensure_stream_context(&self, stream: &Stream) -> Result<()> {
+    fn ensure_stream_access(&self, stream: &Stream) -> Result<()> {
         if !Arc::ptr_eq(self.ctx(), stream.ctx()) {
             return Err(NnisError::invalid_input(
                 "pooled buffer and stream must share one context",
             ));
         }
-        Ok(())
+        if self.stream.raw() == stream.raw() {
+            return Ok(());
+        }
+        let consumers = self.consumers.lock().unwrap();
+        if consumers.iter().any(|s| s.raw() == stream.raw()) {
+            return Ok(());
+        }
+        Err(NnisError::invalid_input(
+            "pooled buffer stream access requires share_with() grant",
+        ))
     }
 
     /// Zero-fill and wait for completion.
@@ -314,7 +321,7 @@ impl<T> PooledBuffer<T> {
     /// This buffer and the stream must remain alive until the stream has
     /// completed the fill.
     pub unsafe fn zero_async(&self, stream: &Stream) -> Result<()> {
-        self.ensure_stream_context(stream)?;
+        self.ensure_stream_access(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -359,7 +366,7 @@ impl<T> PooledBuffer<T> {
                 self.len
             )));
         }
-        self.ensure_stream_context(stream)?;
+        self.ensure_stream_access(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -405,7 +412,7 @@ impl<T> PooledBuffer<T> {
                 self.len
             )));
         }
-        self.ensure_stream_context(stream)?;
+        self.ensure_stream_access(stream)?;
         if self.ptr == 0 {
             return Ok(());
         }
@@ -619,5 +626,38 @@ mod cross_stream_tests {
         buffer.share_with(&other).unwrap();
         buffer.share_with(&other).unwrap();
         assert_eq!(buffer.consumer_count(), 1);
+    }
+
+    #[test]
+    fn ungranted_same_context_stream_is_rejected() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let producer = Stream::new(&context).unwrap();
+        let consumer = Stream::new(&context).unwrap();
+        let allocator = StreamOrderedAllocator::new(&producer).unwrap();
+        let buffer: PooledBuffer<u8> = allocator.alloc(8).unwrap();
+
+        let host = [1u8; 8];
+        let err = unsafe { buffer.copy_from_host_async(&consumer, &host) }.unwrap_err();
+        assert!(
+            err.to_string().contains("share_with()"),
+            "expected share_with error, got: {err}"
+        );
+
+        let err2 = unsafe { buffer.zero_async(&consumer) }.unwrap_err();
+        assert!(
+            err2.to_string().contains("share_with()"),
+            "expected share_with error for zero, got: {err2}"
+        );
+
+        // Grant now succeeds and operation proceeds.
+        buffer.share_with(&consumer).unwrap();
+        unsafe { buffer.zero_async(&consumer) }.unwrap();
+        consumer.synchronize().unwrap();
+
+        // Owning stream remains usable without grant.
+        buffer.zero(&producer).unwrap();
     }
 }
