@@ -793,6 +793,11 @@ impl F32Attention {
         if elements == 0 {
             return Ok(());
         }
+        if query_rows == 0 || kv_rows == 0 {
+            return Err(NnisError::invalid_input(format!(
+                "attention multi-head scale-causal requires non-zero causal dimensions; got query_rows={query_rows}, kv_rows={kv_rows} with elements={elements}"
+            )));
+        }
         let total_elements = elements;
         let (elements, query_rows, kv_rows) = (
             u64::try_from(elements)
@@ -2060,5 +2065,63 @@ mod tests {
         // Oversized heads are rejected before launch exactly like the
         // single-head path.
         assert!(!attention.fused_available(4096, 4096));
+    }
+
+    #[test]
+    fn attention_scale_causal_multihead_rejects_zero_dimensions_before_launch() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let compiler = JitCompiler::new();
+        let attention = F32Attention::load(&context, &compiler).unwrap();
+        let stream = Stream::new(&context).unwrap();
+
+        // elements > 0 with query_rows == 0 must be rejected.
+        let elements = 10usize;
+        let scores = DeviceBuffer::<f32>::new(&context, elements).unwrap();
+        let output = DeviceBuffer::<f32>::new(&context, elements).unwrap();
+        let error = unsafe {
+            attention
+                .enqueue_scale_causal_multihead(&stream, &scores, &output, elements, 0, 5, 0.125)
+        }
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("non-zero causal dimensions"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("query_rows=0"), "{error}");
+        // Stream should remain usable.
+        stream.synchronize().unwrap();
+
+        // elements > 0 with kv_rows == 0 must be rejected.
+        let error = unsafe {
+            attention
+                .enqueue_scale_causal_multihead(&stream, &scores, &output, elements, 5, 0, 0.125)
+        }
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("non-zero causal dimensions"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("kv_rows=0"), "{error}");
+        stream.synchronize().unwrap();
+
+        // elements == 0 is a valid no-op even with zero dimensions.
+        let empty_scores = DeviceBuffer::<f32>::new(&context, 0).unwrap();
+        let empty_output = DeviceBuffer::<f32>::new(&context, 0).unwrap();
+        unsafe {
+            attention.enqueue_scale_causal_multihead(
+                &stream,
+                &empty_scores,
+                &empty_output,
+                0,
+                0,
+                0,
+                0.125,
+            )
+        }
+        .unwrap();
+        stream.synchronize().unwrap();
     }
 }
