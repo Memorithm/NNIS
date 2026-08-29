@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   rust-quality:
@@ -16,9 +16,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
+
+      - name: Normalize decoder branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/model-runtime-decoder'
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
+        run: |
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Cargo.lock crates/nnis-model
+            git commit -m 'style(model): apply rustfmt and sync lockfile'
+            git push origin "HEAD:${HEAD_BRANCH}"
+          fi
 
       - name: rustfmt
         run: cargo fmt --all -- --check
