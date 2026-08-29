@@ -61,6 +61,12 @@ impl ModelConfig {
                 self.num_attention_heads, self.num_key_value_heads
             )));
         }
+        if self.head_dim() % 2 != 0 {
+            return Err(NnisError::invalid_input(format!(
+                "rotary head dimension must be even; got {}",
+                self.head_dim()
+            )));
+        }
         if !self.rms_norm_eps.is_finite() || self.rms_norm_eps <= 0.0 {
             return Err(NnisError::invalid_input(format!(
                 "rms_norm_eps must be finite and positive; got {}",
@@ -167,6 +173,12 @@ mod tests {
     fn invalid_shapes_and_numeric_policy_are_rejected() {
         let mut config = valid_config();
         config.hidden_size = 63;
+        assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.hidden_size = 30;
+        config.num_attention_heads = 2;
+        config.num_key_value_heads = 2;
         assert!(config.validate().is_err());
 
         let mut config = valid_config();
