@@ -6,8 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   rust-quality:
@@ -17,111 +16,21 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
-      - name: Normalize branch quality fixes
-        if: github.event_name == 'pull_request' && github.head_ref == 'feature/model-runtime-owned-async-kv'
-        env:
-          HEAD_BRANCH: ${{ github.head_ref }}
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              Path("crates/nnis-kernels/src/gather.rs"): (
-                  ".map(|index| (((index * 13 % 97) as f32 - 48.0) * 0.0625))",
-                  ".map(|index| ((index * 13 % 97) as f32 - 48.0) * 0.0625)",
-              ),
-              Path("crates/nnis-kernels/src/reduction.rs"): (
-                  ".map(|index| (((index * 37 % 91) as f32 - 45.0) * 0.125))",
-                  ".map(|index| ((index * 37 % 91) as f32 - 45.0) * 0.125)",
-              ),
-              Path("crates/nnis-bench/examples/bf16_attention.rs"): (
-                  ".map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))",
-                  ".map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)",
-              ),
-              Path("crates/nnis-bench/examples/attention.rs"): (
-                  ".map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))",
-                  ".map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)",
-              ),
-          }
-          for path, (old, new) in replacements.items():
-              text = path.read_text()
-              count = text.count(old)
-              if count not in (0, 1):
-                  raise SystemExit(f"unexpected replacement count {count} for {path}")
-              if count == 1:
-                  path.write_text(text.replace(old, new))
-          PY
-          cargo fmt --all
-          if ! git diff --quiet; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add -- '*.rs'
-            git commit -m 'style: keep strict warning gates clean'
-            git push origin "HEAD:${HEAD_BRANCH}"
-          fi
-
       - name: rustfmt
-        id: rustfmt
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo fmt --all -- --check 2>&1 | tee rustfmt.log
+        run: cargo fmt --all -- --check
 
       - name: cargo check
-        id: check
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo check --workspace --all-targets 2>&1 | tee check.log
+        if: always()
+        run: cargo check --workspace --all-targets
 
       - name: clippy
-        id: clippy
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+        if: always()
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: tests without GPU requirement
-        id: tests
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test --workspace --all-targets 2>&1 | tee tests.log
-
-      - name: Report failing diagnostics
-        if: github.event_name == 'pull_request' && (steps.rustfmt.outcome == 'failure' || steps.check.outcome == 'failure' || steps.clippy.outcome == 'failure' || steps.tests.outcome == 'failure')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          {
-            echo 'Automated CPU quality diagnostics for `${{ github.sha }}`:'
-            for item in rustfmt check clippy tests; do
-              file="${item}.log"
-              echo
-              echo "<details><summary>${item}</summary>"
-              echo
-              echo '```text'
-              tail -n 160 "$file"
-              echo '```'
-              echo '</details>'
-            done
-          } > diagnostics.md
-          gh pr comment "${{ github.event.pull_request.number }}" --body-file diagnostics.md
-
-      - name: Enforce quality result
         if: always()
-        run: |
-          test '${{ steps.rustfmt.outcome }}' = success
-          test '${{ steps.check.outcome }}' = success
-          test '${{ steps.clippy.outcome }}' = success
-          test '${{ steps.tests.outcome }}' = success
+        run: cargo test --workspace --all-targets
