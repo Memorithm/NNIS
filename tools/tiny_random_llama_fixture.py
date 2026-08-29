@@ -7,8 +7,7 @@ converts its weights into NNIS's explicit internal matrix orientation, and
 records trusted Transformers logits for the same tokenizer IDs and positions.
 
 Dependencies:
-    python -m pip install 'torch>=2.3' 'transformers==4.43.3' \
-        'safetensors>=0.4' 'huggingface_hub>=0.24'
+    python -m pip install -r tools/requirements-tiny-random-llama.txt
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ import struct
 from pathlib import Path
 
 import torch
+import transformers
 from huggingface_hub import snapshot_download
 from safetensors.torch import load_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -107,9 +107,13 @@ def check_source_config(config: dict) -> None:
             raise RuntimeError(
                 f"pinned checkpoint contract changed: config[{key!r}]={config.get(key)!r}, expected {value!r}"
             )
-    if not math.isclose(float(config["rms_norm_eps"]), 1.0e-5, rel_tol=0.0, abs_tol=0.0):
+    if not math.isclose(
+        float(config["rms_norm_eps"]), 1.0e-5, rel_tol=0.0, abs_tol=0.0
+    ):
         raise RuntimeError("unexpected rms_norm_eps")
-    if not math.isclose(float(config["rope_theta"]), 10000.0, rel_tol=0.0, abs_tol=0.0):
+    if not math.isclose(
+        float(config["rope_theta"]), 10000.0, rel_tol=0.0, abs_tol=0.0
+    ):
         raise RuntimeError("unexpected rope_theta")
     dtype = config.get("torch_dtype", config.get("dtype"))
     if dtype != "float32":
@@ -144,7 +148,9 @@ def convert_weights(checkpoint: Path, output: Path) -> None:
         extra = sorted(actual - expected)
         raise RuntimeError(f"unexpected Safetensors key set; missing={missing}, extra={extra}")
     if any(tensor.dtype != torch.float32 for tensor in source.values()):
-        bad = sorted(name for name, tensor in source.items() if tensor.dtype != torch.float32)
+        bad = sorted(
+            name for name, tensor in source.items() if tensor.dtype != torch.float32
+        )
         raise RuntimeError(f"non-f32 source tensors: {bad}")
 
     if output.exists():
@@ -207,6 +213,7 @@ def convert_weights(checkpoint: Path, output: Path) -> None:
         "source_revision": REVISION,
         "source_model_sha256": MODEL_SHA256,
         "converter": Path(__file__).name,
+        "transformers_version": transformers.__version__,
     }
     (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
 
@@ -238,7 +245,7 @@ def reference_logits(
         "source_repo": REPO_ID,
         "source_revision": REVISION,
         "source_model_sha256": MODEL_SHA256,
-        "transformers_version": TRANSFORMERS_VERSION,
+        "transformers_version": transformers.__version__,
         "prompt": prompt,
         "input_ids": input_ids[0].tolist(),
         "decode_steps": decode_steps,
@@ -278,6 +285,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.decode_steps < 0:
         parser.error("--decode-steps must be non-negative")
+    if transformers.__version__ != TRANSFORMERS_VERSION:
+        raise RuntimeError(
+            "trusted reference requires Transformers "
+            f"{TRANSFORMERS_VERSION}; got {transformers.__version__}"
+        )
 
     checkpoint = download_checkpoint(args.cache_dir)
     model_dir = args.output / "model"
@@ -285,6 +297,7 @@ def main() -> None:
     convert_weights(checkpoint, model_dir)
     reference_logits(checkpoint, reference_dir, args.prompt, args.decode_steps)
     print(f"checkpoint={REPO_ID}@{REVISION}")
+    print(f"transformers={transformers.__version__}")
     print(f"model_dir={model_dir}")
     print(f"reference_dir={reference_dir}")
 
