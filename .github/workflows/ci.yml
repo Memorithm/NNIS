@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   rust-quality:
@@ -21,16 +22,49 @@ jobs:
         run: rustup component add rustfmt clippy
 
       - name: rustfmt
-        run: cargo fmt --all -- --check
+        id: rustfmt
+        continue-on-error: true
+        run: cargo fmt --all -- --check 2>&1 | tee rustfmt.log
 
       - name: cargo check
-        if: always()
-        run: cargo check --workspace --all-targets
+        id: check
+        continue-on-error: true
+        run: cargo check --workspace --all-targets 2>&1 | tee check.log
 
       - name: clippy
-        if: always()
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        id: clippy
+        continue-on-error: true
+        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
 
       - name: tests without GPU requirement
+        id: tests
+        continue-on-error: true
+        run: cargo test --workspace --all-targets 2>&1 | tee tests.log
+
+      - name: Report failing diagnostics
+        if: github.event_name == 'pull_request' && (steps.rustfmt.outcome == 'failure' || steps.check.outcome == 'failure' || steps.clippy.outcome == 'failure' || steps.tests.outcome == 'failure')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'Automated CPU quality diagnostics for `${{ github.sha }}`:'
+            for item in rustfmt check clippy tests; do
+              file="${item}.log"
+              echo
+              echo "<details><summary>${item}</summary>"
+              echo
+              echo '```text'
+              tail -n 160 "$file"
+              echo '```'
+              echo '</details>'
+            done
+          } > diagnostics.md
+          gh pr comment "${{ github.event.pull_request.number }}" --body-file diagnostics.md
+
+      - name: Enforce quality result
         if: always()
-        run: cargo test --workspace --all-targets
+        run: |
+          test '${{ steps.rustfmt.outcome }}' = success
+          test '${{ steps.check.outcome }}' = success
+          test '${{ steps.clippy.outcome }}' = success
+          test '${{ steps.tests.outcome }}' = success
