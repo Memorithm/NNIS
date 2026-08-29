@@ -124,6 +124,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "nnis-model"
+version = "0.1.0"
+dependencies = [
+ "nnis-jit",
+ "nnis-kernels",
+ "nnis-rt",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nnis-rt"
 version = "0.1.0"
 dependencies = [

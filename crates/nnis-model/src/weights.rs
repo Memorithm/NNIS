@@ -197,10 +197,7 @@ impl ModelWeights {
                 &layer.post_attention_norm,
                 config.hidden_size,
             )?;
-            for (name, weight) in [
-                ("gate_proj", &layer.gate_proj),
-                ("up_proj", &layer.up_proj),
-            ] {
+            for (name, weight) in [("gate_proj", &layer.gate_proj), ("up_proj", &layer.up_proj)] {
                 Self::expect_matrix(
                     &format!("layers.{index}.{name}"),
                     weight,
@@ -260,10 +257,16 @@ impl ModelWeights {
         Ok(())
     }
 
-    fn for_each_tensor(&self, mut visit: impl FnMut(&str, &DeviceTensor) -> Result<()>) -> Result<()> {
+    fn for_each_tensor(
+        &self,
+        mut visit: impl FnMut(&str, &DeviceTensor) -> Result<()>,
+    ) -> Result<()> {
         visit("token_embedding", self.token_embedding.tensor())?;
         for (index, layer) in self.layers.iter().enumerate() {
-            visit(&format!("layers.{index}.input_norm"), layer.input_norm.tensor())?;
+            visit(
+                &format!("layers.{index}.input_norm"),
+                layer.input_norm.tensor(),
+            )?;
             visit(&format!("layers.{index}.q_proj"), layer.q_proj.tensor())?;
             visit(&format!("layers.{index}.k_proj"), layer.k_proj.tensor())?;
             visit(&format!("layers.{index}.v_proj"), layer.v_proj.tensor())?;
@@ -272,9 +275,15 @@ impl ModelWeights {
                 &format!("layers.{index}.post_attention_norm"),
                 layer.post_attention_norm.tensor(),
             )?;
-            visit(&format!("layers.{index}.gate_proj"), layer.gate_proj.tensor())?;
+            visit(
+                &format!("layers.{index}.gate_proj"),
+                layer.gate_proj.tensor(),
+            )?;
             visit(&format!("layers.{index}.up_proj"), layer.up_proj.tensor())?;
-            visit(&format!("layers.{index}.down_proj"), layer.down_proj.tensor())?;
+            visit(
+                &format!("layers.{index}.down_proj"),
+                layer.down_proj.tensor(),
+            )?;
         }
         visit("final_norm", self.final_norm.tensor())?;
         visit("lm_head", self.lm_head.tensor())

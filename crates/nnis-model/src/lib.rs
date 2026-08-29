@@ -10,6 +10,4 @@ mod weights;
 
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use kernels::F32DecoderKernels;
-pub use weights::{
-    DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight,
-};
+pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};

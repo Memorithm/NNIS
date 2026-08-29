@@ -136,15 +136,12 @@ pub struct F32DecoderKernels {
 
 impl F32DecoderKernels {
     pub fn load(context: &Arc<Context>, compiler: &JitCompiler) -> Result<Self> {
-        let code = compiler.compile_cubin(
-            MODEL_KERNELS_SOURCE,
-            &CompileOptions::for_device(context),
-        )?;
+        let code =
+            compiler.compile_cubin(MODEL_KERNELS_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let weighted_rms_norm = module.get_function("nnis_weighted_rmsnorm_f32")?;
         let multiply = module.get_function("nnis_multiply_f32")?;
-        let cached_attention_decode =
-            module.get_function("nnis_cached_attention_decode_f32")?;
+        let cached_attention_decode = module.get_function("nnis_cached_attention_decode_f32")?;
 
         for (name, kernel) in [
             ("weighted_rms_norm", &weighted_rms_norm),
@@ -241,11 +238,9 @@ impl F32DecoderKernels {
         }
         let grid_rows = u32::try_from(rows)
             .map_err(|_| NnisError::invalid_input("weighted RMSNorm rows exceed u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid_rows, 1, 1),
-            Dim3::new(self.block_size, 1, 1),
-        )
-        .with_dynamic_shared_memory(self.block_size * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid_rows, 1, 1), Dim3::new(self.block_size, 1, 1))
+                .with_dynamic_shared_memory(self.block_size * std::mem::size_of::<f32>() as u32);
         let mut args = KernelArgs::with_capacity(6, 3);
         args.push_buffer(input)
             .push_buffer(weight)
@@ -472,11 +467,8 @@ mod tests {
             .collect();
         assert_eq!(product.to_vec(&stream).unwrap(), expected_product);
 
-        let mut cache = KvCache::<f32>::new(
-            &stream,
-            KvCacheConfig::new(1, 2, 2, 4).unwrap(),
-        )
-        .unwrap();
+        let mut cache =
+            KvCache::<f32>::new(&stream, KvCacheConfig::new(1, 2, 2, 4).unwrap()).unwrap();
         let keys = Arc::new(
             DeviceBuffer::from_host(
                 &context,
@@ -494,8 +486,7 @@ mod tests {
             .unwrap(),
         );
         cache.append_layer(0, keys, values, 2).unwrap();
-        let query = DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 0.0, 0.0, 1.0])
-            .unwrap();
+        let query = DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 0.0, 0.0, 1.0]).unwrap();
         let attended = DeviceBuffer::<f32>::new(&context, 4).unwrap();
         kernels
             .cached_attention_decode(&stream, &query, &cache, 0, &attended, 1.0)
