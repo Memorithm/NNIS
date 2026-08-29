@@ -5,6 +5,11 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const SOURCE_REPO: &str = "amakhov/tiny-random-llama";
+const SOURCE_REVISION: &str = "99160cb087861a1e3c54ff5d3f45fd9488d9c04e";
+const SOURCE_MODEL_SHA256: &str =
+    "a4eb5dcdfc71d3a8f297bb1c2a672d3babe04f102480addde293210778805d30";
+
 #[derive(Debug, Deserialize)]
 struct ReferenceManifest {
     format: String,
@@ -101,6 +106,15 @@ fn read_reference_manifest(directory: &Path) -> Result<ReferenceManifest> {
             manifest.format, manifest.version
         )));
     }
+    if manifest.source_repo != SOURCE_REPO
+        || manifest.source_revision != SOURCE_REVISION
+        || manifest.source_model_sha256 != SOURCE_MODEL_SHA256
+    {
+        return Err(NnisError::invalid_input(format!(
+            "reference provenance does not match pinned fixture: {}@{} sha256={}",
+            manifest.source_repo, manifest.source_revision, manifest.source_model_sha256
+        )));
+    }
     if manifest.dtype != "f32" {
         return Err(NnisError::unsupported(format!(
             "reference dtype {:?} is not f32",
@@ -159,7 +173,11 @@ fn compare(actual: &[f32], expected: &[f32], atol: f32, rtol: f32) -> ErrorMetri
     for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
         let absolute = (actual - expected).abs();
         let relative = if expected == 0.0 {
-            if absolute == 0.0 { 0.0 } else { f32::INFINITY }
+            if absolute == 0.0 {
+                0.0
+            } else {
+                f32::INFINITY
+            }
         } else {
             absolute / expected.abs()
         };
@@ -169,8 +187,7 @@ fn compare(actual: &[f32], expected: &[f32], atol: f32, rtol: f32) -> ErrorMetri
         }
         metrics.max_rel = metrics.max_rel.max(relative);
         squared_sum += f64::from(absolute) * f64::from(absolute);
-        let tolerance = atol + rtol * expected.abs();
-        if !actual.is_finite() || absolute > tolerance {
+        if !actual.is_finite() || absolute > atol + rtol * expected.abs() {
             metrics.failures += 1;
         }
     }
@@ -211,6 +228,16 @@ fn report_and_require(
     Ok(())
 }
 
+fn require_greedy(step: usize, logits: &[f32], expected: u32) -> Result<()> {
+    let actual = argmax(logits) as u32;
+    if actual != expected {
+        return Err(NnisError::invalid_input(format!(
+            "greedy token mismatch at step {step}: NNIS {actual}, reference {expected}"
+        )));
+    }
+    Ok(())
+}
+
 fn run(arguments: Arguments) -> Result<()> {
     let reference = read_reference_manifest(&arguments.reference_dir)?;
     let device = Device::first()?;
@@ -226,55 +253,40 @@ fn run(arguments: Arguments) -> Result<()> {
     println!("input_ids={:?}", reference.input_ids);
     println!("atol={} rtol={}", arguments.atol, arguments.rtol);
 
-    let prefill = session.prefill(&reference.input_ids)?;
+    let mut actual_logits = session.prefill(&reference.input_ids)?;
     let expected_prefill = read_f32_le(
         &arguments.reference_dir.join(&reference.logit_files[0]),
         vocab,
     )?;
     report_and_require(
         "prefill",
-        &prefill,
+        &actual_logits,
         &expected_prefill,
         arguments.atol,
         arguments.rtol,
     )?;
 
     for step in 0..reference.decode_steps {
-        let expected_greedy = reference.greedy_ids[step];
-        let actual_greedy = if step == 0 {
-            argmax(&prefill) as u32
-        } else {
-            // The previous decode comparison has already verified the logits
-            // from which this reference token was chosen. Use the trusted token
-            // for the next step so one mismatch does not cascade into a new
-            // sequence and obscure the first failing layer/position.
-            expected_greedy
-        };
-        if actual_greedy != expected_greedy {
-            return Err(NnisError::invalid_input(format!(
-                "greedy token mismatch at step {step}: NNIS {actual_greedy}, reference {expected_greedy}"
-            )));
-        }
-        let actual = session.decode_one(expected_greedy)?;
+        let greedy = reference.greedy_ids[step];
+        require_greedy(step, &actual_logits, greedy)?;
+        actual_logits = session.decode_one(greedy)?;
         let expected = read_f32_le(
             &arguments.reference_dir.join(&reference.logit_files[step + 1]),
             vocab,
         )?;
         report_and_require(
             &format!("decode[{step}]"),
-            &actual,
+            &actual_logits,
             &expected,
             arguments.atol,
             arguments.rtol,
         )?;
     }
 
-    let generated = model
-        .new_session()?
-        .generate(
-            &reference.input_ids,
-            GenerationConfig::greedy(reference.decode_steps),
-        )?;
+    let generated = model.new_session()?.generate(
+        &reference.input_ids,
+        GenerationConfig::greedy(reference.decode_steps),
+    )?;
     if generated != reference.greedy_ids {
         return Err(NnisError::invalid_input(format!(
             "greedy sequence mismatch: NNIS {generated:?}, reference {:?}",
