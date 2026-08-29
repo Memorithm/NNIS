@@ -9,4 +9,5 @@ description = "NVIDIA Native Inference Stack — facade crate"
 [dependencies]
 nnis-jit = { workspace = true }
 nnis-kernels = { workspace = true }
+nnis-model = { workspace = true }
 nnis-rt = { workspace = true }
