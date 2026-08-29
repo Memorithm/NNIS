@@ -22,25 +22,37 @@ jobs:
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
-      - name: Normalize decoder runtime branch
+      - name: Normalize model facade integration
         if: github.event_name == 'pull_request' && github.head_ref == 'feature/model-runtime-decoder'
         env:
           HEAD_BRANCH: ${{ github.head_ref }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('crates/nnis-model/src/runtime_kernels.rs')
+
+          path = Path('crates/nnis/src/lib.rs')
           text = path.read_text()
-          text = text.replace('-1.0 * 0.5 - 2.0 * 0.25', '-0.5 - 2.0 * 0.25')
-          text = text.replace('2.0 * 0.5 + -1.0 * 0.25', '2.0 * 0.5 - 0.25')
+          marker = 'pub use jit::{\n'
+          block = '''/// High-level decoder-only model runtime.\npub mod model {\n    pub use nnis_model::{\n        load_model_directory, Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig,\n        InferenceSession, MatrixWeight, Model, ModelConfig, ModelManifest, ModelWeights,\n        TensorManifest, VectorWeight, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,\n        NNIS_MODEL_VERSION,\n    };\n}\n\n'''
+          if block not in text:
+              if marker not in text:
+                  raise SystemExit('nnis facade insertion marker not found')
+              text = text.replace(marker, block + marker, 1)
+
+          marker = '/// Imports for the typical NNIS execution path.\n'
+          reexports = '''pub use model::{\n    load_model_directory, Activation, GenerationConfig, InferenceSession, Model, ModelConfig,\n    ModelManifest, TensorManifest, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,\n    NNIS_MODEL_VERSION,\n};\n\n'''
+          if reexports not in text:
+              if marker not in text:
+                  raise SystemExit('nnis facade re-export marker not found')
+              text = text.replace(marker, reexports + marker, 1)
           path.write_text(text)
           PY
           cargo fmt --all
           if ! git diff --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add crates/nnis-model
-            git commit -m 'style(model): normalize decoder runtime sources'
+            git add crates/nnis crates/nnis-model
+            git commit -m 'feat(facade): expose decoder model runtime'
             git push origin "HEAD:${HEAD_BRANCH}"
           fi
 
