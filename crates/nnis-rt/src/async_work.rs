@@ -102,3 +102,32 @@ impl<R> Drop for PendingGpuWork<R> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{gpu_context, DeviceBuffer};
+    use std::sync::Arc;
+
+    #[test]
+    fn pending_work_owns_async_buffer_until_event_completion_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let buffer = Arc::new(DeviceBuffer::<u32>::new(&context, 4096).unwrap());
+
+        // SAFETY: the ownership record below retains the exact allocation and
+        // stream referenced by the zero-fill until the recorded event fires.
+        unsafe { buffer.zero_async(&stream).unwrap() };
+        // SAFETY: `buffer` is the only resource captured by the submitted fill;
+        // `PendingGpuWork` itself retains a clone of `stream`.
+        let pending = unsafe { PendingGpuWork::from_enqueued(&stream, Arc::clone(&buffer)) }
+            .unwrap();
+        drop(buffer);
+
+        let retained = pending.wait().unwrap();
+        assert_eq!(retained.to_vec(&stream).unwrap(), vec![0; 4096]);
+    }
+}
