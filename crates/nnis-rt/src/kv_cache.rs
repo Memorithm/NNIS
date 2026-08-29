@@ -124,10 +124,9 @@ impl<T: DevicePod> KvCache<T> {
 
     /// Number of valid token positions currently stored for `layer`.
     pub fn len(&self, layer: usize) -> Result<usize> {
-        self.lengths
-            .get(layer)
-            .copied()
-            .ok_or_else(|| NnisError::invalid_input(format!("KV cache layer {layer} is out of range")))
+        self.lengths.get(layer).copied().ok_or_else(|| {
+            NnisError::invalid_input(format!("KV cache layer {layer} is out of range"))
+        })
     }
 
     pub fn remaining(&self, layer: usize) -> Result<usize> {
@@ -160,10 +159,9 @@ impl<T: DevicePod> KvCache<T> {
 
     /// Reset one layer without clearing device memory.
     pub fn reset_layer(&mut self, layer: usize) -> Result<()> {
-        let length = self
-            .lengths
-            .get_mut(layer)
-            .ok_or_else(|| NnisError::invalid_input(format!("KV cache layer {layer} is out of range")))?;
+        let length = self.lengths.get_mut(layer).ok_or_else(|| {
+            NnisError::invalid_input(format!("KV cache layer {layer} is out of range"))
+        })?;
         *length = 0;
         Ok(())
     }
@@ -224,6 +222,15 @@ impl<T: DevicePod> KvCache<T> {
                 "KV cache and append sources must belong to one CUDA context",
             ));
         }
+        for source in [&*keys, &*values] {
+            if source.device_ptr() == self.keys.device_ptr()
+                || source.device_ptr() == self.values.device_ptr()
+            {
+                return Err(NnisError::invalid_input(
+                    "KV append sources must not alias the cache allocations",
+                ));
+            }
+        }
 
         let resources = KvAppendResources {
             source_keys: keys,
@@ -232,35 +239,58 @@ impl<T: DevicePod> KvCache<T> {
             cache_values: Arc::clone(&self.values),
         };
 
-        if tokens != 0 {
+        let elements_per_head = tokens
+            .checked_mul(self.config.head_dim)
+            .ok_or_else(|| NnisError::invalid_input("KV append head size overflows usize"))?;
+        let bytes_per_head = elements_per_head
+            .checked_mul(size_of::<T>())
+            .ok_or_else(|| NnisError::invalid_input("KV append byte size overflows usize"))?;
+
+        // Build and validate the entire transfer plan before submitting the
+        // first CUDA operation. After submission begins, no ordinary Rust
+        // validation error is allowed to drop the ownership graph early.
+        let mut copies = Vec::with_capacity(self.config.heads);
+        for head in 0..self.config.heads {
+            let source_offset = head
+                .checked_mul(elements_per_head)
+                .ok_or_else(|| NnisError::invalid_input("KV source offset overflows usize"))?;
+            let destination_offset = self.append_base_elements(layer, head, start)?;
+            copies.push(KvHeadCopy {
+                source_key: Self::device_region_address(
+                    &resources.source_keys,
+                    source_offset,
+                    elements_per_head,
+                )?,
+                source_value: Self::device_region_address(
+                    &resources.source_values,
+                    source_offset,
+                    elements_per_head,
+                )?,
+                destination_key: Self::device_region_address(
+                    &resources.cache_keys,
+                    destination_offset,
+                    elements_per_head,
+                )?,
+                destination_value: Self::device_region_address(
+                    &resources.cache_values,
+                    destination_offset,
+                    elements_per_head,
+                )?,
+            });
+        }
+
+        if bytes_per_head != 0 {
             context.set_current()?;
             let api = driver::api()?;
-            let elements_per_head = tokens
-                .checked_mul(self.config.head_dim)
-                .ok_or_else(|| NnisError::invalid_input("KV append head size overflows usize"))?;
-            let bytes_per_head = elements_per_head
-                .checked_mul(size_of::<T>())
-                .ok_or_else(|| NnisError::invalid_input("KV append byte size overflows usize"))?;
-
-            for head in 0..self.config.heads {
-                let source_offset = head
-                    .checked_mul(elements_per_head)
-                    .ok_or_else(|| NnisError::invalid_input("KV source offset overflows usize"))?;
-                let destination_offset = self.append_base_elements(layer, head, start)?;
-                let source_key = Self::device_address(&resources.source_keys, source_offset)?;
-                let source_value = Self::device_address(&resources.source_values, source_offset)?;
-                let destination_key = Self::device_address(&resources.cache_keys, destination_offset)?;
-                let destination_value =
-                    Self::device_address(&resources.cache_values, destination_offset)?;
-
-                // SAFETY: all addresses are validated offsets into live device
-                // allocations owned by `resources`; context is current; the
-                // bound stream belongs to that context. The ownership record
-                // below retains every allocation until the stream tail passes.
+            for (head, copy) in copies.into_iter().enumerate() {
+                // SAFETY: the complete plan was range-validated before any
+                // submission. All addresses refer to allocations retained by
+                // `resources`, the context is current, and the stream belongs
+                // to that context.
                 let key_rc = unsafe {
                     (api.cuMemcpyAsync)(
-                        destination_key,
-                        source_key,
+                        copy.destination_key,
+                        copy.source_key,
                         bytes_per_head,
                         self.stream.raw(),
                     )
@@ -278,8 +308,8 @@ impl<T: DevicePod> KvCache<T> {
                 // SAFETY: same proof as the key copy above.
                 let value_rc = unsafe {
                     (api.cuMemcpyAsync)(
-                        destination_value,
-                        source_value,
+                        copy.destination_value,
+                        copy.source_value,
                         bytes_per_head,
                         self.stream.raw(),
                     )
@@ -336,12 +366,27 @@ impl<T: DevicePod> KvCache<T> {
             .checked_add(
                 position
                     .checked_mul(self.config.head_dim)
-                    .ok_or_else(|| NnisError::invalid_input("KV cache position offset overflows usize"))?,
+                    .ok_or_else(|| {
+                        NnisError::invalid_input("KV cache position offset overflows usize")
+                    })?,
             )
             .ok_or_else(|| NnisError::invalid_input("KV cache append offset overflows usize"))
     }
 
-    fn device_address(buffer: &DeviceBuffer<T>, element_offset: usize) -> Result<CUdeviceptr> {
+    fn device_region_address(
+        buffer: &DeviceBuffer<T>,
+        element_offset: usize,
+        elements: usize,
+    ) -> Result<CUdeviceptr> {
+        let end = element_offset
+            .checked_add(elements)
+            .ok_or_else(|| NnisError::invalid_input("device element range overflows usize"))?;
+        if end > buffer.len() {
+            return Err(NnisError::invalid_input(format!(
+                "device region {element_offset}..{end} exceeds buffer length {}",
+                buffer.len()
+            )));
+        }
         let byte_offset = element_offset
             .checked_mul(size_of::<T>())
             .ok_or_else(|| NnisError::invalid_input("device byte offset overflows usize"))?;
@@ -369,6 +414,14 @@ impl<T: DevicePod> KvCache<T> {
     }
 }
 
+#[derive(Clone, Copy)]
+struct KvHeadCopy {
+    source_key: CUdeviceptr,
+    source_value: CUdeviceptr,
+    destination_key: CUdeviceptr,
+    destination_value: CUdeviceptr,
+}
+
 struct KvAppendResources<T: DevicePod> {
     source_keys: Arc<DeviceBuffer<T>>,
     source_values: Arc<DeviceBuffer<T>>,
@@ -377,12 +430,22 @@ struct KvAppendResources<T: DevicePod> {
 }
 
 /// Completion handle for one asynchronous KV-cache append.
-#[derive(Debug)]
 pub struct KvAppend<T: DevicePod> {
     work: PendingGpuWork<KvAppendResources<T>>,
     layer: usize,
     start: usize,
     tokens: usize,
+}
+
+impl<T: DevicePod> core::fmt::Debug for KvAppend<T> {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("KvAppend")
+            .field("layer", &self.layer)
+            .field("start", &self.start)
+            .field("tokens", &self.tokens)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<T: DevicePod> KvAppend<T> {
@@ -440,7 +503,9 @@ mod tests {
             DeviceBuffer::from_host(
                 &context,
                 &stream,
-                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0],
+                &[
+                    1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+                ],
             )
             .unwrap(),
         );
@@ -448,7 +513,10 @@ mod tests {
             DeviceBuffer::from_host(
                 &context,
                 &stream,
-                &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 111.0, 112.0, 113.0, 114.0, 115.0, 116.0],
+                &[
+                    101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 111.0, 112.0, 113.0, 114.0,
+                    115.0, 116.0,
+                ],
             )
             .unwrap(),
         );
@@ -481,10 +549,15 @@ mod tests {
         let keys = cache.keys().to_vec(&stream).unwrap();
         let values = cache.values().to_vec(&stream).unwrap();
         // Layer 0, head 0 occupies elements 0..12; only positions 0..3 are valid.
-        assert_eq!(&keys[0..9], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        assert_eq!(
+            &keys[0..9],
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+        );
         assert_eq!(
             &values[0..9],
-            &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
+            &[
+                101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0
+            ]
         );
         // Layer 0, head 1 starts after head 0's full capacity of 4x3 elements.
         assert_eq!(
