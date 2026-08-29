@@ -363,13 +363,9 @@ impl<T: DevicePod> KvCache<T> {
 
     fn append_base_elements(&self, layer: usize, head: usize, position: usize) -> Result<usize> {
         self.head_base_elements(layer, head)?
-            .checked_add(
-                position
-                    .checked_mul(self.config.head_dim)
-                    .ok_or_else(|| {
-                        NnisError::invalid_input("KV cache position offset overflows usize")
-                    })?,
-            )
+            .checked_add(position.checked_mul(self.config.head_dim).ok_or_else(|| {
+                NnisError::invalid_input("KV cache position offset overflows usize")
+            })?)
             .ok_or_else(|| NnisError::invalid_input("KV cache append offset overflows usize"))
     }
 
@@ -478,12 +474,7 @@ mod tests {
 
     #[test]
     fn config_rejects_zero_and_overflow_shapes() {
-        for config in [
-            (0, 1, 1, 1),
-            (1, 0, 1, 1),
-            (1, 1, 0, 1),
-            (1, 1, 1, 0),
-        ] {
+        for config in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
             assert!(KvCacheConfig::new(config.0, config.1, config.2, config.3).is_err());
         }
         assert!(KvCacheConfig::new(usize::MAX, 2, 2, 2).is_err());
@@ -514,8 +505,8 @@ mod tests {
                 &context,
                 &stream,
                 &[
-                    101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 111.0, 112.0, 113.0, 114.0,
-                    115.0, 116.0,
+                    101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 111.0, 112.0, 113.0, 114.0, 115.0,
+                    116.0,
                 ],
             )
             .unwrap(),
@@ -529,8 +520,7 @@ mod tests {
         pending.wait().unwrap();
 
         let second_keys = Arc::new(
-            DeviceBuffer::from_host(&context, &stream, &[7.0, 8.0, 9.0, 17.0, 18.0, 19.0])
-                .unwrap(),
+            DeviceBuffer::from_host(&context, &stream, &[7.0, 8.0, 9.0, 17.0, 18.0, 19.0]).unwrap(),
         );
         let second_values = Arc::new(
             DeviceBuffer::from_host(
@@ -549,15 +539,10 @@ mod tests {
         let keys = cache.keys().to_vec(&stream).unwrap();
         let values = cache.values().to_vec(&stream).unwrap();
         // Layer 0, head 0 occupies elements 0..12; only positions 0..3 are valid.
-        assert_eq!(
-            &keys[0..9],
-            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
-        );
+        assert_eq!(&keys[0..9], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
         assert_eq!(
             &values[0..9],
-            &[
-                101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0
-            ]
+            &[101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
         );
         // Layer 0, head 1 starts after head 0's full capacity of 4x3 elements.
         assert_eq!(

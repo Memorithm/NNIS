@@ -123,8 +123,8 @@ mod tests {
         unsafe { buffer.zero_async(&stream).unwrap() };
         // SAFETY: `buffer` is the only resource captured by the submitted fill;
         // `PendingGpuWork` itself retains a clone of `stream`.
-        let pending = unsafe { PendingGpuWork::from_enqueued(&stream, Arc::clone(&buffer)) }
-            .unwrap();
+        let pending =
+            unsafe { PendingGpuWork::from_enqueued(&stream, Arc::clone(&buffer)) }.unwrap();
         drop(buffer);
 
         let retained = pending.wait().unwrap();
