@@ -4,9 +4,7 @@ use crate::{
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32Elementwise, F32Gather, F32Gemm, F32TopK, F32TopKWorkspace};
-use nnis_rt::{
-    Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, NnisError, Result, Stream,
-};
+use nnis_rt::{Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, NnisError, Result, Stream};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -244,10 +242,7 @@ impl<'model> InferenceSession<'model> {
         self.validate_prompt(input_ids, generation.max_new_tokens)?;
         self.reset()?;
         let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
-        let generated = DeviceBuffer::<u32>::new(
-            &self.model.context,
-            generation.max_new_tokens,
-        )?;
+        let generated = DeviceBuffer::<u32>::new(&self.model.context, generation.max_new_tokens)?;
 
         let enqueue_result = (|| {
             self.enqueue_prefill(&device_ids)?;
@@ -524,10 +519,9 @@ impl<'model> InferenceSession<'model> {
         for &token in input_ids {
             self.validate_token(token)?;
         }
-        let total = input_ids
-            .len()
-            .checked_add(extra_tokens)
-            .ok_or_else(|| NnisError::invalid_input("prompt + generation length overflows usize"))?;
+        let total = input_ids.len().checked_add(extra_tokens).ok_or_else(|| {
+            NnisError::invalid_input("prompt + generation length overflows usize")
+        })?;
         if total > self.capacity() {
             return Err(NnisError::invalid_input(format!(
                 "prompt + generation requires {total} positions; session capacity is {}",
@@ -571,9 +565,7 @@ fn build_rope_cache(config: &ModelConfig) -> Result<(Vec<f32>, Vec<f32>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        Activation, DecoderLayerWeights, DeviceTensor, MatrixWeight, VectorWeight,
-    };
+    use crate::{Activation, DecoderLayerWeights, DeviceTensor, MatrixWeight, VectorWeight};
     use nnis_rt::gpu_context;
 
     fn matrix(
@@ -593,11 +585,7 @@ mod tests {
         .unwrap()
     }
 
-    fn vector(
-        context: &Arc<Context>,
-        stream: &Stream,
-        values: Vec<f32>,
-    ) -> VectorWeight {
+    fn vector(context: &Arc<Context>, stream: &Stream, values: Vec<f32>) -> VectorWeight {
         let len = values.len();
         VectorWeight::new(
             DeviceTensor::F32(Arc::new(
@@ -629,8 +617,7 @@ mod tests {
             weight_dtype: WeightDType::F32,
         };
         let embedding = vec![
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let zeros = vec![0.0_f32; 16];
         let weights = ModelWeights {

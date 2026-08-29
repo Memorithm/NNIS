@@ -259,11 +259,7 @@ impl F32RuntimeKernels {
         Ok(())
     }
 
-    fn validate_context_f32(
-        &self,
-        stream: &Stream,
-        buffers: &[&DeviceBuffer<f32>],
-    ) -> Result<()> {
+    fn validate_context_f32(&self, stream: &Stream, buffers: &[&DeviceBuffer<f32>]) -> Result<()> {
         let context = self.rope_position.context();
         if !Arc::ptr_eq(context, stream.ctx())
             || buffers
@@ -313,18 +309,12 @@ mod tests {
             &[1.0_f32, 2.0, 3.0, 4.0, -1.0, 0.5, 2.0, -3.0],
         )
         .unwrap();
-        let cos = DeviceBuffer::from_host(
-            &context,
-            &stream,
-            &[1.0_f32, 1.0, 0.5, -0.25, -0.5, 0.75],
-        )
-        .unwrap();
-        let sin = DeviceBuffer::from_host(
-            &context,
-            &stream,
-            &[0.0_f32, 0.0, 0.25, 0.75, 0.5, -0.25],
-        )
-        .unwrap();
+        let cos =
+            DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 1.0, 0.5, -0.25, -0.5, 0.75])
+                .unwrap();
+        let sin =
+            DeviceBuffer::from_host(&context, &stream, &[0.0_f32, 0.0, 0.25, 0.75, 0.5, -0.25])
+                .unwrap();
         let output = DeviceBuffer::<f32>::new(&context, 8).unwrap();
         unsafe {
             kernels
@@ -338,9 +328,9 @@ mod tests {
             2.0 * -0.25 - 4.0 * 0.75,
             3.0 * 0.5 + 1.0 * 0.25,
             4.0 * -0.25 + 2.0 * 0.75,
-            -1.0 * 0.5 - 2.0 * 0.25,
+            -0.5 - 2.0 * 0.25,
             0.5 * -0.25 - -3.0 * 0.75,
-            2.0 * 0.5 + -1.0 * 0.25,
+            2.0 * 0.5 - 0.25,
             -3.0 * -0.25 + 0.5 * 0.75,
         ];
         for (index, (&actual, expected)) in actual.iter().zip(expected).enumerate() {

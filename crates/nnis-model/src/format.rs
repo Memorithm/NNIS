@@ -176,9 +176,9 @@ fn resolve_tensor_path(directory: &Path, file: &str) -> Result<PathBuf> {
     let relative = Path::new(file);
     if file.is_empty()
         || relative.is_absolute()
-        || relative.components().any(|component| {
-            !matches!(component, Component::Normal(_) | Component::CurDir)
-        })
+        || relative
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
     {
         return Err(NnisError::invalid_input(format!(
             "tensor file path {file:?} must be a relative path without parent traversal"
@@ -195,12 +195,7 @@ fn build_weight_graph(
     let intermediate = config.intermediate_size;
     let kv_width = config.key_value_width()?;
 
-    let token_embedding = take_matrix(
-        tensors,
-        "token_embedding",
-        config.vocab_size,
-        hidden,
-    )?;
+    let token_embedding = take_matrix(tensors, "token_embedding", config.vocab_size, hidden)?;
     let mut layers = Vec::with_capacity(config.num_hidden_layers);
     for layer in 0..config.num_hidden_layers {
         let prefix = format!("layers.{layer}");
@@ -221,12 +216,7 @@ fn build_weight_graph(
                 hidden,
                 intermediate,
             )?,
-            up_proj: take_matrix(
-                tensors,
-                &format!("{prefix}.up_proj"),
-                hidden,
-                intermediate,
-            )?,
+            up_proj: take_matrix(tensors, &format!("{prefix}.up_proj"), hidden, intermediate)?,
             down_proj: take_matrix(
                 tensors,
                 &format!("{prefix}.down_proj"),
