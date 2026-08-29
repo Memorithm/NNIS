@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|index| ((index * 29 % 61) as f32 - 30.0) * 0.125)
         .collect();
     let values_host: Vec<f32> = (0..kv_rows * value_dim)
-        .map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))
+        .map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)
         .collect();
     let pack =
         |values: &[f32]| -> Vec<u16> { values.iter().copied().map(f32_to_bf16_rne).collect() };
