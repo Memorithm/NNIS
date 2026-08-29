@@ -2,6 +2,7 @@
 name = "nnis-sys"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Hand-written dynamic FFI bindings to the CUDA driver API and NVRTC for NNIS"
 build = "build.rs"
