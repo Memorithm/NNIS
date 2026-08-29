@@ -7,6 +7,7 @@
 mod config;
 mod format;
 mod kernels;
+mod runtime;
 mod runtime_kernels;
 mod weights;
 
@@ -16,5 +17,6 @@ pub use format::{
     NNIS_MODEL_VERSION,
 };
 pub use kernels::F32DecoderKernels;
+pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
 pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
