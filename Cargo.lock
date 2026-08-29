@@ -90,6 +90,7 @@ version = "0.1.0"
 dependencies = [
  "nnis-jit",
  "nnis-kernels",
+ "nnis-model",
  "nnis-rt",
 ]
 
@@ -121,6 +122,17 @@ dependencies = [
  "nnis-jit",
  "nnis-rt",
  "nnis-sys",
+]
+
+[[package]]
+name = "nnis-model"
+version = "0.1.0"
+dependencies = [
+ "nnis-jit",
+ "nnis-kernels",
+ "nnis-rt",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
