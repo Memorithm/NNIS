@@ -156,13 +156,14 @@ fn main() -> AnyResult<()> {
         match arg.as_str() {
             "--model" => model_dir = args.next().map(PathBuf::from),
             "--reference" => reference_dir = args.next().map(PathBuf::from),
-            other => return Err(invalid_data(format!("unknown argument {other}")) .into()),
+            other => return Err(invalid_data(format!("unknown argument {other}")).into()),
         }
     }
     let model_dir = model_dir.ok_or_else(|| invalid_data("missing --model DIR"))?;
     let reference_dir = reference_dir.ok_or_else(|| invalid_data("missing --reference DIR"))?;
 
-    let manifest: TraceManifest = serde_json::from_slice(&fs::read(reference_dir.join("trace.json"))?)?;
+    let manifest: TraceManifest =
+        serde_json::from_slice(&fs::read(reference_dir.join("trace.json"))?)?;
     if manifest.format != TRACE_FORMAT || manifest.version != TRACE_VERSION {
         return Err(invalid_data("unexpected trace format/version").into());
     }
