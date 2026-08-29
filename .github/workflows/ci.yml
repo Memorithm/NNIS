@@ -23,17 +23,46 @@ jobs:
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
-      - name: Normalize rustfmt on the model-runtime branch
+      - name: Normalize branch quality fixes
         if: github.event_name == 'pull_request' && github.head_ref == 'feature/model-runtime-owned-async-kv'
         env:
           HEAD_BRANCH: ${{ github.head_ref }}
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              Path("crates/nnis-kernels/src/gather.rs"): (
+                  ".map(|index| (((index * 13 % 97) as f32 - 48.0) * 0.0625))",
+                  ".map(|index| ((index * 13 % 97) as f32 - 48.0) * 0.0625)",
+              ),
+              Path("crates/nnis-kernels/src/reduction.rs"): (
+                  ".map(|index| (((index * 37 % 91) as f32 - 45.0) * 0.125))",
+                  ".map(|index| ((index * 37 % 91) as f32 - 45.0) * 0.125)",
+              ),
+              Path("crates/nnis-bench/examples/bf16_attention.rs"): (
+                  ".map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))",
+                  ".map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)",
+              ),
+              Path("crates/nnis-bench/examples/attention.rs"): (
+                  ".map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))",
+                  ".map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)",
+              ),
+          }
+          for path, (old, new) in replacements.items():
+              text = path.read_text()
+              count = text.count(old)
+              if count not in (0, 1):
+                  raise SystemExit(f"unexpected replacement count {count} for {path}")
+              if count == 1:
+                  path.write_text(text.replace(old, new))
+          PY
           cargo fmt --all
           if ! git diff --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add -- '*.rs'
-            git commit -m 'style: apply cargo fmt'
+            git commit -m 'style: keep strict warning gates clean'
             git push origin "HEAD:${HEAD_BRANCH}"
           fi
 
