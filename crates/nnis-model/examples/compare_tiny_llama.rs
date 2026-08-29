@@ -247,7 +247,10 @@ fn run(arguments: Arguments) -> Result<()> {
     let vocab = model.config().vocab_size;
     let mut session = model.new_session()?;
 
-    println!("source={}@{}", reference.source_repo, reference.source_revision);
+    println!(
+        "source={}@{}",
+        reference.source_repo, reference.source_revision
+    );
     println!("source_model_sha256={}", reference.source_model_sha256);
     println!("prompt={:?}", reference.prompt);
     println!("input_ids={:?}", reference.input_ids);
@@ -271,7 +274,9 @@ fn run(arguments: Arguments) -> Result<()> {
         require_greedy(step, &actual_logits, greedy)?;
         actual_logits = session.decode_one(greedy)?;
         let expected = read_f32_le(
-            &arguments.reference_dir.join(&reference.logit_files[step + 1]),
+            &arguments
+                .reference_dir
+                .join(&reference.logit_files[step + 1]),
             vocab,
         )?;
         report_and_require(
