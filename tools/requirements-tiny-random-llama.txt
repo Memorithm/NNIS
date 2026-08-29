@@ -1,0 +1,6 @@
+# Trusted-reference environment for tools/tiny_random_llama_fixture.py
+# Keep Transformers aligned with the checkpoint's recorded version.
+torch==2.4.0
+transformers==4.43.3
+safetensors==0.4.5
+huggingface_hub==0.24.7
