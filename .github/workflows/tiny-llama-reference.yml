@@ -1,0 +1,94 @@
+name: Tiny Llama reference
+
+on:
+  pull_request:
+    paths:
+      - "tools/tiny_random_llama_fixture.py"
+      - "tools/requirements-tiny-random-llama.txt"
+      - ".github/workflows/tiny-llama-reference.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-fixture:
+    name: Pinned Transformers oracle (CPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tools/requirements-tiny-random-llama.txt
+
+      - name: Install CPU reference environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.0
+          python -m pip install \
+            transformers==4.43.3 \
+            safetensors==0.4.5 \
+            huggingface_hub==0.24.7
+
+      - name: Generate pinned fixture and trusted logits
+        run: |
+          python tools/tiny_random_llama_fixture.py \
+            --output /tmp/tiny-random-llama \
+            --prompt "Hello, NNIS!" \
+            --decode-steps 3
+
+      - name: Validate generated evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("/tmp/tiny-random-llama")
+          model = json.loads((root / "model" / "model.json").read_text())
+          provenance = json.loads((root / "model" / "provenance.json").read_text())
+          reference = json.loads((root / "reference" / "reference.json").read_text())
+
+          assert model["format"] == "nnis-model"
+          assert model["version"] == 1
+          assert len(model["tensors"]) == 21
+          assert model["config"] == {
+              "vocab_size": 32000,
+              "hidden_size": 64,
+              "intermediate_size": 128,
+              "num_hidden_layers": 2,
+              "num_attention_heads": 2,
+              "num_key_value_heads": 2,
+              "max_position_embeddings": 128,
+              "rms_norm_eps": 1e-05,
+              "rope_theta": 10000.0,
+              "activation": "silu",
+              "weight_dtype": "f32",
+          }
+          assert provenance["source_revision"] == "99160cb087861a1e3c54ff5d3f45fd9488d9c04e"
+          assert provenance["source_model_sha256"] == "a4eb5dcdfc71d3a8f297bb1c2a672d3babe04f102480addde293210778805d30"
+          assert provenance["transformers_version"] == "4.43.3"
+          assert reference["format"] == "nnis-reference-logits"
+          assert reference["version"] == 1
+          assert reference["transformers_version"] == "4.43.3"
+          assert reference["decode_steps"] == 3
+          assert len(reference["logit_files"]) == 4
+          assert len(reference["greedy_ids"]) == 3
+          assert reference["input_ids"]
+
+          for filename in reference["logit_files"]:
+              path = root / "reference" / filename
+              assert path.stat().st_size == 32000 * 4, (filename, path.stat().st_size)
+
+          tensor_names = {entry["name"] for entry in model["tensors"]}
+          assert len(tensor_names) == 21
+          print("input_ids=", reference["input_ids"])
+          print("greedy_ids=", reference["greedy_ids"])
+          print("tensor_count=", len(tensor_names))
+          print("reference fixture validation passed")
+          PY
