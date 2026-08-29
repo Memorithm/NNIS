@@ -207,11 +207,7 @@ fn report_values(
     let metrics = compare(actual, expected)?;
     println!(
         "{label}: max_abs={:.8e} max_rel={:.8e} rms={:.8e} worst_index={} failures={}",
-        metrics.max_abs,
-        metrics.max_rel,
-        metrics.rms,
-        metrics.worst_index,
-        metrics.failures
+        metrics.max_abs, metrics.max_rel, metrics.rms, metrics.worst_index, metrics.failures
     );
     if metrics.failures != 0 && first_outside.is_none() {
         *first_outside = Some(label.to_string());
@@ -235,7 +231,10 @@ fn report_buffer(
 
 fn run(arguments: Arguments) -> AnyResult<()> {
     let manifest = load_manifest(&arguments.reference_dir)?;
-    println!("source={}@{}", manifest.source_repo, manifest.source_revision);
+    println!(
+        "source={}@{}",
+        manifest.source_repo, manifest.source_revision
+    );
     println!("source_model_sha256={}", manifest.source_model_sha256);
     println!("transformers={}", manifest.transformers_version);
     println!("input_ids={:?}", manifest.input_ids);
