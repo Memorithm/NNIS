@@ -4,18 +4,22 @@
 //! memory management on top of the raw FFI in [`nnis_sys`]. All CUDA state is
 //! context-routed; see [`context::Context`] for the threading model.
 
+pub mod async_work;
 pub mod bf16;
 pub mod context;
 pub mod device;
 pub mod error;
+pub mod kv_cache;
 pub mod memory;
 pub mod pool;
 pub mod stream_event;
 
+pub use async_work::PendingGpuWork;
 pub use bf16::{bf16_bits_to_f32, f32_to_bf16_rne};
 pub use context::{gpu_context, Context};
 pub use device::{Device, DeviceProps};
 pub use error::{ErrorKind, NnisError, Result};
+pub use kv_cache::{KvAppend, KvCache, KvCacheConfig};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use pool::{PooledBuffer, StreamOrderedAllocator};
 pub use stream_event::{Event, Stream};
