@@ -1214,7 +1214,7 @@ mod tests {
         for &size in SIZES {
             // Deterministic spread with exact duplicates to exercise ties.
             let host: Vec<f32> = (0..size)
-                .map(|index| (((index * 37 % 91) as f32 - 45.0) * 0.125))
+                .map(|index| ((index * 37 % 91) as f32 - 45.0) * 0.125)
                 .collect();
             let input = DeviceBuffer::from_host(&context, &stream, &host).unwrap();
 

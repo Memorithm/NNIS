@@ -424,7 +424,7 @@ mod tests {
 
     fn host_table(rows: usize, cols: usize) -> Vec<f32> {
         (0..rows * cols)
-            .map(|index| (((index * 13 % 97) as f32 - 48.0) * 0.0625))
+            .map(|index| ((index * 13 % 97) as f32 - 48.0) * 0.0625)
             .collect()
     }
 

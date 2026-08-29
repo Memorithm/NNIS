@@ -57,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|index| ((index * 29 % 61) as f32 - 30.0) * 0.125)
         .collect();
     let values_host: Vec<f32> = (0..kv_rows * value_dim)
-        .map(|index| (((index * 7 % 43) as f32 - 21.0) * 0.03125))
+        .map(|index| ((index * 7 % 43) as f32 - 21.0) * 0.03125)
         .collect();
     let queries = DeviceBuffer::from_host(&context, &stream, &queries_host)?;
     let keys = DeviceBuffer::from_host(&context, &stream, &keys_host)?;
