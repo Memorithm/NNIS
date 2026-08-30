@@ -375,7 +375,7 @@ mod tests {
         let case = BenchmarkCase::new("nnis_scale_f32", "f32")
             .with_dimension("elements", elements as u64)
             .with_work_items(elements as u64)
-            .with_bytes_per_iteration((elements * 2 * size_of::<f32>()) as u64);
+            .with_bytes_per_iteration((elements * 2 * core::mem::size_of::<f32>()) as u64);
 
         let report = benchmark_gpu(&context, &stream, case, BenchConfig::new(3, 9), || {
             // SAFETY: the harness synchronizes every measured launch and
