@@ -5,7 +5,11 @@ use std::path::PathBuf;
 
 fn read_f32_le(path: &PathBuf) -> Vec<f32> {
     let bytes = fs::read(path).expect("read SmolLM2 final hidden reference");
-    assert_eq!(bytes.len() % 4, 0, "reference byte length must be f32-aligned");
+    assert_eq!(
+        bytes.len() % 4,
+        0,
+        "reference byte length must be f32-aligned"
+    );
     bytes
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
@@ -52,10 +56,17 @@ fn smollm2_prefill_final_norm_diagnostic_on_gpu() {
     let mut worst_index = 0_usize;
     let mut squared_sum = 0.0_f64;
     for (index, (&got, &want)) in actual.iter().zip(&expected).enumerate() {
-        assert!(got.is_finite(), "non-finite NNIS final hidden at index {index}");
+        assert!(
+            got.is_finite(),
+            "non-finite NNIS final hidden at index {index}"
+        );
         let absolute = (got - want).abs();
         let relative = if want == 0.0 {
-            if absolute == 0.0 { 0.0 } else { f32::INFINITY }
+            if absolute == 0.0 {
+                0.0
+            } else {
+                f32::INFINITY
+            }
         } else {
             absolute / want.abs()
         };
