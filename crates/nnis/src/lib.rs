@@ -35,6 +35,16 @@ pub mod kernels {
     };
 }
 
+/// High-level decoder-only model runtime.
+pub mod model {
+    pub use nnis_model::{
+        load_model_directory, Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig,
+        InferenceSession, MatrixWeight, Model, ModelConfig, ModelManifest, ModelWeights,
+        TensorManifest, VectorWeight, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
+        NNIS_MODEL_VERSION,
+    };
+}
+
 pub use jit::{
     CompileOptions, JitCompiler, Kernel, KernelArgs, KernelAttributes, KernelLaunch, LaunchConfig,
     Module, OccupancyRecommendation,
@@ -50,6 +60,12 @@ pub use kernels::{
 pub use runtime::{
     Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
     PinnedBuffer, Result, Stream,
+};
+
+pub use model::{
+    load_model_directory, Activation, GenerationConfig, InferenceSession, Model, ModelConfig,
+    ModelManifest, TensorManifest, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
+    NNIS_MODEL_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.

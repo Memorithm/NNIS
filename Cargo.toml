@@ -5,6 +5,7 @@ members = [
     "crates/nnis-rt",
     "crates/nnis-jit",
     "crates/nnis-kernels",
+    "crates/nnis-model",
     "crates/nnis-bench",
     "crates/nnis",
 ]
@@ -26,6 +27,7 @@ nnis-sys = { path = "crates/nnis-sys" }
 nnis-rt = { path = "crates/nnis-rt" }
 nnis-jit = { path = "crates/nnis-jit" }
 nnis-kernels = { path = "crates/nnis-kernels" }
+nnis-model = { path = "crates/nnis-model" }
 nnis-bench = { path = "crates/nnis-bench" }
 
 [profile.release]
