@@ -27,6 +27,8 @@ jobs:
           cargo +1.77.0 generate-lockfile
           cargo +1.77.0 update -p unicode-segmentation --precise 1.12.0
           cargo +1.77.0 update -p monostate --precise 0.1.14
+          cargo +1.77.0 update -p rayon --precise 1.10.0
+          cargo +1.77.0 update -p rayon-core --precise 1.12.1
           cargo +1.77.0 check --workspace --all-targets
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
