@@ -112,14 +112,15 @@ impl DecodeWorkspace {
         let hidden = model.config.hidden_size;
         let intermediate = model.config.intermediate_size;
         let vocab = model.config.vocab_size;
+        let kv_width = model.config.key_value_width()?;
         Ok(Self {
             hidden: DeviceBuffer::new(context, hidden)?,
             normed: DeviceBuffer::new(context, hidden)?,
             q: DeviceBuffer::new(context, hidden)?,
-            k: DeviceBuffer::new(context, hidden)?,
-            v: Arc::new(DeviceBuffer::new(context, hidden)?),
+            k: DeviceBuffer::new(context, kv_width)?,
+            v: Arc::new(DeviceBuffer::new(context, kv_width)?),
             q_rope: DeviceBuffer::new(context, hidden)?,
-            k_rope: Arc::new(DeviceBuffer::new(context, hidden)?),
+            k_rope: Arc::new(DeviceBuffer::new(context, kv_width)?),
             attention: DeviceBuffer::new(context, hidden)?,
             projected: DeviceBuffer::new(context, hidden)?,
             residual: DeviceBuffer::new(context, hidden)?,
@@ -382,6 +383,7 @@ impl<'model> InferenceSession<'model> {
         }
 
         let attention_scale = 1.0_f32 / (config.head_dim() as f32).sqrt();
+        let kv_width = config.key_value_width()?;
         for layer_index in 0..config.num_hidden_layers {
             let layer = &self.model.weights.layers[layer_index];
             // SAFETY: the session owns all mutable buffers exclusively and
@@ -411,7 +413,7 @@ impl<'model> InferenceSession<'model> {
                     layer.k_proj.tensor().as_f32()?,
                     &self.workspace.k,
                     1,
-                    config.hidden_size,
+                    kv_width,
                     config.hidden_size,
                 )?;
                 self.model.gemm.enqueue_gemm(
@@ -420,7 +422,7 @@ impl<'model> InferenceSession<'model> {
                     layer.v_proj.tensor().as_f32()?,
                     &self.workspace.v,
                     1,
-                    config.hidden_size,
+                    kv_width,
                     config.hidden_size,
                 )?;
                 self.model.runtime.enqueue_rope_position(
@@ -675,7 +677,7 @@ mod tests {
             hidden_size: 4,
             intermediate_size: 4,
             num_hidden_layers: 1,
-            num_attention_heads: 1,
+            num_attention_heads: 2,
             num_key_value_heads: 1,
             max_position_embeddings: 8,
             rms_norm_eps: 1.0e-5,
@@ -687,13 +689,14 @@ mod tests {
             1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let zeros = vec![0.0_f32; 16];
+        let kv_zeros = vec![0.0_f32; 8];
         let weights = ModelWeights {
             token_embedding: matrix(&context, &construction_stream, 4, 4, embedding),
             layers: vec![DecoderLayerWeights {
                 input_norm: vector(&context, &construction_stream, vec![1.0; 4]),
                 q_proj: matrix(&context, &construction_stream, 4, 4, zeros.clone()),
-                k_proj: matrix(&context, &construction_stream, 4, 4, zeros.clone()),
-                v_proj: matrix(&context, &construction_stream, 4, 4, zeros.clone()),
+                k_proj: matrix(&context, &construction_stream, 4, 2, kv_zeros.clone()),
+                v_proj: matrix(&context, &construction_stream, 4, 2, kv_zeros),
                 o_proj: matrix(&context, &construction_stream, 4, 4, zeros.clone()),
                 post_attention_norm: vector(&context, &construction_stream, vec![1.0; 4]),
                 gate_proj: matrix(&context, &construction_stream, 4, 4, zeros.clone()),

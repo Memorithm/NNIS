@@ -61,32 +61,34 @@ extern "C" __global__ void nnis_multiply_f32(
 }
 
 // Correctness-first single-token decoder attention over the fixed-capacity
-// cache layout [layer][head][capacity][head_dim]. One CUDA thread owns one
-// attention head and evaluates online softmax in deterministic position order.
-// Profiling, not assumption, will decide whether this requires parallelization.
+// cache layout [layer][kv_head][capacity][head_dim]. One CUDA thread owns one
+// query head. Consecutive groups of query heads share a KV head.
 extern "C" __global__ void nnis_cached_attention_decode_f32(
     const float* query,
     const float* keys,
     const float* values,
     float* output,
     unsigned long long layer,
-    unsigned long long heads,
+    unsigned long long query_heads,
+    unsigned long long kv_heads,
     unsigned long long capacity,
     unsigned long long head_dim,
     unsigned long long kv_rows,
     float scale
 ) {
-    const unsigned long long head = blockIdx.x;
-    if (threadIdx.x != 0 || head >= heads) {
+    const unsigned long long query_head = blockIdx.x;
+    if (threadIdx.x != 0 || query_head >= query_heads) {
         return;
     }
 
-    const float* q = query + head * head_dim;
+    const unsigned long long group_size = query_heads / kv_heads;
+    const unsigned long long kv_head = query_head / group_size;
+    const float* q = query + query_head * head_dim;
     const unsigned long long cache_base =
-        ((layer * heads + head) * capacity) * head_dim;
+        ((layer * kv_heads + kv_head) * capacity) * head_dim;
     const float* head_keys = keys + cache_base;
     const float* head_values = values + cache_base;
-    float* destination = output + head * head_dim;
+    float* destination = output + query_head * head_dim;
 
     for (unsigned long long dim = 0; dim < head_dim; ++dim) {
         destination[dim] = 0.0f;
@@ -124,6 +126,20 @@ extern "C" __global__ void nnis_cached_attention_decode_f32(
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
+
+fn gqa_group_size(query_heads: usize, kv_heads: usize) -> Result<usize> {
+    if query_heads == 0 || kv_heads == 0 {
+        return Err(NnisError::invalid_input(
+            "cached attention requires non-zero query and KV head counts",
+        ));
+    }
+    if query_heads % kv_heads != 0 {
+        return Err(NnisError::invalid_input(format!(
+            "query head count {query_heads} is not divisible by KV head count {kv_heads}"
+        )));
+    }
+    Ok(query_heads / kv_heads)
+}
 
 /// Exact CUDA operations needed to assemble the first decoder runtime.
 #[derive(Debug)]
@@ -345,17 +361,22 @@ impl F32DecoderKernels {
     ) -> Result<()> {
         let config = cache.config();
         let kv_rows = cache.len(layer)?;
-        let width = config
-            .heads
-            .checked_mul(config.head_dim)
-            .ok_or_else(|| NnisError::invalid_input("attention width overflows usize"))?;
-        if query.len() != width || output.len() != width {
+        if query.len() != output.len() {
             return Err(NnisError::invalid_input(format!(
-                "cached attention expects query/output width {width}; got {}/{}",
+                "cached attention query/output lengths differ: {}/{}",
                 query.len(),
                 output.len()
             )));
         }
+        if query.len() % config.head_dim != 0 {
+            return Err(NnisError::invalid_input(format!(
+                "cached attention query width {} is not divisible by head_dim {}",
+                query.len(),
+                config.head_dim
+            )));
+        }
+        let query_heads = query.len() / config.head_dim;
+        let _group_size = gqa_group_size(query_heads, config.heads)?;
         if kv_rows == 0 {
             return Err(NnisError::invalid_input(
                 "cached attention requires at least one valid KV position",
@@ -372,14 +393,15 @@ impl F32DecoderKernels {
                 "cached attention must execute on the KV cache's owning stream",
             ));
         }
-        let heads = u32::try_from(config.heads)
-            .map_err(|_| NnisError::invalid_input("attention head count exceeds u32"))?;
-        let mut args = KernelArgs::with_capacity(10, 4);
+        let query_heads_u32 = u32::try_from(query_heads)
+            .map_err(|_| NnisError::invalid_input("query head count exceeds u32"))?;
+        let mut args = KernelArgs::with_capacity(11, 4);
         args.push_buffer(query)
             .push_buffer(cache.keys())
             .push_buffer(cache.values())
             .push_buffer(output)
             .push(layer as u64)
+            .push(query_heads as u64)
             .push(config.heads as u64)
             .push(config.capacity as u64)
             .push(config.head_dim as u64)
@@ -388,7 +410,7 @@ impl F32DecoderKernels {
         let launch = KernelLaunch::new(
             &self.cached_attention_decode,
             stream,
-            LaunchConfig::new(Dim3::new(heads, 1, 1), Dim3::new(1, 1, 1)),
+            LaunchConfig::new(Dim3::new(query_heads_u32, 1, 1), Dim3::new(1, 1, 1)),
         );
         unsafe { launch.launch(&mut args) }
     }
@@ -424,6 +446,15 @@ mod tests {
                 "mismatch at {index}: {actual} != {expected}"
             );
         }
+    }
+
+    #[test]
+    fn grouped_query_head_mapping_is_validated_without_cuda() {
+        assert_eq!(gqa_group_size(2, 2).unwrap(), 1);
+        assert_eq!(gqa_group_size(4, 2).unwrap(), 2);
+        assert_eq!(gqa_group_size(9, 3).unwrap(), 3);
+        assert!(gqa_group_size(3, 2).is_err());
+        assert!(gqa_group_size(0, 1).is_err());
     }
 
     #[test]
@@ -496,6 +527,33 @@ mod tests {
         assert_close(
             &attended.to_vec(&stream).unwrap(),
             &expected_attention,
+            2.0e-5,
+        );
+
+        let gqa_query = DeviceBuffer::from_host(
+            &context,
+            &stream,
+            &[1.0_f32, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0],
+        )
+        .unwrap();
+        let gqa_attended = DeviceBuffer::<f32>::new(&context, 8).unwrap();
+        kernels
+            .cached_attention_decode(&stream, &gqa_query, &cache, 0, &gqa_attended, 1.0)
+            .unwrap();
+        let e2 = 2.0_f32.exp();
+        let expected_gqa = [
+            10.0 * e / (e + 1.0),
+            20.0 / (e + 1.0),
+            10.0 / (e + 1.0),
+            20.0 * e / (e + 1.0),
+            (e2 + 3.0) / (e2 + 1.0),
+            (2.0 * e2 + 4.0) / (e2 + 1.0),
+            2.0,
+            3.0,
+        ];
+        assert_close(
+            &gqa_attended.to_vec(&stream).unwrap(),
+            &expected_gqa,
             2.0e-5,
         );
     }

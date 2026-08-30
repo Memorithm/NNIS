@@ -6,13 +6,13 @@ compatibility claim.
 
 ## Supported execution shape
 
-The model representation can describe `f32` and packed-bf16 device tensors and
-can represent grouped-query attention. The first executable decoder path is
-intentionally narrower:
+The model representation can describe `f32` and packed-bf16 device tensors. The
+first executable decoder path is intentionally narrow but supports both standard
+multi-head attention and grouped-query attention:
 
 - decoder-only pre-norm transformer;
 - `f32` weights and activations;
-- equal query and KV head counts;
+- query-head count equal to or an integer multiple of KV-head count;
 - even rotary head dimension;
 - per-channel RMSNorm;
 - Llama-style rotate-half RoPE;
