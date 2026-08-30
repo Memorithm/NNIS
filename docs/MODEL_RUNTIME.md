@@ -71,9 +71,13 @@ embedding gather
 ```
 
 Prefill uploads input IDs once and selects successive prompt IDs on device.
-Greedy generation performs top-1 on device, records the generated ID on device,
-and feeds the same ID into the next embedding lookup. There is no host
-roundtrip between transformer stages.
+Fixed-length greedy generation performs top-1 on device, records the generated
+ID on device, and feeds the same ID into the next embedding lookup. There is no
+host roundtrip between transformer stages. When EOS stopping is requested, the
+runtime copies only the one top-1 token ID to the host at each generation step
+to decide whether to stop; activations, weights and KV state remain on device.
+The EOS token itself is processed before the session returns, so `position()`
+continues to describe the complete generated sequence length.
 
 ## KV cache
 

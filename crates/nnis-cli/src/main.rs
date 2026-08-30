@@ -136,14 +136,15 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
         ));
     }
 
+    let generation = match model.config().eos_token_id {
+        Some(eos_token_id) => {
+            GenerationConfig::greedy_until_eos(arguments.max_new_tokens, eos_token_id)
+        }
+        None => GenerationConfig::greedy(arguments.max_new_tokens),
+    };
     let generated = model
         .new_session()
-        .and_then(|mut session| {
-            session.generate(
-                &input_ids,
-                GenerationConfig::greedy(arguments.max_new_tokens),
-            )
-        })
+        .and_then(|mut session| session.generate(&input_ids, generation))
         .map_err(|error| format!("NNIS generation failed: {error}"))?;
 
     tokenizer

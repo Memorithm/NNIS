@@ -20,6 +20,8 @@ pub enum Activation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelConfig {
     pub vocab_size: usize,
+    #[serde(default)]
+    pub eos_token_id: Option<u32>,
     pub hidden_size: usize,
     pub intermediate_size: usize,
     pub num_hidden_layers: usize,
@@ -46,6 +48,14 @@ impl ModelConfig {
             if value == 0 {
                 return Err(NnisError::invalid_input(format!(
                     "model config {name} must be non-zero"
+                )));
+            }
+        }
+        if let Some(eos_token_id) = self.eos_token_id {
+            if eos_token_id as usize >= self.vocab_size {
+                return Err(NnisError::invalid_input(format!(
+                    "eos_token_id {eos_token_id} is out of range for vocabulary {}",
+                    self.vocab_size
                 )));
             }
         }
@@ -124,11 +134,40 @@ impl ModelConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GenerationConfig {
     pub max_new_tokens: usize,
+    pub eos_token_id: Option<u32>,
 }
 
 impl GenerationConfig {
-    pub fn greedy(max_new_tokens: usize) -> Self {
-        Self { max_new_tokens }
+    /// Fixed-length greedy generation. This preserves the fully
+    /// device-resident generation graph and does not stop on EOS.
+    pub const fn greedy(max_new_tokens: usize) -> Self {
+        Self {
+            max_new_tokens,
+            eos_token_id: None,
+        }
+    }
+
+    /// Greedy generation that stops after producing `eos_token_id`.
+    ///
+    /// EOS-aware generation deliberately introduces one host-visible
+    /// token observation per step so the session can stop submitting
+    /// decoder work once the termination token has been produced.
+    pub const fn greedy_until_eos(max_new_tokens: usize, eos_token_id: u32) -> Self {
+        Self {
+            max_new_tokens,
+            eos_token_id: Some(eos_token_id),
+        }
+    }
+
+    pub fn validate(&self, vocab_size: usize) -> Result<()> {
+        if let Some(eos_token_id) = self.eos_token_id {
+            if eos_token_id as usize >= vocab_size {
+                return Err(NnisError::invalid_input(format!(
+"generation eos_token_id {eos_token_id} is out of range for vocabulary {vocab_size}"
+      )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -139,6 +178,7 @@ mod tests {
     fn valid_config() -> ModelConfig {
         ModelConfig {
             vocab_size: 32_000,
+            eos_token_id: Some(2),
             hidden_size: 64,
             intermediate_size: 128,
             num_hidden_layers: 2,
@@ -188,5 +228,13 @@ mod tests {
         let mut config = valid_config();
         config.rope_theta = 0.0;
         assert!(config.validate().is_err());
+
+        let mut config = valid_config();
+        config.eos_token_id = Some(32_000);
+        assert!(config.validate().is_err());
+
+        assert!(GenerationConfig::greedy_until_eos(4, 32_000)
+            .validate(32_000)
+            .is_err());
     }
 }
