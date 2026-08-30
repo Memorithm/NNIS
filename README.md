@@ -102,17 +102,18 @@ cargo run --release -p nnis-cli --bin nnis -- generate \
   --model /path/to/nnis-model \
   --tokenizer /path/to/tokenizer.json \
   --prompt "Hello" \
+  --device 1 \
   --max-new-tokens 16
 ```
 
-The command tokenizes the prompt, loads the model on the first visible CUDA
-device, runs greedy generation, and decodes only the newly generated token IDs
-back to text. When the NNIS model metadata contains `eos_token_id`, generation
-stops after that token is produced; older manifests without EOS metadata retain
-fixed-length greedy decoding. Fixed-length generation remains fully
-device-resident. EOS-aware generation deliberately observes one token per step
-on the host to stop safely. Sampling, device selection and streaming output are
-not yet part of this command.
+`--device` is the CUDA device ordinal and defaults to `0` when omitted. The
+command tokenizes the prompt, loads the model on that CUDA device, runs greedy
+generation, and decodes only the newly generated token IDs back to text. When
+the NNIS model metadata contains `eos_token_id`, generation stops after that
+token is produced; older manifests without EOS metadata retain fixed-length
+greedy decoding. Fixed-length generation remains fully device-resident.
+EOS-aware generation deliberately observes one token per step on the host to
+stop safely. Sampling and streaming output are not yet part of this command.
 
 The pinned tiny-Llama fixture used for model-runtime qualification can also
 produce a matching tokenizer file for CLI testing:
@@ -256,9 +257,9 @@ deterministic top-k, embedding row gather, and positional row scatter.
 
 The decoder runtime adds explicit model configuration and weight graphs,
 long-lived workspaces, device-resident capacity-strided KV storage, prefill,
-one-token decode, and fixed-length greedy generation. The first executable
-model policy remains intentionally narrow: f32 weights, equal Q/KV head counts,
-Llama rotate-half RoPE and SiLU/SwiGLU. Broader model families, EOS-aware
-control flow and sampling should be added only with corresponding correctness
-evidence. NNIS deliberately does not depend on PyTorch, TensorFlow, Candle,
-Burn, wgpu, or downstream projects at runtime.
+one-token decode, fixed-length greedy generation and optional EOS-aware greedy
+stopping. The first executable model policy remains intentionally narrow: f32
+weights, equal Q/KV head counts, Llama rotate-half RoPE and SiLU/SwiGLU.
+Broader model families and sampling should be added only with corresponding
+correctness evidence. NNIS deliberately does not depend on PyTorch, TensorFlow,
+Candle, Burn, wgpu, or downstream projects at runtime.
