@@ -15,16 +15,16 @@ Rust API
 The current implementation provides dynamically loaded CUDA/NVRTC bindings,
 primary-context ownership, streams and events, device and pinned memory,
 runtime PTX/CUBIN compilation, owned modules and functions, validated launch
-configuration, reusable `f32` elementwise kernels, multi-pass sum/max
-reductions, stable flat and row-batched softmax (including a fused
-shared-memory kernel with automatic dispatch), and CUDA-event benchmarks.
+configuration, reusable transformer-oriented kernel families, a device-resident
+KV cache, and the first decoder-only `Model` / `InferenceSession` runtime.
 It has been exercised end to end on an NVIDIA Thor GPU; the tests perform real
-allocations, copies, compilation, launches, synchronization, and result
-validation.
+allocations, copies, compilation, launches, synchronization, result validation,
+prefill and autoregressive decode.
 
-NNIS is not yet a complete model runtime. The public API is version `0.1`, the
-standard kernel library is intentionally small, and compatibility beyond the
-hardware/software configurations exercised by the tests is not yet guaranteed.
+NNIS is not a broad framework runtime. The public API is version `0.1`, the
+first model execution path is deliberately narrow, and compatibility beyond the
+hardware/software and model structures exercised by the tests is not yet
+guaranteed.
 
 ## Requirements
 
@@ -43,7 +43,7 @@ the selected device's compute capability rather than hard-coded for Thor.
 
 ## Quick start
 
-The `nnis` facade is the normal application entry point. A `Session` owns one
+The `nnis` facade is the normal library entry point. A `Session` owns one
 context-bound stream, a process-local JIT cache, and the standard kernels:
 
 ```rust
@@ -92,6 +92,40 @@ four-launch pipeline otherwise; both are validated against f64 oracles across
 boundary sizes. The flat `session.softmax()` pipeline composes device-side
 max/sum reductions without host roundtrips.
 
+### Greedy text generation
+
+The `nnis` binary is a thin frontend over the same decoder runtime. It accepts
+an explicit NNIS model directory and a Hugging Face `tokenizer.json` file:
+
+```bash
+cargo run --release -p nnis-cli --bin nnis -- generate \
+  --model /path/to/nnis-model \
+  --tokenizer /path/to/tokenizer.json \
+  --prompt "Hello" \
+  --max-new-tokens 16
+```
+
+The command tokenizes the prompt, loads the model on the first visible CUDA
+device, runs the existing device-resident greedy generation path, and decodes
+only the newly generated token IDs back to text. The first CLI deliberately
+uses fixed-length greedy decoding. EOS-aware stopping, sampling, device
+selection and streaming output are not yet part of this command.
+
+The pinned tiny-Llama fixture used for model-runtime qualification can also
+produce a matching tokenizer file for CLI testing:
+
+```bash
+python tools/tiny_random_llama_fixture.py --output /tmp/tiny-random-llama
+cargo run --release -p nnis-cli --bin nnis -- generate \
+  --model /tmp/tiny-random-llama/model \
+  --tokenizer /tmp/tiny-random-llama/tokenizer.json \
+  --prompt "Hello, NNIS!" \
+  --max-new-tokens 3
+```
+
+That checkpoint has random weights and is a structural/numerical fixture, not a
+quality model.
+
 To compile and launch custom CUDA source through the complete stack, run:
 
 ```bash
@@ -113,15 +147,18 @@ cargo run --release -p nnis-jit --example inspect_kernel
 
 | Crate | Responsibility |
 | --- | --- |
-| `nnis` | Stable facade, common re-exports, and `Session` |
+| `nnis` | Stable facade, common re-exports, and low-level `Session` |
+| `nnis-cli` | User-facing `nnis generate` text-generation frontend |
+| `nnis-model` | Decoder-only model config, weights, KV-backed inference sessions, and generation |
 | `nnis-kernels` | Reusable native kernel families and CPU-oracle tests |
 | `nnis-jit` | NVRTC compilation/cache, modules, functions, and launches |
-| `nnis-rt` | Devices, contexts, streams, events, and memory ownership |
+| `nnis-rt` | Devices, contexts, streams, events, memory ownership, and KV cache |
 | `nnis-sys` | Narrow, dynamically loaded CUDA Driver/NVRTC FFI |
 | `nnis-bench` | CUDA-event timing and machine-readable benchmark reports |
 
-See [Architecture and safety](docs/ARCHITECTURE.md) for the dependency and
-ownership model.
+See [Architecture and safety](docs/ARCHITECTURE.md) and the
+[model runtime contract](docs/MODEL_RUNTIME.md) for the dependency and ownership
+model.
 
 ## Validation
 
@@ -131,6 +168,7 @@ Run the complete test suite with GPU availability mandatory:
 cargo fmt --all -- --check
 cargo check --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
+cargo +1.77.0 check --workspace --all-targets
 NNIS_REQUIRE_GPU=1 cargo test --workspace --all-targets
 git diff --check
 ```
@@ -212,8 +250,12 @@ score forms), rotary position embeddings, scaled dot-product attention with
 optional causal masking behind fused or composed paths in `f32` and over
 packed-bf16 heads (bit-exact against the f32 family on widened inputs),
 deterministic top-k, embedding row gather, and positional row scatter.
-Near-term
-extension points include safe owned abstractions for longer asynchronous
-pipelines and allocation pooling (see the
-[design note](docs/DESIGN_ALLOCATION_POOLING.md)). NNIS deliberately does not
-depend on PyTorch, TensorFlow, Candle, Burn, wgpu, or downstream projects.
+
+The decoder runtime adds explicit model configuration and weight graphs,
+long-lived workspaces, device-resident capacity-strided KV storage, prefill,
+one-token decode, and fixed-length greedy generation. The first executable
+model policy remains intentionally narrow: f32 weights, equal Q/KV head counts,
+Llama rotate-half RoPE and SiLU/SwiGLU. Broader model families, EOS-aware
+control flow and sampling should be added only with corresponding correctness
+evidence. NNIS deliberately does not depend on PyTorch, TensorFlow, Candle,
+Burn, wgpu, or downstream projects at runtime.
