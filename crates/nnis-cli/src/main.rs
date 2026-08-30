@@ -4,14 +4,16 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tokenizers::Tokenizer;
 
+const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--max-new-tokens N]\n\nThe first generation CLI is intentionally narrow: greedy decoding on the first visible CUDA device using an explicit NNIS model directory and Hugging Face tokenizer.json file.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N]\n\nGreedy decoding uses an explicit NNIS model directory and Hugging Face tokenizer.json file. CUDA device ordinal defaults to 0.";
 
 #[derive(Debug, PartialEq, Eq)]
 struct GenerateArgs {
     model_dir: PathBuf,
     tokenizer_file: PathBuf,
     prompt: String,
+    device_ordinal: i32,
     max_new_tokens: usize,
 }
 
@@ -39,6 +41,7 @@ where
     let mut model_dir = None;
     let mut tokenizer_file = None;
     let mut prompt = None;
+    let mut device_ordinal = DEFAULT_DEVICE_ORDINAL;
     let mut max_new_tokens = DEFAULT_MAX_NEW_TOKENS;
 
     while let Some(argument) = arguments.next() {
@@ -64,6 +67,17 @@ where
                         .ok_or_else(|| "--prompt requires text".to_string())?,
                 );
             }
+            "--device" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--device requires an integer ordinal".to_string())?;
+                device_ordinal = raw
+                    .parse::<i32>()
+                    .map_err(|error| format!("invalid --device {raw:?}: {error}"))?;
+                if device_ordinal < 0 {
+                    return Err("--device must be a non-negative CUDA device ordinal".to_string());
+                }
+            }
             "--max-new-tokens" => {
                 let raw = arguments
                     .next()
@@ -84,6 +98,7 @@ where
         model_dir: model_dir.ok_or_else(|| "missing --model DIR".to_string())?,
         tokenizer_file: tokenizer_file.ok_or_else(|| "missing --tokenizer FILE".to_string())?,
         prompt: prompt.ok_or_else(|| "missing --prompt TEXT".to_string())?,
+        device_ordinal,
         max_new_tokens,
     }))
 }
@@ -109,8 +124,12 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
     let (tokenizer, input_ids) =
         tokenize_prompt(&arguments.tokenizer_file, arguments.prompt.as_str())?;
 
-    let device =
-        Device::first().map_err(|error| format!("failed to select CUDA device: {error}"))?;
+    let device = Device::get(arguments.device_ordinal).map_err(|error| {
+        format!(
+            "failed to select CUDA device {}: {error}",
+            arguments.device_ordinal
+        )
+    })?;
     let context =
         Context::new(&device).map_err(|error| format!("failed to create CUDA context: {error}"))?;
     let construction_stream =
@@ -203,6 +222,8 @@ mod tests {
             "/tokenizer.json",
             "--prompt",
             "Hello, NNIS!",
+            "--device",
+            "3",
             "--max-new-tokens",
             "7",
         ]))
@@ -213,9 +234,28 @@ mod tests {
                 model_dir: PathBuf::from("/model"),
                 tokenizer_file: PathBuf::from("/tokenizer.json"),
                 prompt: "Hello, NNIS!".to_string(),
+                device_ordinal: 3,
                 max_new_tokens: 7,
             })
         );
+    }
+
+    #[test]
+    fn generate_defaults_to_device_zero() {
+        let parsed = parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+        ]))
+        .unwrap();
+        let Command::Generate(arguments) = parsed else {
+            panic!("expected generate command");
+        };
+        assert_eq!(arguments.device_ordinal, 0);
     }
 
     #[test]
@@ -231,6 +271,30 @@ mod tests {
             "x",
             "--max-new-tokens",
             "0",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--device",
+            "-1",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--device",
+            "gpu0",
         ]))
         .is_err());
         assert!(parse_args(strings(&["unknown"])).is_err());
