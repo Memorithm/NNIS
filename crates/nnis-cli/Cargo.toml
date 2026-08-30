@@ -13,4 +13,4 @@ path = "src/main.rs"
 
 [dependencies]
 nnis = { path = "../nnis" }
-tokenizers = { version = "=0.19.1", default-features = false }
+tokenizers = { version = "=0.19.1", default-features = false, features = ["fancy-regex"] }
