@@ -1,0 +1,35 @@
+name: Sync MSRV lockfile
+
+on:
+  push:
+    branches: [feature/nnis-generate-cli]
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: github.repository == 'Memorithm/NVIDIA-Native-Inference-Stack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feature/nnis-generate-cli
+
+      - name: Install Rust 1.77
+        run: rustup toolchain install 1.77.0 --profile minimal
+
+      - name: Regenerate and verify lockfile at MSRV
+        run: |
+          rm Cargo.lock
+          cargo +1.77.0 generate-lockfile
+          cargo +1.77.0 check --workspace --all-targets
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m 'build: regenerate Cargo.lock with Rust 1.77'
+            git push origin HEAD:feature/nnis-generate-cli
+          fi
