@@ -61,6 +61,7 @@ jobs:
           assert len(model["tensors"]) == 21
           assert model["config"] == {
               "vocab_size": 32000,
+              "eos_token_id": 2,
               "hidden_size": 64,
               "intermediate_size": 128,
               "num_hidden_layers": 2,
