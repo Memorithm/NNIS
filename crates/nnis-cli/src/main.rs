@@ -103,8 +103,10 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
         return Err("tokenizer produced no input IDs".to_string());
     }
 
-    let device = Device::first().map_err(|error| format!("failed to select CUDA device: {error}"))?;
-    let context = Context::new(&device).map_err(|error| format!("failed to create CUDA context: {error}"))?;
+    let device =
+        Device::first().map_err(|error| format!("failed to select CUDA device: {error}"))?;
+    let context =
+        Context::new(&device).map_err(|error| format!("failed to create CUDA context: {error}"))?;
     let construction_stream =
         Stream::new(&context).map_err(|error| format!("failed to create CUDA stream: {error}"))?;
     let model = Model::load_directory(&context, &construction_stream, &arguments.model_dir)
