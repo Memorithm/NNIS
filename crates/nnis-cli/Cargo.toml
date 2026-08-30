@@ -1,0 +1,16 @@
+[package]
+name = "nnis-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Command-line generation frontend for NNIS"
+publish = false
+
+[[bin]]
+name = "nnis"
+path = "src/main.rs"
+
+[dependencies]
+nnis = { path = "../nnis" }
+tokenizers = { version = "=0.19.1", default-features = false, features = ["unstable_wasm"] }

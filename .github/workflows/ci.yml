@@ -34,3 +34,17 @@ jobs:
       - name: tests without GPU requirement
         if: always()
         run: cargo test --workspace --all-targets
+
+  msrv:
+    name: Rust 1.77 check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install declared MSRV
+        run: rustup toolchain install 1.77.0 --profile minimal
+
+      - name: cargo check at MSRV
+        run: cargo +1.77.0 check --workspace --all-targets

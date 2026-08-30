@@ -292,6 +292,9 @@ def main() -> None:
         )
 
     checkpoint = download_checkpoint(args.cache_dir)
+    args.output.mkdir(parents=True, exist_ok=True)
+    tokenizer_file = args.output / "tokenizer.json"
+    shutil.copy2(checkpoint / "tokenizer.json", tokenizer_file)
     model_dir = args.output / "model"
     reference_dir = args.output / "reference"
     convert_weights(checkpoint, model_dir)
@@ -299,6 +302,7 @@ def main() -> None:
     print(f"checkpoint={REPO_ID}@{REVISION}")
     print(f"transformers={transformers.__version__}")
     print(f"model_dir={model_dir}")
+    print(f"tokenizer_file={tokenizer_file}")
     print(f"reference_dir={reference_dir}")
 
 
