@@ -1,0 +1,34 @@
+name: Sync CLI branch
+
+on:
+  push:
+    branches: [feature/nnis-generate-cli]
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    if: github.repository == 'Memorithm/NVIDIA-Native-Inference-Stack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch head
+        uses: actions/checkout@v4
+        with:
+          ref: feature/nnis-generate-cli
+
+      - name: Install Rust formatting tools
+        run: rustup component add rustfmt
+
+      - name: Normalize sources and lockfile
+        run: |
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Cargo.lock crates/nnis-cli Cargo.toml
+            git commit -m 'style(cli): format sources and sync lockfile'
+            git push origin HEAD:feature/nnis-generate-cli
+          fi
