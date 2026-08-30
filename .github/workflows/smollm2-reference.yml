@@ -1,0 +1,140 @@
+name: SmolLM2 135M reference
+
+on:
+  pull_request:
+    paths:
+      - "crates/nnis-model/examples/compare_smollm2_135m.rs"
+      - "tools/smollm2_135m_fixture.py"
+      - "tools/requirements-smollm2-135m.txt"
+      - ".github/workflows/smollm2-reference.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    name: Pinned trained SmolLM2 oracle (CPU)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU reference environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.0
+          python -m pip install \
+            transformers==4.40.1 \
+            safetensors==0.4.5 \
+            huggingface_hub==0.24.7
+
+      - name: Generate converted model and trusted logits
+        run: |
+          python tools/smollm2_135m_fixture.py \
+            --output /tmp/smollm2-135m \
+            --prompt "Gravity is" \
+            --decode-steps 2
+
+      - name: Validate generated evidence
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import math
+          from pathlib import Path
+
+          root = Path("/tmp/smollm2-135m")
+          model = json.loads((root / "model" / "model.json").read_text())
+          provenance = json.loads((root / "model" / "provenance.json").read_text())
+          reference = json.loads((root / "reference" / "reference.json").read_text())
+
+          expected_config = {
+              "vocab_size": 49152,
+              "eos_token_id": 0,
+              "hidden_size": 576,
+              "intermediate_size": 1536,
+              "num_hidden_layers": 30,
+              "num_attention_heads": 9,
+              "num_key_value_heads": 3,
+              "max_position_embeddings": 8192,
+              "rms_norm_eps": 1e-05,
+              "rope_theta": 100000.0,
+              "activation": "silu",
+              "weight_dtype": "f32",
+          }
+          assert model["format"] == "nnis-model"
+          assert model["version"] == 1
+          assert model["config"] == expected_config
+          assert len(model["tensors"]) == 273
+          assert len({entry["name"] for entry in model["tensors"]}) == 273
+
+          entries = {entry["name"]: entry for entry in model["tensors"]}
+          assert entries["token_embedding"]["shape"] == [49152, 576]
+          assert entries["lm_head"]["shape"] == [576, 49152]
+          assert entries["layers.0.q_proj"]["shape"] == [576, 576]
+          assert entries["layers.0.k_proj"]["shape"] == [576, 192]
+          assert entries["layers.0.v_proj"]["shape"] == [576, 192]
+          assert entries["layers.0.o_proj"]["shape"] == [576, 576]
+
+          for entry in model["tensors"]:
+              elements = math.prod(entry["shape"])
+              path = root / "model" / entry["file"]
+              assert entry["dtype"] == "f32"
+              assert path.stat().st_size == elements * 4, (entry["name"], path.stat().st_size)
+
+          assert provenance["source_repo"] == "HuggingFaceTB/SmolLM2-135M"
+          assert provenance["source_revision"] == "93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
+          assert provenance["source_model_sha256"] == "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1"
+          assert provenance["source_weight_dtype"] == "bfloat16"
+          assert provenance["execution_weight_dtype"] == "f32"
+          assert provenance["tied_lm_head_materialized"] is True
+          assert provenance["transformers_version"] == "4.40.1"
+
+          assert reference["format"] == "nnis-reference-logits"
+          assert reference["version"] == 1
+          assert reference["source_revision"] == provenance["source_revision"]
+          assert reference["source_model_sha256"] == provenance["source_model_sha256"]
+          assert reference["transformers_version"] == "4.40.1"
+          assert reference["source_weight_dtype"] == "bfloat16"
+          assert reference["execution_weight_dtype"] == "f32"
+          assert reference["prompt"] == "Gravity is"
+          assert reference["decode_steps"] == 2
+          assert reference["input_ids"] == [22007, 6463, 314]
+          assert reference["greedy_ids"] == [260, 3075]
+          assert reference["logit_files"] == [
+              "prefill_logits.f32le",
+              "decode_00_logits.f32le",
+              "decode_01_logits.f32le",
+          ]
+
+          expected_hashes = {
+              "prefill_logits.f32le": "e374835ec84324552e72bedcf4554cf7baf9505f4c7489a4c32255b785549ef6",
+              "decode_00_logits.f32le": "759e014bdc6272e6a93f257da8291fdd1cab4ac5c83c3f0ec3d8aaa92ed9a1ef",
+              "decode_01_logits.f32le": "a905fc88c522c96b11976a611a786e7741bab59aa78157133237c2e2f7cd9792",
+          }
+          for filename, expected_hash in expected_hashes.items():
+              path = root / "reference" / filename
+              assert path.stat().st_size == 49152 * 4, (filename, path.stat().st_size)
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              assert digest == expected_hash, (filename, digest, expected_hash)
+
+          print("input_ids=", reference["input_ids"])
+          print("greedy_ids=", reference["greedy_ids"])
+          print("converted_tensor_count=", len(model["tensors"]))
+          print("SmolLM2 trained reference validation passed")
+          PY
+
+      - name: Upload validated SmolLM2 oracle
+        uses: actions/upload-artifact@v4
+        with:
+          name: smollm2-135m-reference
+          path: /tmp/smollm2-135m
+          if-no-files-found: error
+          retention-days: 7
