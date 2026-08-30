@@ -130,3 +130,11 @@ jobs:
           print("converted_tensor_count=", len(model["tensors"]))
           print("SmolLM2 trained reference validation passed")
           PY
+
+      - name: Upload validated SmolLM2 oracle
+        uses: actions/upload-artifact@v4
+        with:
+          name: smollm2-135m-reference
+          path: /tmp/smollm2-135m
+          if-no-files-found: error
+          retention-days: 7
