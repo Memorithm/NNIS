@@ -1,6 +1,6 @@
 use nnis::{Context, Device, GenerationConfig, Model, Stream};
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tokenizers::Tokenizer;
 
@@ -88,20 +88,26 @@ where
     }))
 }
 
-fn generate(arguments: &GenerateArgs) -> Result<String, String> {
-    let tokenizer = Tokenizer::from_file(&arguments.tokenizer_file).map_err(|error| {
+fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Vec<u32>), String> {
+    let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(|error| {
         format!(
             "failed to load tokenizer {}: {error}",
-            arguments.tokenizer_file.display()
+            tokenizer_file.display()
         )
     })?;
     let encoding = tokenizer
-        .encode(arguments.prompt.as_str(), true)
+        .encode(prompt, true)
         .map_err(|error| format!("failed to tokenize prompt: {error}"))?;
-    let input_ids = encoding.get_ids();
+    let input_ids = encoding.get_ids().to_vec();
     if input_ids.is_empty() {
         return Err("tokenizer produced no input IDs".to_string());
     }
+    Ok((tokenizer, input_ids))
+}
+
+fn generate(arguments: &GenerateArgs) -> Result<String, String> {
+    let (tokenizer, input_ids) =
+        tokenize_prompt(&arguments.tokenizer_file, arguments.prompt.as_str())?;
 
     let device =
         Device::first().map_err(|error| format!("failed to select CUDA device: {error}"))?;
@@ -134,7 +140,7 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
         .new_session()
         .and_then(|mut session| {
             session.generate(
-                input_ids,
+                &input_ids,
                 GenerationConfig::greedy(arguments.max_new_tokens),
             )
         })
@@ -227,5 +233,16 @@ mod tests {
         ]))
         .is_err());
         assert!(parse_args(strings(&["unknown"])).is_err());
+    }
+
+    #[test]
+    fn pinned_tiny_llama_tokenizer_matches_transformers_when_available() {
+        let Some(path) = std::env::var_os("NNIS_TINY_LLAMA_TOKENIZER") else {
+            eprintln!("skipped: NNIS_TINY_LLAMA_TOKENIZER is not set");
+            return;
+        };
+        let (_, input_ids) =
+            tokenize_prompt(&PathBuf::from(path), "Hello, NNIS!").expect("tokenize pinned prompt");
+        assert_eq!(input_ids, vec![1, 15043, 29892, 405, 29940, 3235, 29991]);
     }
 }
