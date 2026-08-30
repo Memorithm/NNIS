@@ -110,17 +110,12 @@ impl ModelConfig {
             .ok_or_else(|| NnisError::invalid_input("key/value width overflows usize"))
     }
 
-    /// Current decoder execution support is deliberately narrower than the
-    /// representation: grouped-query attention is representable but not yet
-    /// executed by the first runtime path.
+    /// Validate the numeric/activation combinations executable by the
+    /// current decoder. Multi-head and grouped-query attention share the
+    /// same head dimension; `validate` requires Q heads to be an integer
+    /// multiple of KV heads.
     pub fn validate_execution_support(&self) -> Result<()> {
         self.validate()?;
-        if self.num_attention_heads != self.num_key_value_heads {
-            return Err(NnisError::unsupported(format!(
-                "decoder runtime currently requires equal attention/KV head counts; got {}/{}",
-                self.num_attention_heads, self.num_key_value_heads
-            )));
-        }
         if self.activation != Activation::Silu {
             return Err(NnisError::unsupported(
                 "decoder runtime currently supports only SiLU/SwiGLU MLPs",
@@ -201,12 +196,13 @@ mod tests {
     }
 
     #[test]
-    fn grouped_query_is_representable_but_execution_is_explicitly_rejected() {
+    fn grouped_query_execution_is_supported_when_heads_divide_evenly() {
         let mut config = valid_config();
         config.num_attention_heads = 4;
         config.num_key_value_heads = 2;
-        assert!(config.validate().is_ok());
-        assert!(config.validate_execution_support().is_err());
+        config.validate_execution_support().unwrap();
+        assert_eq!(config.head_dim(), 16);
+        assert_eq!(config.key_value_width().unwrap(), 32);
     }
 
     #[test]

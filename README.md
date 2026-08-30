@@ -259,7 +259,8 @@ The decoder runtime adds explicit model configuration and weight graphs,
 long-lived workspaces, device-resident capacity-strided KV storage, prefill,
 one-token decode, fixed-length greedy generation and optional EOS-aware greedy
 stopping. The first executable model policy remains intentionally narrow: f32
-weights, equal Q/KV head counts, Llama rotate-half RoPE and SiLU/SwiGLU.
-Broader model families and sampling should be added only with corresponding
+weights, MHA/GQA with query-head counts divisible by KV-head counts, Llama
+rotate-half RoPE and SiLU/SwiGLU. Broader model families and sampling should be
+added only with corresponding
 correctness evidence. NNIS deliberately does not depend on PyTorch, TensorFlow,
 Candle, Burn, wgpu, or downstream projects at runtime.
