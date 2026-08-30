@@ -4,6 +4,13 @@ on:
   push:
     branches: [research/smollm2-135m-reference]
     paths:
+      - "crates/nnis-model/examples/compare_smollm2_135m.rs"
+      - "tools/smollm2_135m_fixture.py"
+      - "tools/requirements-smollm2-135m.txt"
+      - ".github/workflows/smollm2-reference.yml"
+  pull_request:
+    paths:
+      - "crates/nnis-model/examples/compare_smollm2_135m.rs"
       - "tools/smollm2_135m_fixture.py"
       - "tools/requirements-smollm2-135m.txt"
       - ".github/workflows/smollm2-reference.yml"
@@ -106,15 +113,24 @@ jobs:
           assert reference["execution_weight_dtype"] == "f32"
           assert reference["prompt"] == "Gravity is"
           assert reference["decode_steps"] == 2
-          assert len(reference["input_ids"]) > 0
-          assert len(reference["greedy_ids"]) == 2
-          assert len(reference["logit_files"]) == 3
+          assert reference["input_ids"] == [22007, 6463, 314]
+          assert reference["greedy_ids"] == [260, 3075]
+          assert reference["logit_files"] == [
+              "prefill_logits.f32le",
+              "decode_00_logits.f32le",
+              "decode_01_logits.f32le",
+          ]
 
-          for filename in reference["logit_files"]:
+          expected_hashes = {
+              "prefill_logits.f32le": "e374835ec84324552e72bedcf4554cf7baf9505f4c7489a4c32255b785549ef6",
+              "decode_00_logits.f32le": "759e014bdc6272e6a93f257da8291fdd1cab4ac5c83c3f0ec3d8aaa92ed9a1ef",
+              "decode_01_logits.f32le": "a905fc88c522c96b11976a611a786e7741bab59aa78157133237c2e2f7cd9792",
+          }
+          for filename, expected_hash in expected_hashes.items():
               path = root / "reference" / filename
               assert path.stat().st_size == 49152 * 4, (filename, path.stat().st_size)
               digest = hashlib.sha256(path.read_bytes()).hexdigest()
-              print(f"{filename}_sha256={digest}")
+              assert digest == expected_hash, (filename, digest, expected_hash)
 
           print("input_ids=", reference["input_ids"])
           print("greedy_ids=", reference["greedy_ids"])
