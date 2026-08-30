@@ -1,0 +1,295 @@
+name: Stage EOS-aware generation
+
+on:
+  push:
+    branches: [feature/eos-aware-generation]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.repository == 'Memorithm/NVIDIA-Native-Inference-Stack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/eos-aware-generation
+
+      - name: Apply EOS-aware generation patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f"expected patch anchor not found in {path}: {old[:80]!r}")
+              target.write_text(text.replace(old, new, 1))
+
+          # Model metadata and generation policy.
+          replace_once(
+              "crates/nnis-model/src/config.rs",
+              "pub struct ModelConfig {\n    pub vocab_size: usize,\n    pub hidden_size: usize,",
+              "pub struct ModelConfig {\n    pub vocab_size: usize,\n    #[serde(default)]\n    pub eos_token_id: Option<u32>,\n    pub hidden_size: usize,",
+          )
+          replace_once(
+              "crates/nnis-model/src/config.rs",
+              "        if self.hidden_size % self.num_attention_heads != 0 {",
+              "        if let Some(eos_token_id) = self.eos_token_id {\n            if eos_token_id as usize >= self.vocab_size {\n                return Err(NnisError::invalid_input(format!(\n                    \"eos_token_id {eos_token_id} is out of range for vocabulary {}\",\n                    self.vocab_size\n                )));\n            }\n        }\n        if self.hidden_size % self.num_attention_heads != 0 {",
+          )
+          old_generation = '''/// Deterministic generation policy. Sampling is intentionally not exposed yet.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub struct GenerationConfig {
+              pub max_new_tokens: usize,
+          }
+
+          impl GenerationConfig {
+              pub fn greedy(max_new_tokens: usize) -> Self {
+                  Self { max_new_tokens }
+              }
+          }
+          '''.replace("          ", "")
+          new_generation = '''/// Deterministic generation policy. Sampling is intentionally not exposed yet.
+          #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          pub struct GenerationConfig {
+              pub max_new_tokens: usize,
+              pub eos_token_id: Option<u32>,
+          }
+
+          impl GenerationConfig {
+              /// Fixed-length greedy generation. This preserves the fully
+              /// device-resident generation graph and does not stop on EOS.
+              pub const fn greedy(max_new_tokens: usize) -> Self {
+                  Self {
+                      max_new_tokens,
+                      eos_token_id: None,
+                  }
+              }
+
+              /// Greedy generation that stops after producing `eos_token_id`.
+              ///
+              /// EOS-aware generation deliberately introduces one host-visible
+              /// token observation per step so the session can stop submitting
+              /// decoder work once the termination token has been produced.
+              pub const fn greedy_until_eos(max_new_tokens: usize, eos_token_id: u32) -> Self {
+                  Self {
+                      max_new_tokens,
+                      eos_token_id: Some(eos_token_id),
+                  }
+              }
+
+              pub fn validate(&self, vocab_size: usize) -> Result<()> {
+                  if let Some(eos_token_id) = self.eos_token_id {
+                      if eos_token_id as usize >= vocab_size {
+                          return Err(NnisError::invalid_input(format!(
+                              "generation eos_token_id {eos_token_id} is out of range for vocabulary {vocab_size}"
+                          )));
+                      }
+                  }
+                  Ok(())
+              }
+          }
+          '''.replace("          ", "")
+          replace_once("crates/nnis-model/src/config.rs", old_generation, new_generation)
+          replace_once(
+              "crates/nnis-model/src/config.rs",
+              "            vocab_size: 32_000,\n            hidden_size: 64,",
+              "            vocab_size: 32_000,\n            eos_token_id: Some(2),\n            hidden_size: 64,",
+          )
+          replace_once(
+              "crates/nnis-model/src/config.rs",
+              "        let mut config = valid_config();\n        config.rope_theta = 0.0;\n        assert!(config.validate().is_err());",
+              "        let mut config = valid_config();\n        config.rope_theta = 0.0;\n        assert!(config.validate().is_err());\n\n        let mut config = valid_config();\n        config.eos_token_id = Some(32_000);\n        assert!(config.validate().is_err());\n\n        assert!(GenerationConfig::greedy_until_eos(4, 32_000)\n            .validate(32_000)\n            .is_err());",
+          )
+
+          # Runtime: preserve the no-EOS device-resident graph and add a
+          # correctness-first EOS path with one D2H token observation per step.
+          runtime_path = Path("crates/nnis-model/src/runtime.rs")
+          runtime = runtime_path.read_text()
+          start = runtime.index("    /// Greedy generation entirely through NNIS.")
+          end = runtime.index("    fn enqueue_prefill", start)
+          new_runtime_generation = r'''    /// Greedy generation entirely through NNIS.
+              ///
+              /// Fixed-length generation remains one device-resident graph. When
+              /// `eos_token_id` is configured, NNIS observes one top-1 token on
+              /// the host per step so it can stop submitting decoder work after
+              /// EOS. Transformer stages themselves remain ordered on one CUDA
+              /// stream with no intermediate activation roundtrips.
+              pub fn generate(
+                  &mut self,
+                  input_ids: &[u32],
+                  generation: GenerationConfig,
+              ) -> Result<Vec<u32>> {
+                  generation.validate(self.model.config.vocab_size)?;
+                  self.validate_prompt(input_ids, generation.max_new_tokens)?;
+                  match generation.eos_token_id {
+                      Some(eos_token_id) => {
+                          self.generate_until_eos(input_ids, generation.max_new_tokens, eos_token_id)
+                      }
+                      None => self.generate_fixed(input_ids, generation.max_new_tokens),
+                  }
+              }
+
+              fn generate_fixed(&mut self, input_ids: &[u32], max_new_tokens: usize) -> Result<Vec<u32>> {
+                  self.reset()?;
+                  let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
+                  let generated = DeviceBuffer::<u32>::new(&self.model.context, max_new_tokens)?;
+
+                  let enqueue_result = (|| {
+                      self.enqueue_prefill(&device_ids)?;
+                      for step in 0..max_new_tokens {
+                          // SAFETY: session ownership keeps logits, outputs and scratch
+                          // live; the workspace is used serially on this stream only.
+                          unsafe {
+                              self.model.top_k.enqueue_top_k(
+                                  &self.stream,
+                                  &self.workspace.logits,
+                                  &self.workspace.top_value,
+                                  &self.workspace.current_token,
+                                  1,
+                                  &self.workspace.top_k_workspace,
+                              )?;
+                              self.model.runtime.enqueue_record_token(
+                                  &self.stream,
+                                  &self.workspace.current_token,
+                                  &generated,
+                                  step,
+                              )?;
+                          }
+                          self.enqueue_current_token()?;
+                      }
+                      Ok(())
+                  })();
+                  self.finish(enqueue_result)?;
+                  generated.to_vec(&self.stream)
+              }
+
+              fn generate_until_eos(
+                  &mut self,
+                  input_ids: &[u32],
+                  max_new_tokens: usize,
+                  eos_token_id: u32,
+              ) -> Result<Vec<u32>> {
+                  self.reset()?;
+                  let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
+                  let enqueue_result = self.enqueue_prefill(&device_ids);
+                  self.finish(enqueue_result)?;
+
+                  let mut generated = Vec::with_capacity(max_new_tokens);
+                  for _ in 0..max_new_tokens {
+                      let mut token_host = [0_u32; 1];
+                      let enqueue_result = (|| {
+                          // SAFETY: top-1 writes exactly one u32 token. The host
+                          // destination remains alive and untouched until `finish`
+                          // synchronizes this stream below.
+                          unsafe {
+                              self.model.top_k.enqueue_top_k(
+                                  &self.stream,
+                                  &self.workspace.logits,
+                                  &self.workspace.top_value,
+                                  &self.workspace.current_token,
+                                  1,
+                                  &self.workspace.top_k_workspace,
+                              )?;
+                              self.workspace
+                                  .current_token
+                                  .copy_to_host_async(&self.stream, &mut token_host)?;
+                          }
+                          Ok(())
+                      })();
+                      self.finish(enqueue_result)?;
+
+                      let token = token_host[0];
+                      generated.push(token);
+                      let enqueue_result = self.enqueue_current_token();
+                      if token == eos_token_id || enqueue_result.is_err() {
+                          self.finish(enqueue_result)?;
+                          if token == eos_token_id {
+                              return Ok(generated);
+                          }
+                      }
+                  }
+
+                  // The final non-EOS token has been submitted but no following
+                  // top-1 observation exists to provide the synchronization
+                  // boundary, so drain it explicitly before returning.
+                  self.finish(Ok(()))?;
+                  Ok(generated)
+              }
+
+          '''.replace("              ", "")
+          runtime_path.write_text(runtime[:start] + new_runtime_generation + runtime[end:])
+          replace_once(
+              "crates/nnis-model/src/runtime.rs",
+              "            vocab_size: 4,\n            hidden_size: 4,",
+              "            vocab_size: 4,\n            eos_token_id: Some(0),\n            hidden_size: 4,",
+          )
+          replace_once(
+              "crates/nnis-model/src/runtime.rs",
+              "        assert_eq!(generated, vec![0, 0]);\n        assert_eq!(session.position(), 4);",
+              "        assert_eq!(generated, vec![0, 0]);\n        assert_eq!(session.position(), 4);\n\n        let generated = session\n            .generate(&[1, 2], GenerationConfig::greedy_until_eos(4, 0))\n            .unwrap();\n        assert_eq!(generated, vec![0]);\n        assert_eq!(session.position(), 3);",
+          )
+
+          # Manifest compatibility and pinned converter metadata.
+          replace_once(
+              "crates/nnis-model/src/format.rs",
+              "            vocab_size: 8,\n            hidden_size: 4,",
+              "            vocab_size: 8,\n            eos_token_id: Some(2),\n            hidden_size: 4,",
+          )
+          replace_once(
+              "tools/tiny_random_llama_fixture.py",
+              '        "vocab_size": 32000,\n        "tie_word_embeddings": False,',
+              '        "vocab_size": 32000,\n        "bos_token_id": 1,\n        "eos_token_id": 2,\n        "pad_token_id": 2,\n        "tie_word_embeddings": False,',
+          )
+          replace_once(
+              "tools/tiny_random_llama_fixture.py",
+              '        "vocab_size": config["vocab_size"],\n        "hidden_size": config["hidden_size"],',
+              '        "vocab_size": config["vocab_size"],\n        "eos_token_id": config["eos_token_id"],\n        "hidden_size": config["hidden_size"],',
+          )
+          replace_once(
+              ".github/workflows/tiny-llama-reference.yml",
+              '              "vocab_size": 32000,\n              "hidden_size": 64,',
+              '              "vocab_size": 32000,\n              "eos_token_id": 2,\n              "hidden_size": 64,',
+          )
+
+          # CLI automatically follows model metadata when available.
+          replace_once(
+              "crates/nnis-cli/src/main.rs",
+              "    let generated = model\n        .new_session()\n        .and_then(|mut session| {\n            session.generate(\n                &input_ids,\n                GenerationConfig::greedy(arguments.max_new_tokens),\n            )\n        })",
+              "    let generation = match model.config().eos_token_id {\n        Some(eos_token_id) => {\n            GenerationConfig::greedy_until_eos(arguments.max_new_tokens, eos_token_id)\n        }\n        None => GenerationConfig::greedy(arguments.max_new_tokens),\n    };\n    let generated = model\n        .new_session()\n        .and_then(|mut session| session.generate(&input_ids, generation))",
+          )
+
+          # User-facing and runtime documentation.
+          replace_once(
+              "README.md",
+              "The command tokenizes the prompt, loads the model on the first visible CUDA\ndevice, runs the existing device-resident greedy generation path, and decodes\nonly the newly generated token IDs back to text. The first CLI deliberately\nuses fixed-length greedy decoding. EOS-aware stopping, sampling, device\nselection and streaming output are not yet part of this command.",
+              "The command tokenizes the prompt, loads the model on the first visible CUDA\ndevice, runs greedy generation, and decodes only the newly generated token IDs\nback to text. When the NNIS model metadata contains `eos_token_id`, generation\nstops after that token is produced; older manifests without EOS metadata retain\nfixed-length greedy decoding. Fixed-length generation remains fully\ndevice-resident. EOS-aware generation deliberately observes one token per step\non the host to stop safely. Sampling, device selection and streaming output are\nnot yet part of this command.",
+          )
+          replace_once(
+              "docs/MODEL_RUNTIME.md",
+              "Prefill uploads input IDs once and selects successive prompt IDs on device.\nGreedy generation performs top-1 on device, records the generated ID on device,\nand feeds the same ID into the next embedding lookup. There is no host\nroundtrip between transformer stages.",
+              "Prefill uploads input IDs once and selects successive prompt IDs on device.\nFixed-length greedy generation performs top-1 on device, records the generated\nID on device, and feeds the same ID into the next embedding lookup. There is no\nhost roundtrip between transformer stages. When EOS stopping is requested, the\nruntime copies only the one top-1 token ID to the host at each generation step\nto decide whether to stop; activations, weights and KV state remain on device.\nThe EOS token itself is processed before the session returns, so `position()`\ncontinues to describe the complete generated sequence length.",
+          )
+          PY
+
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo check --workspace --all-targets
+          cargo test --workspace --all-targets
+
+      - name: Commit staged implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/nnis-model/src/config.rs crates/nnis-model/src/runtime.rs crates/nnis-model/src/format.rs crates/nnis-cli/src/main.rs tools/tiny_random_llama_fixture.py .github/workflows/tiny-llama-reference.yml README.md docs/MODEL_RUNTIME.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(model): add EOS-aware greedy generation'
+            git push origin HEAD:feature/eos-aware-generation
+          fi
