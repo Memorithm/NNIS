@@ -1,13 +1,6 @@
 name: SmolLM2 135M reference
 
 on:
-  push:
-    branches: [research/smollm2-135m-reference]
-    paths:
-      - "crates/nnis-model/examples/compare_smollm2_135m.rs"
-      - "tools/smollm2_135m_fixture.py"
-      - "tools/requirements-smollm2-135m.txt"
-      - ".github/workflows/smollm2-reference.yml"
   pull_request:
     paths:
       - "crates/nnis-model/examples/compare_smollm2_135m.rs"
