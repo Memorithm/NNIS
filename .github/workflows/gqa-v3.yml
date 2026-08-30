@@ -1,0 +1,64 @@
+name: Stage GQA runtime v3
+
+on:
+  push:
+    branches: [feature/gqa-runtime]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    if: github.repository == 'Memorithm/NVIDIA-Native-Inference-Stack'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/gqa-runtime
+
+      - name: Normalize and execute structural patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import textwrap
+
+          lines = Path('.github/workflows/gqa-v2.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if line.strip() == "python3 - <<'PY'")
+          end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'PY')
+          script = lines[start + 1:end]
+
+          kernel_start = next(i for i, line in enumerate(script) if "gqa_kernel = '''" in line)
+          kernel_end = next(i for i in range(kernel_start + 1, len(script)) if script[i] == "'''")
+          prefix, first = script[kernel_start].split("gqa_kernel = '''", 1)
+          kernel_lines = [first, *script[kernel_start + 1:kernel_end]]
+          kernel_source = "\n".join(kernel_lines) + "\n"
+          script = [
+              *script[:kernel_start],
+              prefix + "gqa_kernel = " + repr(kernel_source),
+              *script[kernel_end + 1:],
+          ]
+          normalized = textwrap.dedent("\n".join(script)) + "\n"
+          Path('/tmp/gqa_patch.py').write_text(normalized)
+          subprocess.run(['python3', '/tmp/gqa_patch.py'], check=True)
+          PY
+
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+
+      - name: Commit implementation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/nnis-model/src/config.rs crates/nnis-model/src/runtime.rs crates/nnis-model/src/kernels.rs docs/MODEL_RUNTIME.md README.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(model): execute grouped-query attention'
+            git push origin HEAD:feature/gqa-runtime
+          fi
