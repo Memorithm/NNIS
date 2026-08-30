@@ -8,6 +8,7 @@ members = [
     "crates/nnis-model",
     "crates/nnis-bench",
     "crates/nnis",
+    "crates/nnis-cli",
 ]
 
 [workspace.package]
