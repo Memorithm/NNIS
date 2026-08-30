@@ -106,10 +106,13 @@ cargo run --release -p nnis-cli --bin nnis -- generate \
 ```
 
 The command tokenizes the prompt, loads the model on the first visible CUDA
-device, runs the existing device-resident greedy generation path, and decodes
-only the newly generated token IDs back to text. The first CLI deliberately
-uses fixed-length greedy decoding. EOS-aware stopping, sampling, device
-selection and streaming output are not yet part of this command.
+device, runs greedy generation, and decodes only the newly generated token IDs
+back to text. When the NNIS model metadata contains `eos_token_id`, generation
+stops after that token is produced; older manifests without EOS metadata retain
+fixed-length greedy decoding. Fixed-length generation remains fully
+device-resident. EOS-aware generation deliberately observes one token per step
+on the host to stop safely. Sampling, device selection and streaming output are
+not yet part of this command.
 
 The pinned tiny-Llama fixture used for model-runtime qualification can also
 produce a matching tokenizer file for CLI testing:

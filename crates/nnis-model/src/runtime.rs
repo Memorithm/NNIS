@@ -230,23 +230,36 @@ impl<'model> InferenceSession<'model> {
         self.workspace.logits.to_vec(&self.stream)
     }
 
-    /// Greedy generation entirely through NNIS. Prompt IDs are uploaded once;
-    /// every generated ID remains on device and feeds the next embedding lookup.
-    /// The returned IDs are copied to host only after the whole generation graph
-    /// has completed.
+    /// Greedy generation entirely through NNIS.
+    ///
+    /// Fixed-length generation remains one device-resident graph. When
+    /// `eos_token_id` is configured, NNIS observes one top-1 token on
+    /// the host per step so it can stop submitting decoder work after
+    /// EOS. Transformer stages themselves remain ordered on one CUDA
+    /// stream with no intermediate activation roundtrips.
     pub fn generate(
         &mut self,
         input_ids: &[u32],
         generation: GenerationConfig,
     ) -> Result<Vec<u32>> {
+        generation.validate(self.model.config.vocab_size)?;
         self.validate_prompt(input_ids, generation.max_new_tokens)?;
+        match generation.eos_token_id {
+            Some(eos_token_id) => {
+                self.generate_until_eos(input_ids, generation.max_new_tokens, eos_token_id)
+            }
+            None => self.generate_fixed(input_ids, generation.max_new_tokens),
+        }
+    }
+
+    fn generate_fixed(&mut self, input_ids: &[u32], max_new_tokens: usize) -> Result<Vec<u32>> {
         self.reset()?;
         let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
-        let generated = DeviceBuffer::<u32>::new(&self.model.context, generation.max_new_tokens)?;
+        let generated = DeviceBuffer::<u32>::new(&self.model.context, max_new_tokens)?;
 
         let enqueue_result = (|| {
             self.enqueue_prefill(&device_ids)?;
-            for step in 0..generation.max_new_tokens {
+            for step in 0..max_new_tokens {
                 // SAFETY: session ownership keeps logits, outputs and scratch
                 // live; the workspace is used serially on this stream only.
                 unsafe {
@@ -271,6 +284,59 @@ impl<'model> InferenceSession<'model> {
         })();
         self.finish(enqueue_result)?;
         generated.to_vec(&self.stream)
+    }
+
+    fn generate_until_eos(
+        &mut self,
+        input_ids: &[u32],
+        max_new_tokens: usize,
+        eos_token_id: u32,
+    ) -> Result<Vec<u32>> {
+        self.reset()?;
+        let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
+        let enqueue_result = self.enqueue_prefill(&device_ids);
+        self.finish(enqueue_result)?;
+
+        let mut generated = Vec::with_capacity(max_new_tokens);
+        for _ in 0..max_new_tokens {
+            let mut token_host = [0_u32; 1];
+            let enqueue_result = (|| {
+                // SAFETY: top-1 writes exactly one u32 token. The host
+                // destination remains alive and untouched until `finish`
+                // synchronizes this stream below.
+                unsafe {
+                    self.model.top_k.enqueue_top_k(
+                        &self.stream,
+                        &self.workspace.logits,
+                        &self.workspace.top_value,
+                        &self.workspace.current_token,
+                        1,
+                        &self.workspace.top_k_workspace,
+                    )?;
+                    self.workspace
+                        .current_token
+                        .copy_to_host_async(&self.stream, &mut token_host)?;
+                }
+                Ok(())
+            })();
+            self.finish(enqueue_result)?;
+
+            let token = token_host[0];
+            generated.push(token);
+            let enqueue_result = self.enqueue_current_token();
+            if token == eos_token_id || enqueue_result.is_err() {
+                self.finish(enqueue_result)?;
+                if token == eos_token_id {
+                    return Ok(generated);
+                }
+            }
+        }
+
+        // The final non-EOS token has been submitted but no following
+        // top-1 observation exists to provide the synchronization
+        // boundary, so drain it explicitly before returning.
+        self.finish(Ok(()))?;
+        Ok(generated)
     }
 
     fn enqueue_prefill(&mut self, input_ids: &DeviceBuffer<u32>) -> Result<()> {
@@ -605,6 +671,7 @@ mod tests {
         let construction_stream = Stream::new(&context).unwrap();
         let config = ModelConfig {
             vocab_size: 4,
+            eos_token_id: Some(0),
             hidden_size: 4,
             intermediate_size: 4,
             num_hidden_layers: 1,
@@ -643,5 +710,11 @@ mod tests {
             .unwrap();
         assert_eq!(generated, vec![0, 0]);
         assert_eq!(session.position(), 4);
+
+        let generated = session
+            .generate(&[1, 2], GenerationConfig::greedy_until_eos(4, 0))
+            .unwrap();
+        assert_eq!(generated, vec![0]);
+        assert_eq!(session.position(), 3);
     }
 }

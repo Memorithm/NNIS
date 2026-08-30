@@ -277,6 +277,7 @@ mod tests {
     fn manifest_header_and_paths_are_strict() {
         let config = ModelConfig {
             vocab_size: 8,
+            eos_token_id: Some(2),
             hidden_size: 4,
             intermediate_size: 8,
             num_hidden_layers: 1,
