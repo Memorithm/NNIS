@@ -721,3 +721,7 @@ mod tests {
         assert_eq!(session.position(), 3);
     }
 }
+
+#[cfg(test)]
+#[path = "smollm2_layerwise_diagnostic.rs"]
+mod smollm2_layerwise_diagnostic;

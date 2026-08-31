@@ -83,7 +83,10 @@ fn report_stage(
     let mut worst_index = 0_usize;
     let mut squared_sum = 0.0_f64;
     for (index, (&got, &want)) in actual.iter().zip(&expected).enumerate() {
-        assert!(got.is_finite(), "non-finite NNIS value in {name} at {index}");
+        assert!(
+            got.is_finite(),
+            "non-finite NNIS value in {name} at {index}"
+        );
         let absolute = (got - want).abs();
         let relative = if want == 0.0 {
             if absolute == 0.0 {
