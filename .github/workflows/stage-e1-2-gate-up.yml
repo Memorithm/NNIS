@@ -1,0 +1,113 @@
+name: Stage E1.2 gate-up plus LM-head plan
+on:
+  push:
+    branches: [perf/e1-2-gate-up-plus-lm-head]
+permissions:
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/e1-2-gate-up-plus-lm-head
+          fetch-depth: 0
+      - name: Add E1.2 marginal plan
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('crates/nnis-model/src/projection_plan.rs')
+          s = p.read_text()
+          marker = '''    pub const fn thor_e1_1_smollm2_lm_head() -> Self {
+                  Self {
+                      q_o: F32ProjectionKernel::Gemm,
+                      k_v: F32ProjectionKernel::Gemm,
+                      gate_up: F32ProjectionKernel::Gemm,
+                      down: F32ProjectionKernel::Gemm,
+                      lm_head: F32ProjectionKernel::Gemv { block_size: 64 },
+                  }
+              }
+          '''
+          addition = marker + '''
+              /// E1.2 marginal plan: retain the promoted LM-head GEMV64 and add
+              /// gate/up GEMV128. All attention and down projections remain GEMM.
+              ///
+              /// This plan exists only to measure the marginal end-to-end value
+              /// of gate/up after E1.1; it is not a universal optimality claim.
+              #[must_use]
+              pub const fn thor_e1_2_smollm2_gate_up_lm_head() -> Self {
+                  Self {
+                      q_o: F32ProjectionKernel::Gemm,
+                      k_v: F32ProjectionKernel::Gemm,
+                      gate_up: F32ProjectionKernel::Gemv { block_size: 128 },
+                      down: F32ProjectionKernel::Gemm,
+                      lm_head: F32ProjectionKernel::Gemv { block_size: 64 },
+                  }
+              }
+          '''
+          if 'thor_e1_2_smollm2_gate_up_lm_head' not in s:
+              if marker not in s:
+                  raise SystemExit('E1.1 method marker missing')
+              s = s.replace(marker, addition, 1)
+
+          test_marker = '''    #[test]
+              fn invalid_gemv_width_is_fail_closed() {'''
+          test = '''    #[test]
+              fn thor_e1_2_adds_only_gate_up_to_e1_1() {
+                  let plan = F32ProjectionPlan::thor_e1_2_smollm2_gate_up_lm_head();
+                  assert_eq!(plan.q_o, F32ProjectionKernel::Gemm);
+                  assert_eq!(plan.k_v, F32ProjectionKernel::Gemm);
+                  assert_eq!(
+                      plan.gate_up,
+                      F32ProjectionKernel::Gemv { block_size: 128 }
+                  );
+                  assert_eq!(plan.down, F32ProjectionKernel::Gemm);
+                  assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
+                  plan.validate().unwrap();
+              }
+
+          ''' + test_marker
+          if 'fn thor_e1_2_adds_only_gate_up_to_e1_1' not in s:
+              if test_marker not in s:
+                  raise SystemExit('test marker missing')
+              s = s.replace(test_marker, test, 1)
+          p.write_text(s)
+
+          p = Path('crates/nnis-bench/examples/smollm2_e2e.rs')
+          s = p.read_text()
+          s = s.replace(
+              '--projection-plan requires baseline-gemm or thor-e1-1-lm-head',
+              '--projection-plan requires baseline-gemm, thor-e1-1-lm-head, or thor-e1-2-gate-up-lm-head',
+          )
+          needle = '''                    "thor-e1-1-lm-head" => F32ProjectionPlan::thor_e1_1_smollm2_lm_head(),
+          '''
+          replacement = needle + '''                    "thor-e1-2-gate-up-lm-head" => {
+                          F32ProjectionPlan::thor_e1_2_smollm2_gate_up_lm_head()
+                      }
+          '''
+          if '"thor-e1-2-gate-up-lm-head"' not in s:
+              if needle not in s:
+                  raise SystemExit('CLI plan marker missing')
+              s = s.replace(needle, replacement, 1)
+          s = s.replace(
+              '[--projection-plan baseline-gemm|thor-e1-1-lm-head]',
+              '[--projection-plan baseline-gemm|thor-e1-1-lm-head|thor-e1-2-gate-up-lm-head]',
+          )
+          p.write_text(s)
+          PY
+      - name: Validate E1.2
+        run: |
+          cargo fmt --all
+          cargo check --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked -p nnis-model --lib
+          cargo test --locked --workspace
+      - name: Commit clean E1.2 source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/stage-e1-2-gate-up.yml
+          git add crates/nnis-model/src/projection_plan.rs crates/nnis-bench/examples/smollm2_e2e.rs
+          git commit -m "experiment(model): add E1.2 gate-up plus LM-head plan"
+          git push origin HEAD:perf/e1-2-gate-up-plus-lm-head
