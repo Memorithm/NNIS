@@ -3,9 +3,8 @@
 
 This is checkpoint-specific and diagnostic-only. It loads the same pinned
 SmolLM2-135M checkpoint used by the NNIS trained-model qualification harness,
-widens the persisted BF16 weights to f32, and records the last-token hidden
-vector after every decoder layer plus a focused layer-24 block trace and the
-final RMSNorm output.
+widens the persisted BF16 weights to f32, records the last-token hidden vector
+after every decoder layer, and captures focused layer-24 attention/MLP stages.
 """
 
 from __future__ import annotations
@@ -26,6 +25,7 @@ MODEL_SHA256 = "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
 TRANSFORMERS_VERSION = "4.40.1"
 INPUT_IDS = [22007, 6463, 314]
 HIDDEN_SIZE = 576
+KV_WIDTH = 192
 LAYERS = 30
 TARGET_LAYER = 24
 
@@ -38,15 +38,14 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_f32(path: Path, tensor: torch.Tensor) -> None:
-    vector = tensor.detach().to(device="cpu", dtype=torch.float32).contiguous()
-    if vector.ndim != 1 or vector.numel() != HIDDEN_SIZE:
-        raise RuntimeError(f"expected [{HIDDEN_SIZE}] vector, got {tuple(vector.shape)}")
+def write_f32(path: Path, tensor: torch.Tensor) -> int:
+    vector = tensor.detach().to(device="cpu", dtype=torch.float32).contiguous().reshape(-1)
     vector.numpy().astype("<f4", copy=False).tofile(path)
+    return vector.numel()
 
 
 def last_token(tensor: torch.Tensor) -> torch.Tensor:
-    return tensor[0, -1].detach().float().cpu().clone()
+    return tensor[0, -1].detach().float().cpu().clone().reshape(-1)
 
 
 def main() -> None:
@@ -84,6 +83,8 @@ def main() -> None:
         raise RuntimeError(
             f"expected hidden size {HIDDEN_SIZE}, got {model.config.hidden_size}"
         )
+    if model.config.num_key_value_heads * model.config.hidden_size // model.config.num_attention_heads != KV_WIDTH:
+        raise RuntimeError("unexpected SmolLM2 KV width")
 
     captured: dict[int, torch.Tensor] = {}
     block: dict[str, torch.Tensor] = {}
@@ -100,20 +101,24 @@ def main() -> None:
     def capture_input(_module, inputs):
         block["input"] = last_token(inputs[0])
 
-    def capture_attention(_module, _inputs, output):
-        attention = output[0] if isinstance(output, tuple) else output
-        block["attention_projected"] = last_token(attention)
+    def capture_output(name: str):
+        def hook(_module, _inputs, output):
+            tensor = output[0] if isinstance(output, tuple) else output
+            block[name] = last_token(tensor)
+        return hook
 
-    def capture_post_attention_norm(_module, _inputs, output):
-        block["post_attention_norm"] = last_token(output)
-
-    def capture_mlp(_module, _inputs, output):
-        block["mlp"] = last_token(output)
+    def capture_o_proj_input(_module, inputs):
+        block["attention_pre_o"] = last_token(inputs[0])
 
     handles.append(target.register_forward_pre_hook(capture_input))
-    handles.append(target.self_attn.register_forward_hook(capture_attention))
-    handles.append(target.post_attention_layernorm.register_forward_hook(capture_post_attention_norm))
-    handles.append(target.mlp.down_proj.register_forward_hook(capture_mlp))
+    handles.append(target.input_layernorm.register_forward_hook(capture_output("input_norm")))
+    handles.append(target.self_attn.q_proj.register_forward_hook(capture_output("q_raw")))
+    handles.append(target.self_attn.k_proj.register_forward_hook(capture_output("k_raw")))
+    handles.append(target.self_attn.v_proj.register_forward_hook(capture_output("v_raw")))
+    handles.append(target.self_attn.o_proj.register_forward_pre_hook(capture_o_proj_input))
+    handles.append(target.self_attn.o_proj.register_forward_hook(capture_output("attention_projected")))
+    handles.append(target.post_attention_layernorm.register_forward_hook(capture_output("post_attention_norm")))
+    handles.append(target.mlp.down_proj.register_forward_hook(capture_output("mlp")))
 
     ids = torch.tensor([INPUT_IDS], dtype=torch.long)
     with torch.inference_mode():
@@ -125,9 +130,27 @@ def main() -> None:
         handle.remove()
     if set(captured) != set(range(LAYERS)):
         raise RuntimeError(f"missing layer captures: {sorted(set(range(LAYERS)) - set(captured))}")
-    expected_block = {"input", "attention_projected", "post_attention_norm", "mlp"}
+    expected_block = {
+        "input",
+        "input_norm",
+        "q_raw",
+        "k_raw",
+        "v_raw",
+        "attention_pre_o",
+        "attention_projected",
+        "post_attention_norm",
+        "mlp",
+    }
     if set(block) != expected_block:
-        raise RuntimeError(f"missing layer-{TARGET_LAYER} block captures: {sorted(expected_block - set(block))}")
+        raise RuntimeError(
+            f"missing layer-{TARGET_LAYER} block captures: {sorted(expected_block - set(block))}"
+        )
+    if block["q_raw"].numel() != HIDDEN_SIZE:
+        raise RuntimeError("unexpected Q width")
+    if block["k_raw"].numel() != KV_WIDTH or block["v_raw"].numel() != KV_WIDTH:
+        raise RuntimeError("unexpected K/V width")
+    if block["attention_pre_o"].numel() != HIDDEN_SIZE:
+        raise RuntimeError("unexpected attention output width")
     block["attention_residual"] = block["input"] + block["attention_projected"]
 
     args.output.mkdir(parents=True, exist_ok=True)
@@ -135,13 +158,18 @@ def main() -> None:
 
     def store(name: str, vector: torch.Tensor) -> None:
         file_name = f"{name}.f32le"
-        write_f32(args.output / file_name, vector)
-        stages.append({"name": name, "file": file_name, "elements": HIDDEN_SIZE})
+        elements = write_f32(args.output / file_name, vector)
+        stages.append({"name": name, "file": file_name, "elements": elements})
 
     store("embedding", embedding)
     for index in range(LAYERS):
         store(f"layer{index:02d}.hidden", captured[index])
     store(f"layer{TARGET_LAYER:02d}.input", block["input"])
+    store(f"layer{TARGET_LAYER:02d}.input_norm", block["input_norm"])
+    store(f"layer{TARGET_LAYER:02d}.q_raw", block["q_raw"])
+    store(f"layer{TARGET_LAYER:02d}.k_raw", block["k_raw"])
+    store(f"layer{TARGET_LAYER:02d}.v_raw", block["v_raw"])
+    store(f"layer{TARGET_LAYER:02d}.attention_pre_o", block["attention_pre_o"])
     store(f"layer{TARGET_LAYER:02d}.attention_projected", block["attention_projected"])
     store(f"layer{TARGET_LAYER:02d}.attention_residual", block["attention_residual"])
     store(f"layer{TARGET_LAYER:02d}.post_attention_norm", block["post_attention_norm"])
