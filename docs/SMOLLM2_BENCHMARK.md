@@ -63,7 +63,7 @@ GPU:
 
 ```bash
 NNIS_REQUIRE_GPU=1 \
-cargo run --release -p nnis-bench --example smollm2_e2e -- \
+cargo run --locked --release -p nnis-bench --example smollm2_e2e -- \
   --model /tmp/smollm2-135m/model \
   --device 0 \
   --decode-steps 32 \
@@ -79,11 +79,33 @@ The report contains:
 - model shape and exact checkpoint provenance;
 - free/total CUDA memory before model load, after model load and with one fresh
   session resident;
-- model/session free-memory deltas;
+- CUDA free-memory deltas after model and session creation;
 - session-construction samples;
 - synchronized generation samples and distribution statistics;
 - deterministic generated IDs;
 - whether the qualified two-token greedy prefix was checked.
+
+### Controlled Jetson Thor runs
+
+Jetson AGX Thor uses dynamic power/frequency management. Benchmark evidence
+intended for backend comparison should therefore retain the current power mode
+and clock state. Before each compared run, capture at least:
+
+```bash
+sudo nvpmodel -q
+sudo /usr/bin/jetson_clocks --show
+```
+
+For a controlled maximum-performance experiment, select the intended nvpmodel
+mode before the CUDA context is created and, when appropriate for the test,
+apply `jetson_clocks`. Do not silently change power mode or clock policy inside
+the benchmark harness. If fixed clocks are used for one backend they must be
+used for the other backend as well.
+
+`tegrastats` may be recorded alongside longer experiments to retain GPU/EMC
+frequency, thermal and power/throttling context. A throughput result obtained
+under a different power/clock/thermal state is a different experiment, even on
+the same physical Thor.
 
 ## Transformers CUDA baseline
 
@@ -91,6 +113,36 @@ Use a Python environment whose PyTorch build actually supports the target GPU.
 Do not use the CPU-only environment used to construct the correctness oracle.
 The script records the actual Torch, Transformers and CUDA versions instead of
 pretending they are interchangeable across installations.
+
+On Jetson AGX Thor/CUDA 13.0, keep the correctness oracle untouched and create a
+separate GPU environment. One supported setup is to install the CUDA 13.0
+PyTorch wheel first, then install the pinned Python-side benchmark dependencies:
+
+```bash
+python3 -m venv /tmp/nnis-smollm2-gpu-venv
+source /tmp/nnis-smollm2-gpu-venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu130
+python -m pip install -r tools/requirements-smollm2-benchmark-gpu.txt
+```
+
+Verify that the installed build is really CUDA-enabled before collecting any
+Transformers evidence:
+
+```bash
+python - <<'PY'
+import torch
+print(torch.__version__)
+print(torch.version.cuda)
+print(torch.cuda.is_available())
+print(torch.cuda.get_device_name(0))
+print(torch.cuda.get_device_capability(0))
+x = torch.ones(4096, device="cuda")
+print(float((x * x).sum()))
+PY
+```
+
+Then run:
 
 ```bash
 python tools/bench_smollm2_transformers.py \
@@ -124,7 +176,9 @@ explicitly reported as a difference:
 7. no per-token host decision in either fixed-length path;
 8. successful qualified greedy prefix check for the default probe;
 9. clean NNIS git state, or the dirty state is explicitly retained in evidence;
-10. actual Torch/Transformers/CUDA and NNIS driver/NVRTC versions are retained.
+10. actual Torch/Transformers/CUDA and NNIS driver/NVRTC versions are retained;
+11. Jetson power mode, clock policy and relevant thermal/throttling state are
+    matched or explicitly retained as a difference.
 
 Do not compare NNIS GPU timing with the Transformers CPU reference used for
 numerical validation. Do not infer quality from tokens/second, and do not infer
@@ -132,5 +186,7 @@ performance from the numerical-validation logs.
 
 ## Memory interpretation
 
-NNIS memory snapshots use CUDA `cuMemGetInfo`. The reported free-byte deltas are observational process/device memory signals only; they are **not** allocation ownership, model byte size, or proof of physical residency. This distinction is especially important on integrated/unified-memory devices such as NVIDIA Thor.
-
+NNIS memory snapshots use CUDA `cuMemGetInfo`. The reported free-byte deltas are
+observational process/device memory signals only; they are **not** allocation
+ownership, model byte size, or proof of physical residency. This distinction is
+especially important on integrated/unified-memory devices such as NVIDIA Thor.
