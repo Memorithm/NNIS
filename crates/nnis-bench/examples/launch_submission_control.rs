@@ -223,13 +223,9 @@ fn run() -> Result<Report> {
             .with_dimension("launches", launch_count as u64)
             .with_dimension("elements_per_launch", CONTROL_ELEMENTS as u64)
             .with_work_items(launch_count as u64);
-        let gpu_timeline = benchmark_gpu(
-            &context,
-            &stream,
-            case,
-            arguments.config,
-            || enqueue_repeated_scale(&kernels, &stream, &input, &output, launch_count),
-        )?;
+        let gpu_timeline = benchmark_gpu(&context, &stream, case, arguments.config, || {
+            enqueue_repeated_scale(&kernels, &stream, &input, &output, launch_count)
+        })?;
 
         if gpu_timeline.metadata.git_dirty != Some(false) {
             return Err(NnisError::invalid_input(
@@ -262,9 +258,8 @@ fn run() -> Result<Report> {
         )));
     }
 
-    let metadata = reference_metadata.ok_or_else(|| {
-        NnisError::invalid_input("launch-control benchmark produced no metadata")
-    })?;
+    let metadata = reference_metadata
+        .ok_or_else(|| NnisError::invalid_input("launch-control benchmark produced no metadata"))?;
     Ok(Report {
         schema_version: 1,
         experiment: "R2-cuda-host-launch-submission-control-v1",
