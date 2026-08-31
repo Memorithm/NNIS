@@ -1,0 +1,40 @@
+name: SmolLM2 benchmark harness
+
+on:
+  pull_request:
+    paths:
+      - "crates/nnis-bench/Cargo.toml"
+      - "crates/nnis-bench/examples/smollm2_e2e.rs"
+      - "tools/bench_smollm2_transformers.py"
+      - "docs/SMOLLM2_BENCHMARK.md"
+      - ".github/workflows/smollm2-benchmark-harness.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  harness:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Rust format
+        run: cargo fmt --all -- --check
+
+      - name: Check NNIS benchmark example
+        run: cargo check -p nnis-bench --example smollm2_e2e
+
+      - name: Clippy NNIS benchmark example
+        run: cargo clippy -p nnis-bench --example smollm2_e2e -- -D warnings
+
+      - name: Validate Transformers harness syntax
+        run: |
+          python3 -m py_compile tools/bench_smollm2_transformers.py
+          python3 tools/bench_smollm2_transformers.py --help >/dev/null
