@@ -1,7 +1,7 @@
 schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 repository: Memorithm/NVIDIA-Native-Inference-Stack
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
@@ -19,6 +19,9 @@ score_policy:
     - treating_random_tiny_fixtures_as_model_quality_evidence
     - treating_kernel_microbenchmarks_as_serving_performance
     - claiming_general_model_support_from_one_llama_like_fixture
+    - claiming_KV_compression_from_nominal_index_width_without_all_overheads
+    - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
+    - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 priority_program:
   - id: NNML0
     name: Shared model and tensor interoperability
@@ -58,9 +61,15 @@ priority_program:
       - integrate_FLAT_ATTENTION_through_a_versioned_execution_boundary_where_backend_compatible
       - expose_KV_storage_contract_for_SLHAv2_and_TurboQuant_adapters_without_copying_codec_ownership
       - preserve_uncompressed_reference_KV_path_for_quality_oracle
+      - qualify_DA_LUC_only_through_the_dedicated_research_program
+      - require_exact_effective_bits_per_value_including_codebooks_residuals_metadata_and_padding
+      - report_quality_memory_decode_latency_and_tokens_per_second_together_for_compressed_KV_promotion
+      - prefer_no_dense_KV_materialization_as_the_verifiable_kernel_property
     exit_criteria:
       - baseline_and_specialized_paths_run_the_same_real_model_and_prompt_suite
       - quality_memory_and_tokens_per_second_are_reported_together
+      - compressed_KV_candidates_have_exact_storage_accounting_and_versioned_semantics
+      - no_DA_LUC_runtime_promotion_from_isolated_kernel_evidence_only
   - id: NNML4
     name: Serving grade inference surface
     priority: P1
@@ -78,6 +87,16 @@ priority_program:
       - same_model_same_weights_same_prompts_comparison_against_a_trusted_reference_runtime
       - retain_CUDA_event_kernel_measurements_but_add_end_to_end_serving_measurements
       - export_versioned_evidence_for_SciRust_Verify
+      - include_relevant_quantized_KV_external_baselines_when_reproducible_and_semantically_comparable
+  - id: NNML6
+    name: Experimental semantic KV routing
+    priority: P2_research_only
+    goals:
+      - evaluate_PHR_Lite_only_as_KV_precision_retention_page_or_offload_routing
+      - compare_against_recency_attention_mass_and_deterministic_random_controls
+      - keep_tokenizer_next_token_objective_and_LM_head_unchanged
+    exit_criteria:
+      - no_semantic_router_promotion_without_same_budget_same_quality_real_model_evidence
 completion_definition: >-
   NNIS is 5/5 only when it can load representative real models directly,
   execute prefill/decode/sampling/batching fully on supported NVIDIA hardware,
