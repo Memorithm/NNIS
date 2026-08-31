@@ -36,21 +36,32 @@ jobs:
           bash /tmp/e1-generate.sh
           python3 - <<'PY'
           from pathlib import Path
+
           p = Path('crates/nnis-model/src/runtime.rs')
-          s = p.read_text()
-          old = '''                if !gemv_by_block_size.contains_key(&block_size) {
-                      let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;
-                      gemv_by_block_size.insert(block_size, kernel);
-                  }'''
-          new = '''                if let std::collections::btree_map::Entry::Vacant(entry) =
-                      gemv_by_block_size.entry(block_size)
-                  {
-                      let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;
-                      entry.insert(kernel);
-                  }'''
-          if old not in s:
+          lines = p.read_text().splitlines()
+          target = 'if !gemv_by_block_size.contains_key(&block_size) {'
+          for index, line in enumerate(lines):
+              if line.strip() == target:
+                  indent = line[:len(line) - len(line.lstrip())]
+                  expected = [
+                      'let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;',
+                      'gemv_by_block_size.insert(block_size, kernel);',
+                      '}',
+                  ]
+                  if [lines[index + offset].strip() for offset in (1, 2, 3)] != expected:
+                      raise SystemExit('unexpected map-entry fragment after match')
+                  lines[index:index + 4] = [
+                      indent + 'if let std::collections::btree_map::Entry::Vacant(entry) =',
+                      indent + '    gemv_by_block_size.entry(block_size)',
+                      indent + '{',
+                      indent + '    let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;',
+                      indent + '    entry.insert(kernel);',
+                      indent + '}',
+                  ]
+                  break
+          else:
               raise SystemExit('expected map-entry staging fragment not found')
-          p.write_text(s.replace(old, new, 1))
+          p.write_text('\n'.join(lines) + '\n')
           PY
       - name: Validate repaired E1 plan
         run: |
