@@ -164,6 +164,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
 
     for layer_index in 0..model.config.num_hidden_layers {
         let layer = &model.weights.layers[layer_index];
+        if layer_index == 24 {
+            report_stage(
+                "layer24.input",
+                &session.workspace.hidden,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .decoder
             .weighted_rms_norm(
@@ -279,6 +288,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 model.config.hidden_size,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.attention_projected",
+                &session.workspace.projected,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .elementwise
             .vector_add(
@@ -288,6 +306,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 &session.workspace.residual,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.attention_residual",
+                &session.workspace.residual,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .decoder
             .weighted_rms_norm(
@@ -300,6 +327,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 model.config.rms_norm_eps,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.post_attention_norm",
+                &session.workspace.normed,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .gemm
             .gemm(
@@ -353,6 +389,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 model.config.intermediate_size,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.mlp",
+                &session.workspace.mlp,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .elementwise
             .vector_add(
