@@ -199,9 +199,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .as_str()
                 {
                     "baseline" => F32FusionPlan::baseline(),
-                    "r2-silu-multiply-fused" => {
-                        F32FusionPlan::r2_silu_multiply_fused_candidate()
-                    }
+                    "r2-silu-multiply-fused" => F32FusionPlan::r2_silu_multiply_fused_candidate(),
                     other => return Err(format!("unknown --fusion-plan {other:?}")),
                 };
             }
