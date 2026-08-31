@@ -116,7 +116,8 @@ impl ProjectionFixture {
 
         let lm_head_host = deterministic_weight(HIDDEN, VOCAB, 11);
         let lm_head = upload_weight(context, stream, &lm_head_host)?;
-        let hidden_input = DeviceBuffer::from_host(context, stream, &deterministic_input(HIDDEN, 13))?;
+        let hidden_input =
+            DeviceBuffer::from_host(context, stream, &deterministic_input(HIDDEN, 13))?;
         let intermediate_input =
             DeviceBuffer::from_host(context, stream, &deterministic_input(INTERMEDIATE, 17))?;
         let hidden_output = DeviceBuffer::<f32>::new(context, HIDDEN)?;
@@ -242,11 +243,7 @@ fn validate_selected_shapes(
     Ok(())
 }
 
-fn enqueue_baseline(
-    stream: &Stream,
-    fixture: &ProjectionFixture,
-    gemm: &F32Gemm,
-) -> Result<()> {
+fn enqueue_baseline(stream: &Stream, fixture: &ProjectionFixture, gemm: &F32Gemm) -> Result<()> {
     for layer in &fixture.layers {
         unsafe {
             gemm.enqueue_gemm(
@@ -410,6 +407,7 @@ fn enqueue_hybrid(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn benchmark_sequence(
     context: &Arc<Context>,
     stream: &Stream,
@@ -477,25 +475,11 @@ fn run() -> Result<()> {
 
     let fixture = ProjectionFixture::new(&context, &stream)?;
     validate_selected_shapes(
-        &context,
-        &stream,
-        &fixture,
-        &gemm,
-        &gemv_512,
-        &gemv_128,
-        &gemv_64,
+        &context, &stream, &fixture, &gemm, &gemv_512, &gemv_128, &gemv_64,
     )?;
 
     let (baseline, hybrid) = benchmark_sequence(
-        &context,
-        &stream,
-        &fixture,
-        &gemm,
-        &gemv_512,
-        &gemv_128,
-        &gemv_64,
-        config,
-        order,
+        &context, &stream, &fixture, &gemm, &gemv_512, &gemv_128, &gemv_64, config, order,
     )?;
 
     let weight_elements = projection_weight_elements();
@@ -556,7 +540,9 @@ fn run() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&report).map_err(|error| {
-            NnisError::unsupported(format!("failed to serialize projection-stream report: {error}"))
+            NnisError::unsupported(format!(
+                "failed to serialize projection-stream report: {error}"
+            ))
         })?
     );
     Ok(())
