@@ -162,17 +162,20 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
             "--projection-plan" => {
                 projection_plan = match args
                     .next()
-                    .ok_or("--projection-plan requires baseline-gemm or thor-e1-smollm2")?
+                    .ok_or("--projection-plan requires a known E1 diagnostic plan")?
                     .as_str()
                 {
                     "baseline-gemm" => F32ProjectionPlan::baseline_gemm(),
+                    "thor-e1-qo-only" => F32ProjectionPlan::thor_e1_qo_only(),
+                    "thor-e1-gate-up-only" => F32ProjectionPlan::thor_e1_gate_up_only(),
+                    "thor-e1-lm-head-only" => F32ProjectionPlan::thor_e1_lm_head_only(),
                     "thor-e1-smollm2" => F32ProjectionPlan::thor_e1_smollm2(),
                     other => return Err(format!("unknown --projection-plan {other:?}")),
                 };
             }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-smollm2]"
+                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-qo-only|thor-e1-gate-up-only|thor-e1-lm-head-only|thor-e1-smollm2]"
                         .to_string(),
                 );
             }

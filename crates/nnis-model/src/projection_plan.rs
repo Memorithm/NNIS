@@ -63,6 +63,33 @@ impl F32ProjectionPlan {
         }
     }
 
+    /// Diagnostic E1 plan: only Q/O projections use the measured GEMV candidate.
+    #[must_use]
+    pub const fn thor_e1_qo_only() -> Self {
+        Self {
+            q_o: F32ProjectionKernel::Gemv { block_size: 512 },
+            ..Self::baseline_gemm()
+        }
+    }
+
+    /// Diagnostic E1 plan: only gate/up projections use the measured GEMV candidate.
+    #[must_use]
+    pub const fn thor_e1_gate_up_only() -> Self {
+        Self {
+            gate_up: F32ProjectionKernel::Gemv { block_size: 128 },
+            ..Self::baseline_gemm()
+        }
+    }
+
+    /// Diagnostic E1 plan: only the LM head uses the measured GEMV candidate.
+    #[must_use]
+    pub const fn thor_e1_lm_head_only() -> Self {
+        Self {
+            lm_head: F32ProjectionKernel::Gemv { block_size: 64 },
+            ..Self::baseline_gemm()
+        }
+    }
+
     pub fn validate(self) -> Result<()> {
         for choice in [self.q_o, self.k_v, self.gate_up, self.down, self.lm_head] {
             choice.validate()?;
@@ -101,6 +128,40 @@ mod tests {
         assert_eq!(plan.down, F32ProjectionKernel::Gemm);
         assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
         plan.validate().unwrap();
+    }
+
+    #[test]
+    fn single_family_diagnostics_change_only_one_family() {
+        let baseline = F32ProjectionPlan::baseline_gemm();
+        let qo = F32ProjectionPlan::thor_e1_qo_only();
+        assert_eq!(qo.q_o, F32ProjectionKernel::Gemv { block_size: 512 });
+        assert_eq!(
+            (qo.k_v, qo.gate_up, qo.down, qo.lm_head),
+            (
+                baseline.k_v,
+                baseline.gate_up,
+                baseline.down,
+                baseline.lm_head
+            )
+        );
+        let gate_up = F32ProjectionPlan::thor_e1_gate_up_only();
+        assert_eq!(
+            gate_up.gate_up,
+            F32ProjectionKernel::Gemv { block_size: 128 }
+        );
+        assert_eq!(
+            (gate_up.q_o, gate_up.k_v, gate_up.down, gate_up.lm_head),
+            (baseline.q_o, baseline.k_v, baseline.down, baseline.lm_head)
+        );
+        let lm_head = F32ProjectionPlan::thor_e1_lm_head_only();
+        assert_eq!(
+            lm_head.lm_head,
+            F32ProjectionKernel::Gemv { block_size: 64 }
+        );
+        assert_eq!(
+            (lm_head.q_o, lm_head.k_v, lm_head.gate_up, lm_head.down),
+            (baseline.q_o, baseline.k_v, baseline.gate_up, baseline.down)
+        );
     }
 
     #[test]
