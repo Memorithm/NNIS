@@ -58,6 +58,28 @@ phase_evidence:
       Stream, Event and DeviceBuffer; nnis-bench provides CUDA-event reports and
       fail-closed environment compatibility. No new NNIS CUDA API is required
       before the AXPBY-like qualification slice.
+  NK1_host_qualification:
+    forge_main_commit: 9762e78c8e89f570078a694f0c417932c1fa5fea
+    forge_pull_request: 10
+    exact_head_ci: 53a4b466d1f62e189dc1791895251e5ac6ab1efe
+    pinned_nnis_commit: a4635547f3e46abd6652f8d319093dabc0baee6f
+    result: passed
+    evidence:
+      - adapter_compiles_against_exact_pinned_NNIS
+      - adapter_clippy_deny_warnings_passes
+      - host_contract_tests_pass
+      - strict_f32_TF32_disabled_gate_is_enforced
+      - generated_candidate_compilation_uses_NNIS_JIT_NVRTC
+      - launch_path_uses_NNIS_Driver_API_abstractions
+      - verification_evidence_precedes_measurement_evidence
+      - benchmark_translation_uses_NNIS_CUDA_events
+      - NNIS_environment_completeness_is_fail_closed
+      - axpby_smoke_contains_wrong_and_correct_candidate_hardware_path
+    remaining_before_NK1_completion:
+      - execute_axpby_smoke_on_real_NVIDIA_hardware
+      - capture_machine_readable_output
+      - confirm_wrong_candidate_is_rejected_without_measurement
+      - confirm_correct_candidate_passes_oracle_and_emits_CUDA_event_samples
 
 phases:
   - id: NK0
@@ -73,6 +95,7 @@ phases:
       - run_first_AXPBY_like_closed_loop_without_PyTorch
       - prove_verification_precedes_measurement
       - prove_incompatible_environment_comparison_fails_closed
+      - qualify_the_path_on_real_NVIDIA_hardware
   - id: NK2
     name: Native transformer kernel search
     status: planned
@@ -81,7 +104,7 @@ phases:
       - retain_existing_NNIS_reference_paths_as_oracles
       - require_destination_end_to_end_requalification_before_plan_promotion
   - id: NK3
-    name: Attention_and_decode_search
+    name: Attention_and_decode search
     status: planned
     goals:
       - expose_measured_bottlenecks_as_search_tasks
