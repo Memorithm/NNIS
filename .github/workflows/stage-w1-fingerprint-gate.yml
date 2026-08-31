@@ -1,0 +1,42 @@
+name: Stage W1 fingerprint gate
+on:
+  push:
+    branches: [perf/w1-lm-head-bf16-weight-candidate]
+permissions:
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/w1-lm-head-bf16-weight-candidate
+          fetch-depth: 0
+      - name: Require compatible benchmark fingerprints
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs')
+          s = p.read_text()
+          marker = '''    let candidate = benchmark_gpu(\n        &context,\n        &stream,\n        BenchmarkCase::new(\n            "smollm2_lm_head_f32_activation_bf16_weight",\n            "f32xbf16->f32",\n        ),\n        arguments.config,\n        || {\n            // SAFETY: benchmark_gpu synchronizes each measured launch and\n            // all captured buffers outlive the benchmark.\n            unsafe {\n                candidate_kernel.enqueue_project_kn(\n                    &stream,\n                    &input,\n                    &weight_bf16,\n                    &candidate_output,\n                    HIDDEN,\n                    VOCAB,\n                )\n            }\n        },\n    )?;\n\n    let reference_after = reference_output.to_vec(&stream)?;'''
+          replacement = '''    let candidate = benchmark_gpu(\n        &context,\n        &stream,\n        BenchmarkCase::new(\n            "smollm2_lm_head_f32_activation_bf16_weight",\n            "f32xbf16->f32",\n        ),\n        arguments.config,\n        || {\n            // SAFETY: benchmark_gpu synchronizes each measured launch and\n            // all captured buffers outlive the benchmark.\n            unsafe {\n                candidate_kernel.enqueue_project_kn(\n                    &stream,\n                    &input,\n                    &weight_bf16,\n                    &candidate_output,\n                    HIDDEN,\n                    VOCAB,\n                )\n            }\n        },\n    )?;\n\n    reference\n        .metadata\n        .require_compatible_environment(&candidate.metadata)?;\n\n    let reference_after = reference_output.to_vec(&stream)?;'''
+          if marker not in s:
+              raise SystemExit('W1 benchmark insertion marker missing')
+          p.write_text(s.replace(marker, replacement, 1))
+          PY
+      - name: Validate W1 fingerprint-gated candidate
+        run: |
+          cargo fmt --all
+          cargo check --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked -p nnis-bench --lib
+          cargo test --locked -p nnis-kernels --lib
+          cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
+      - name: Commit product patch only
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/stage-w1-fingerprint-gate.yml
+          git add crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs
+          git commit -m "experiment(weights): require W1 environment compatibility"
+          git push origin HEAD:perf/w1-lm-head-bf16-weight-candidate
