@@ -1,0 +1,66 @@
+name: Stage precise SmolLM2 memory labels
+
+on:
+  push:
+    branches:
+      - perf/smollm2-e2e-benchmark
+
+permissions:
+  contents: write
+
+jobs:
+  stage-labels:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: perf/smollm2-e2e-benchmark
+
+      - name: Make cuMemGetInfo semantics explicit
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          rust = Path("crates/nnis-bench/examples/smollm2_e2e.rs")
+          text = rust.read_text()
+          text = text.replace("model_resident_delta_bytes", "cuda_free_delta_after_model_bytes")
+          text = text.replace("session_resident_delta_bytes", "cuda_free_delta_after_session_bytes")
+          rust.write_text(text)
+
+          docs = Path("docs/SMOLLM2_BENCHMARK.md")
+          text = docs.read_text()
+          text = text.replace("model_resident_delta_bytes", "cuda_free_delta_after_model_bytes")
+          text = text.replace("session_resident_delta_bytes", "cuda_free_delta_after_session_bytes")
+          marker = "## Memory interpretation\n"
+          note = (
+              "## Memory interpretation\n\n"
+              "NNIS memory snapshots use CUDA `cuMemGetInfo`. The reported free-byte deltas are observational process/device memory signals only; they are **not** allocation ownership, model byte size, or proof of physical residency. This distinction is especially important on integrated/unified-memory devices such as NVIDIA Thor.\n\n"
+          )
+          if marker not in text:
+              text += "\n" + note
+          docs.write_text(text)
+          PY
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo check --locked -p nnis-bench --example smollm2_e2e
+          cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
+
+      - name: Commit staged labels
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/nnis-bench/examples/smollm2_e2e.rs docs/SMOLLM2_BENCHMARK.md
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "bench: clarify CUDA free-memory deltas"
+          git push origin HEAD:perf/smollm2-e2e-benchmark
