@@ -213,9 +213,7 @@ pub fn load_model_directory_with_representation_plan(
             host_bf16.push((bits >> 16) as u16);
         }
         let packed = DeviceTensor::Bf16(Arc::new(DeviceBuffer::from_host(
-            context,
-            stream,
-            &host_bf16,
+            context, stream, &host_bf16,
         )?));
         weights.lm_head = MatrixWeight::new(packed, rows, cols)?;
     }
