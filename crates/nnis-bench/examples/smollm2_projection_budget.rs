@@ -1,7 +1,7 @@
-use nnis_bench::{BenchConfig, BenchmarkCase, BenchmarkReport, benchmark_gpu};
+use nnis_bench::{benchmark_gpu, BenchConfig, BenchmarkCase, BenchmarkReport};
 use nnis_jit::JitCompiler;
 use nnis_kernels::F32Gemm;
-use nnis_rt::{DeviceBuffer, NnisError, Result, Stream, gpu_context};
+use nnis_rt::{gpu_context, DeviceBuffer, NnisError, Result, Stream};
 use serde_json::json;
 
 const HIDDEN: usize = 576;
@@ -206,8 +206,11 @@ fn run() -> Result<()> {
         ],
     });
 
-    println!("{}", serde_json::to_string_pretty(&report).map_err(|error| {
-        NnisError::unsupported(format!("failed to serialize projection budget: {error}"))
-    })?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).map_err(|error| {
+            NnisError::unsupported(format!("failed to serialize projection budget: {error}"))
+        })?
+    );
     Ok(())
 }
