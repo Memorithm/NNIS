@@ -120,7 +120,9 @@ impl F32CachedAttentionDecodeParallelValue {
         scale: f32,
     ) -> Result<()> {
         // SAFETY: this method retains all borrows until the stream is drained.
-        unsafe { self.enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)? };
+        unsafe {
+            self.enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)?
+        };
         stream.synchronize()
     }
 
@@ -152,7 +154,8 @@ impl F32CachedAttentionDecodeParallelValue {
         if query.len() % config.head_dim != 0 {
             return Err(NnisError::invalid_input(format!(
                 "candidate cached attention query width {} is not divisible by head_dim {}",
-                query.len(), config.head_dim
+                query.len(),
+                config.head_dim
             )));
         }
         let query_heads = query.len() / config.head_dim;
