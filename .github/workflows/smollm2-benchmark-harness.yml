@@ -3,6 +3,7 @@ name: SmolLM2 benchmark harness
 on:
   pull_request:
     paths:
+      - "Cargo.lock"
       - "crates/nnis-bench/Cargo.toml"
       - "crates/nnis-bench/examples/smollm2_e2e.rs"
       - "tools/bench_smollm2_transformers.py"
@@ -29,10 +30,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Check NNIS benchmark example
-        run: cargo check -p nnis-bench --example smollm2_e2e
+        run: cargo check --locked -p nnis-bench --example smollm2_e2e
 
       - name: Clippy NNIS benchmark example
-        run: cargo clippy -p nnis-bench --example smollm2_e2e -- -D warnings
+        run: cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
 
       - name: Validate Transformers harness syntax
         run: |
