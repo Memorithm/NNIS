@@ -162,17 +162,20 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
             "--projection-plan" => {
                 projection_plan = match args
                     .next()
-                    .ok_or("--projection-plan requires baseline-gemm or thor-e1-1-lm-head")?
+                    .ok_or("--projection-plan requires baseline-gemm, thor-e1-1-lm-head, or thor-e1-2-gate-up-lm-head")?
                     .as_str()
                 {
                     "baseline-gemm" => F32ProjectionPlan::baseline_gemm(),
                     "thor-e1-1-lm-head" => F32ProjectionPlan::thor_e1_1_smollm2_lm_head(),
+                    "thor-e1-2-gate-up-lm-head" => {
+                F32ProjectionPlan::thor_e1_2_smollm2_gate_up_lm_head()
+            }
                     other => return Err(format!("unknown --projection-plan {other:?}")),
                 };
             }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head]"
+                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head|thor-e1-2-gate-up-lm-head]"
                         .to_string(),
                 );
             }

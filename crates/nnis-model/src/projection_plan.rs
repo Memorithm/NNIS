@@ -65,6 +65,22 @@ impl F32ProjectionPlan {
         }
     }
 
+    /// E1.2 marginal plan: retain the promoted LM-head GEMV64 and add
+    /// gate/up GEMV128. All attention and down projections remain GEMM.
+    ///
+    /// This plan exists only to measure the marginal end-to-end value
+    /// of gate/up after E1.1; it is not a universal optimality claim.
+    #[must_use]
+    pub const fn thor_e1_2_smollm2_gate_up_lm_head() -> Self {
+        Self {
+            q_o: F32ProjectionKernel::Gemm,
+            k_v: F32ProjectionKernel::Gemm,
+            gate_up: F32ProjectionKernel::Gemv { block_size: 128 },
+            down: F32ProjectionKernel::Gemm,
+            lm_head: F32ProjectionKernel::Gemv { block_size: 64 },
+        }
+    }
+
     pub fn validate(self) -> Result<()> {
         for choice in [self.q_o, self.k_v, self.gate_up, self.down, self.lm_head] {
             choice.validate()?;
@@ -100,6 +116,17 @@ mod tests {
         assert_eq!(plan.q_o, F32ProjectionKernel::Gemm);
         assert_eq!(plan.k_v, F32ProjectionKernel::Gemm);
         assert_eq!(plan.gate_up, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.down, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn thor_e1_2_adds_only_gate_up_to_e1_1() {
+        let plan = F32ProjectionPlan::thor_e1_2_smollm2_gate_up_lm_head();
+        assert_eq!(plan.q_o, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.k_v, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.gate_up, F32ProjectionKernel::Gemv { block_size: 128 });
         assert_eq!(plan.down, F32ProjectionKernel::Gemm);
         assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
         plan.validate().unwrap();
