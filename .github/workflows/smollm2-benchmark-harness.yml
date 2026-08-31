@@ -7,6 +7,7 @@ on:
       - "crates/nnis-bench/Cargo.toml"
       - "crates/nnis-bench/examples/smollm2_e2e.rs"
       - "tools/bench_smollm2_transformers.py"
+      - "tools/requirements-smollm2-benchmark-gpu.txt"
       - "docs/SMOLLM2_BENCHMARK.md"
       - ".github/workflows/smollm2-benchmark-harness.yml"
   workflow_dispatch:
@@ -39,3 +40,6 @@ jobs:
         run: |
           python3 -m py_compile tools/bench_smollm2_transformers.py
           python3 tools/bench_smollm2_transformers.py --help >/dev/null
+          grep -q '^transformers==4.40.1$' tools/requirements-smollm2-benchmark-gpu.txt
+          grep -q '^safetensors==0.4.5$' tools/requirements-smollm2-benchmark-gpu.txt
+          grep -q '^huggingface_hub==0.24.7$' tools/requirements-smollm2-benchmark-gpu.txt
