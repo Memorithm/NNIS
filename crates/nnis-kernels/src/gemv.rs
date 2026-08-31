@@ -41,6 +41,24 @@ extern "C" __global__ void nnis_gemv_f32(
         output[row] = partial[0];
     }
 }
+
+extern "C" __global__ void nnis_project_kn_f32(
+    const float* input,
+    const float* weight,
+    float* output,
+    unsigned long long k,
+    unsigned long long n
+) {
+    const unsigned long long col =
+        (unsigned long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (col >= n) return;
+
+    float value = 0.0f;
+    for (unsigned long long row = 0; row < k; ++row) {
+        value = fmaf(input[row], weight[row * n + col], value);
+    }
+    output[col] = value;
+}
 "#;
 
 const DEFAULT_BLOCK_SIZE: u32 = 256;
@@ -49,6 +67,7 @@ const DEFAULT_BLOCK_SIZE: u32 = 256;
 #[derive(Debug)]
 pub struct F32Gemv {
     gemv: Kernel,
+    project_kn: Kernel,
     block_size: u32,
 }
 
@@ -75,6 +94,7 @@ impl F32Gemv {
         let code = compiler.compile_cubin(GEMV_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let gemv = module.get_function("nnis_gemv_f32")?;
+        let project_kn = module.get_function("nnis_project_kn_f32")?;
         let attributes = gemv.attributes()?;
         if block_size > attributes.max_threads_per_block {
             return Err(NnisError::invalid_input(format!(
@@ -88,7 +108,18 @@ impl F32Gemv {
                 attributes.max_dynamic_shared_memory_bytes
             )));
         }
-        Ok(Self { gemv, block_size })
+        let project_attributes = project_kn.attributes()?;
+        if block_size > project_attributes.max_threads_per_block {
+            return Err(NnisError::invalid_input(format!(
+                "project-kn block size {block_size} exceeds function limit {}",
+                project_attributes.max_threads_per_block
+            )));
+        }
+        Ok(Self {
+            gemv,
+            project_kn,
+            block_size,
+        })
     }
 
     /// CUDA thread-block width used along each row.
@@ -161,6 +192,116 @@ impl F32Gemv {
         // SAFETY: argument order/widths match `nnis_gemv_f32`; the caller
         // owns the asynchronous lifetime obligation.
         unsafe { launch.launch(&mut arguments) }
+    }
+
+    /// Compute `[1,K] × [K,N] -> [1,N]` and wait for completion.
+    ///
+    /// This orientation matches decoder projection weights as stored by NNIS.
+    /// Each output column accumulates `K` with explicit `fmaf` in increasing
+    /// index order, matching the current batch-one [`crate::F32Gemm`] path.
+    pub fn project_kn(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        weight: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        // SAFETY: all borrows remain live until synchronization below.
+        let enqueue_result =
+            unsafe { self.enqueue_project_kn(stream, input, weight, output, k, n) };
+        match enqueue_result {
+            Ok(()) => stream.synchronize(),
+            Err(error) => {
+                let _ = stream.synchronize();
+                Err(error)
+            }
+        }
+    }
+
+    /// Enqueue `[1,K] × [K,N] -> [1,N]` without synchronizing.
+    ///
+    /// # Safety
+    ///
+    /// All buffers, the stream, and this kernel must remain alive and
+    /// otherwise untouched until the stream completes.
+    pub unsafe fn enqueue_project_kn(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        weight: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        self.validate_project_execution(stream, input, weight, output, k, n)?;
+        if n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            // SAFETY: the output lifetime obligation is documented above.
+            return unsafe { output.zero_async(stream) };
+        }
+        let k_arg = u64::try_from(k)
+            .map_err(|_| NnisError::invalid_input("project-kn K exceeds u64::MAX"))?;
+        let n_arg = u64::try_from(n)
+            .map_err(|_| NnisError::invalid_input("project-kn N exceeds u64::MAX"))?;
+        let config = LaunchConfig::for_num_elements(n, self.block_size)?;
+        let mut arguments = KernelArgs::with_capacity(5, 3);
+        arguments
+            .push_buffer(input)
+            .push_buffer(weight)
+            .push_buffer(output)
+            .push(k_arg)
+            .push(n_arg);
+        let launch = KernelLaunch::new(&self.project_kn, stream, config);
+        // SAFETY: argument order/widths match `nnis_project_kn_f32`; the
+        // caller owns the asynchronous lifetime obligation.
+        unsafe { launch.launch(&mut arguments) }
+    }
+
+    fn validate_project_execution(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        weight: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        let expected_weight = k
+            .checked_mul(n)
+            .ok_or_else(|| NnisError::invalid_input("project-kn shape overflows usize"))?;
+        if input.len() != k {
+            return Err(NnisError::invalid_input(format!(
+                "project-kn input has {} elements; shape requires {k}",
+                input.len()
+            )));
+        }
+        if weight.len() != expected_weight {
+            return Err(NnisError::invalid_input(format!(
+                "project-kn weight has {} elements; shape ({k}, {n}) requires {expected_weight}",
+                weight.len()
+            )));
+        }
+        if output.len() != n {
+            return Err(NnisError::invalid_input(format!(
+                "project-kn output has {} elements; shape requires {n}",
+                output.len()
+            )));
+        }
+        let context = self.project_kn.context();
+        if !Arc::ptr_eq(context, stream.ctx())
+            || !Arc::ptr_eq(context, input.ctx())
+            || !Arc::ptr_eq(context, weight.ctx())
+            || !Arc::ptr_eq(context, output.ctx())
+        {
+            return Err(NnisError::invalid_input(
+                "project-kn stream, buffers, and kernel must share one context",
+            ));
+        }
+        Ok(())
     }
 
     fn validate_execution(
