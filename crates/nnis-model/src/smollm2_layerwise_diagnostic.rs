@@ -157,6 +157,68 @@ fn ordered_projection(input: &[f32], weights: &[f32], output_size: usize) -> Vec
     output
 }
 
+#[allow(clippy::too_many_arguments)]
+fn host_cached_attention_same_input(
+    query: &[f32],
+    keys: &[f32],
+    values: &[f32],
+    layer: usize,
+    query_heads: usize,
+    kv_heads: usize,
+    capacity: usize,
+    head_dim: usize,
+    kv_rows: usize,
+    scale: f32,
+) -> Vec<f32> {
+    assert_eq!(query.len(), query_heads * head_dim);
+    assert_eq!(query_heads % kv_heads, 0);
+    let expected_cache = layer
+        .checked_add(1)
+        .and_then(|layers| layers.checked_mul(kv_heads))
+        .and_then(|rows| rows.checked_mul(capacity))
+        .and_then(|rows| rows.checked_mul(head_dim))
+        .expect("cache shape overflow");
+    assert!(keys.len() >= expected_cache);
+    assert!(values.len() >= expected_cache);
+    let group_size = query_heads / kv_heads;
+    let mut output = vec![0.0_f32; query_heads * head_dim];
+    for query_head in 0..query_heads {
+        let kv_head = query_head / group_size;
+        let q = &query[query_head * head_dim..(query_head + 1) * head_dim];
+        let cache_base = ((layer * kv_heads + kv_head) * capacity) * head_dim;
+        let destination = &mut output[query_head * head_dim..(query_head + 1) * head_dim];
+        let mut running_max = f32::MIN;
+        let mut running_sum = 0.0_f32;
+        for position in 0..kv_rows {
+            let row = cache_base + position * head_dim;
+            let key = &keys[row..row + head_dim];
+            let value = &values[row..row + head_dim];
+            let mut score = 0.0_f32;
+            for dim in 0..head_dim {
+                score = q[dim].mul_add(key[dim], score);
+            }
+            score *= scale;
+            let next_max = running_max.max(score);
+            let old_weight = if running_sum == 0.0 {
+                0.0
+            } else {
+                (running_max - next_max).exp()
+            };
+            let new_weight = (score - next_max).exp();
+            for dim in 0..head_dim {
+                destination[dim] = destination[dim] * old_weight + value[dim] * new_weight;
+            }
+            running_sum = running_sum * old_weight + new_weight;
+            running_max = next_max;
+        }
+        let inverse_sum = 1.0_f32 / running_sum;
+        for value in destination {
+            *value *= inverse_sum;
+        }
+    }
+    output
+}
+
 #[test]
 fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
     let Some(model_dir) = std::env::var_os("NNIS_SMOLLM2_MODEL") else {
@@ -361,6 +423,53 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 &session.stream,
                 &manifest,
                 &reference_dir,
+            );
+            let q_rope = session
+                .workspace
+                .q_rope
+                .to_vec(&session.stream)
+                .expect("copy layer-24 Q RoPE");
+            let cache_keys = session
+                .cache
+                .keys()
+                .to_vec(&session.stream)
+                .expect("copy NNIS KV keys for attention oracle");
+            let cache_values = session
+                .cache
+                .values()
+                .to_vec(&session.stream)
+                .expect("copy NNIS KV values for attention oracle");
+            let host_attention = host_cached_attention_same_input(
+                &q_rope,
+                &cache_keys,
+                &cache_values,
+                layer_index,
+                model.config.num_attention_heads,
+                model.config.num_key_value_heads,
+                model.config.max_position_embeddings,
+                model.config.head_dim(),
+                session
+                    .cache
+                    .len(layer_index)
+                    .expect("layer-24 cache length"),
+                attention_scale,
+            );
+            let gpu_attention = session
+                .workspace
+                .attention
+                .to_vec(&session.stream)
+                .expect("copy NNIS GPU attention");
+            let reference_attention =
+                expected_stage(&manifest, &reference_dir, "layer24.attention_pre_o");
+            report_host_vectors(
+                "layer24.attention.gpu_vs_host_same_input",
+                &gpu_attention,
+                &host_attention,
+            );
+            report_host_vectors(
+                "layer24.attention.host_same_input_vs_transformers",
+                &host_attention,
+                &reference_attention,
             );
         }
 
