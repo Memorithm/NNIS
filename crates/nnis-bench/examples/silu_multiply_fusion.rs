@@ -190,9 +190,7 @@ fn main() -> Result<()> {
     }
 
     let avoided_per_layer = (elements as u64)
-        .checked_mul(
-            REFERENCE_LOGICAL_BYTES_PER_ELEMENT - CANDIDATE_LOGICAL_BYTES_PER_ELEMENT,
-        )
+        .checked_mul(REFERENCE_LOGICAL_BYTES_PER_ELEMENT - CANDIDATE_LOGICAL_BYTES_PER_ELEMENT)
         .ok_or_else(|| NnisError::invalid_input("avoided-byte accounting overflow"))?;
     let avoided_per_token = avoided_per_layer
         .checked_mul(SMOLLM2_LAYERS as u64)
@@ -239,8 +237,9 @@ fn main() -> Result<()> {
 
     println!(
         "{}",
-        serde_json::to_string_pretty(&report)
-            .map_err(|error| NnisError::invalid_input(format!("serialize fusion report: {error}")))?
+        serde_json::to_string_pretty(&report).map_err(|error| NnisError::invalid_input(
+            format!("serialize fusion report: {error}")
+        ))?
     );
     Ok(())
 }
