@@ -1,0 +1,85 @@
+schema_version: 1
+kind: memorithm_ml_maturity_program
+status: active
+last_updated: "2026-08-31"
+repository: Memorithm/NVIDIA-Native-Inference-Stack
+objective: >-
+  Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
+  remaining a specialized inference runtime rather than absorbing SciRust's
+  general training, tensor, data, or orchestration ownership.
+score_policy:
+  five_of_five_requires:
+    - real_model_end_to_end_execution
+    - exact_weight_config_tokenizer_identity
+    - real_GPU_required_tests
+    - machine_readable_latency_throughput_memory_and_quality_evidence
+    - failure_modes_documented_and_tested
+    - exact_head_required_CI_green
+  forbidden:
+    - treating_random_tiny_fixtures_as_model_quality_evidence
+    - treating_kernel_microbenchmarks_as_serving_performance
+    - claiming_general_model_support_from_one_llama_like_fixture
+priority_program:
+  - id: NNML0
+    name: Shared model and tensor interoperability
+    priority: P0
+    goals:
+      - implement_versioned_adapter_to_SciRust_backend_neutral_Tensor_Device_DType_Model_contracts
+      - support_Safetensors_and_Hugging_Face_style_configs_tokenizers_without_hidden_conversion_loss
+      - support_sharded_large_weight_loading_and_bf16_f16_storage_policies
+    exit_criteria:
+      - external_real_decoder_model_loads_without_python_runtime_dependency
+      - unsupported_architecture_or_dtype_fails_closed
+  - id: NNML1
+    name: Broader decoder runtime
+    priority: P0
+    goals:
+      - generalize_supported_decoder_block_variants_with_explicit_capability_checks
+      - support_MHA_GQA_MQA_and_common_rope_variants_as_versioned_capabilities
+      - add_sampling_top_k_top_p_temperature_and_reproducible_seeded_paths
+      - add_streaming_generation_and_batched_sessions
+    exit_criteria:
+      - multiple_real_model_families_pass_reference_parity_and_generation_smoke_tests
+  - id: NNML2
+    name: Device resident production execution
+    priority: P0
+    goals:
+      - eliminate_avoidable_host_roundtrips
+      - add_memory_pool_workspace_and_graph_level_lifetime_planning
+      - qualify_concurrent_streams_and_batching
+      - expose_peak_and_steady_state_VRAM_measurements
+    exit_criteria:
+      - prefill_and_decode_profiles_show_no_unintended_host_materialization
+      - OOM_and_capacity_failures_are_explicit
+  - id: NNML3
+    name: Specialized attention and KV adapters
+    priority: P0
+    goals:
+      - integrate_FLAT_ATTENTION_through_a_versioned_execution_boundary_where_backend_compatible
+      - expose_KV_storage_contract_for_SLHAv2_and_TurboQuant_adapters_without_copying_codec_ownership
+      - preserve_uncompressed_reference_KV_path_for_quality_oracle
+    exit_criteria:
+      - baseline_and_specialized_paths_run_the_same_real_model_and_prompt_suite
+      - quality_memory_and_tokens_per_second_are_reported_together
+  - id: NNML4
+    name: Serving grade inference surface
+    priority: P1
+    goals:
+      - continuous_or_dynamic_batching_contract
+      - cancellation_backpressure_and_bounded_queues
+      - request_level_metrics_and_structured_errors
+      - prefix_or_prompt_cache_only_after_identity_and_correctness_contracts_are_explicit
+    exit_criteria:
+      - sustained_multi_request_benchmark_reports_latency_distribution_throughput_and_VRAM
+  - id: NNML5
+    name: Qualification parity suite
+    priority: P0
+    goals:
+      - same_model_same_weights_same_prompts_comparison_against_a_trusted_reference_runtime
+      - retain_CUDA_event_kernel_measurements_but_add_end_to_end_serving_measurements
+      - export_versioned_evidence_for_SciRust_Verify
+completion_definition: >-
+  NNIS is 5/5 only when it can load representative real models directly,
+  execute prefill/decode/sampling/batching fully on supported NVIDIA hardware,
+  interoperate with specialized attention/KV products through explicit contracts,
+  and publish reproducible quality, latency, throughput and memory evidence.
