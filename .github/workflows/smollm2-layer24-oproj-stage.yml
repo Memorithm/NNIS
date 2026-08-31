@@ -74,27 +74,17 @@ jobs:
                   raise SystemExit('test marker missing')
               text = text.replace(marker, '\n' + helper + marker, 1)
 
-          needle = dedent('''
-                  if layer_index == 24 {
-                      report_stage(
-                          "layer24.attention_projected",
-                          &session.workspace.projected,
-                          &session.stream,
-                          &manifest,
-                          &reference_dir,
-                      );
-                  }
-          ''').strip('\n')
-          repl = dedent('''
-                  if layer_index == 24 {
-                      report_stage(
-                          "layer24.attention_projected",
-                          &session.workspace.projected,
-                          &session.stream,
-                          &manifest,
-                          &reference_dir,
-                      );
+          if 'layer24.o_proj.gpu_vs_ordered_same_input' not in text:
+              start_marker = '        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_projected",'
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit('O-proj start marker missing')
+              end_marker = '\n        model\n            .elementwise\n            .vector_add('
+              end = text.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit('O-proj end marker missing')
 
+              addition = dedent('''
                       let nnis_pre_o = session
                           .workspace
                           .attention
@@ -147,12 +137,11 @@ jobs:
                           &ordered_from_reference,
                           &reference_projected,
                       );
-                  }
-          ''').strip('\n')
-          if 'layer24.o_proj.gpu_vs_ordered_same_input' not in text:
-              if needle not in text:
-                  raise SystemExit('O-proj insertion point missing')
-              text = text.replace(needle, repl, 1)
+              ''')
+              close = text.rfind('        }', start, end)
+              if close < 0:
+                  raise SystemExit('O-proj block close missing')
+              text = text[:close] + addition + text[close:]
 
           path.write_text(text)
           PY
