@@ -58,7 +58,6 @@ fn expected_stage(manifest: &TraceManifest, reference_dir: &Path, name: &str) ->
         .iter()
         .find(|stage| stage.name == name)
         .unwrap_or_else(|| panic!("missing trace stage {name}"));
-    assert_eq!(stage.elements, 576);
     let bytes = fs::read(reference_dir.join(&stage.file)).expect("read trace vector");
     assert_eq!(bytes.len(), stage.elements * std::mem::size_of::<f32>());
     bytes
@@ -185,6 +184,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 model.config.rms_norm_eps,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.input_norm",
+                &session.workspace.normed,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
         model
             .gemm
             .gemm(
@@ -221,6 +229,29 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
                 model.config.hidden_size,
             )
             .unwrap();
+        if layer_index == 24 {
+            report_stage(
+                "layer24.q_raw",
+                &session.workspace.q,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+            report_stage(
+                "layer24.k_raw",
+                &session.workspace.k,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+            report_stage(
+                "layer24.v_raw",
+                &session.workspace.v,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
 
         unsafe {
             model
@@ -275,6 +306,15 @@ fn smollm2_prefill_layerwise_diagnostic_on_gpu() {
             )
             .unwrap();
         drop(append);
+        if layer_index == 24 {
+            report_stage(
+                "layer24.attention_pre_o",
+                &session.workspace.attention,
+                &session.stream,
+                &manifest,
+                &reference_dir,
+            );
+        }
 
         model
             .gemm
