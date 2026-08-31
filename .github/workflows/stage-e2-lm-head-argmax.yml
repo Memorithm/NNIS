@@ -1,0 +1,46 @@
+name: Stage E2 f32 LM-head argmax candidate
+on:
+  push:
+    branches: [perf/e2-f32-lm-head-argmax-candidate]
+permissions:
+  contents: write
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/e2-f32-lm-head-argmax-candidate
+          fetch-depth: 0
+      - name: Export candidate module
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/nnis-kernels/src/lib.rs')
+          s = p.read_text()
+          if 'mod lm_head_argmax;' not in s:
+              s = s.replace('mod layernorm;\n', 'mod layernorm;\nmod lm_head_argmax;\n', 1)
+          export = 'pub use lm_head_argmax::{F32LmHeadArgmax, F32LmHeadArgmaxWorkspace};\n'
+          if export not in s:
+              s = s.replace(
+                  'pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};\n',
+                  'pub use layernorm::{F32LayerNorm, F32LayerNormWorkspace};\n' + export,
+                  1,
+              )
+          p.write_text(s)
+          PY
+      - name: Validate E2 candidate
+        run: |
+          cargo fmt --all
+          cargo check --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked -p nnis-kernels --lib
+          cargo check --locked -p nnis-bench --example smollm2_lm_head_argmax_candidates
+      - name: Commit clean candidate source
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/stage-e2-lm-head-argmax.yml
+          git add crates/nnis-kernels/src/lib.rs crates/nnis-kernels/src/lm_head_argmax.rs crates/nnis-bench/examples/smollm2_lm_head_argmax_candidates.rs
+          git commit -m "perf(kernels): validate f32 LM-head argmax candidate"
+          git push origin HEAD:perf/e2-f32-lm-head-argmax-candidate
