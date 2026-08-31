@@ -55,8 +55,8 @@ struct MemoryReport {
     before_model: MemorySnapshot,
     after_model: MemorySnapshot,
     after_session: MemorySnapshot,
-    model_resident_delta_bytes: Option<u64>,
-    session_resident_delta_bytes: Option<u64>,
+    cuda_free_delta_after_model_bytes: Option<u64>,
+    cuda_free_delta_after_session_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -362,8 +362,8 @@ fn run(arguments: Arguments) -> Result<Report> {
             max_position_embeddings: config.max_position_embeddings,
         },
         memory: MemoryReport {
-            model_resident_delta_bytes: consumed_bytes(&before_model, &after_model),
-            session_resident_delta_bytes: consumed_bytes(&after_model, &after_session),
+            cuda_free_delta_after_model_bytes: consumed_bytes(&before_model, &after_model),
+            cuda_free_delta_after_session_bytes: consumed_bytes(&after_model, &after_session),
             before_model,
             after_model,
             after_session,

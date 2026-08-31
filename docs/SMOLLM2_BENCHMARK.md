@@ -129,3 +129,8 @@ explicitly reported as a difference:
 Do not compare NNIS GPU timing with the Transformers CPU reference used for
 numerical validation. Do not infer quality from tokens/second, and do not infer
 performance from the numerical-validation logs.
+
+## Memory interpretation
+
+NNIS memory snapshots use CUDA `cuMemGetInfo`. The reported free-byte deltas are observational process/device memory signals only; they are **not** allocation ownership, model byte size, or proof of physical residency. This distinction is especially important on integrated/unified-memory devices such as NVIDIA Thor.
+
