@@ -29,31 +29,29 @@ checks the model file hash before loading it.
 
 ## What is timed
 
-The primary comparison is `generation`:
+The primary backend comparison is `request_total`:
 
 - model load is excluded;
-- a fresh NNIS `InferenceSession` is created before each timed NNIS sample;
-- NNIS session creation is timed and reported separately;
-- the timed region includes prompt prefill plus fixed-length greedy decode;
+- a fresh NNIS `InferenceSession` is created inside each `request_total` sample;
+- NNIS session creation and generation-only time are also reported separately;
+- NNIS `request_total` includes session/cache/workspace setup plus prefill and decode;
 - NNIS uses `GenerationConfig::greedy`, so token selection and token feedback
   remain device-resident during the graph;
-- the Transformers harness uses `use_cache=True`, keeps each argmax token on
-  CUDA, feeds it back without a per-step `.item()`, and synchronizes CUDA only
+- Transformers `request_total` starts before prompt-tensor creation, includes dynamic
+  KV-cache construction, keeps argmax/token feedback on CUDA, and synchronizes only
   at timing boundaries;
 - both paths intentionally execute the final generated token through the
   decoder, matching NNIS fixed-length generation semantics;
 - all samples are host wall-clock durations around synchronized end-to-end
   operations. They must not be described as individual CUDA-kernel latency.
 
-The reported `generated_tokens_per_second_median` is:
+The primary throughput is `generated_tokens_per_second_request_median`:
 
 ```text
-decode_steps / median_generation_seconds
+decode_steps / median_request_total_seconds
 ```
 
-Because the timed region also includes prefill, this is an end-to-end generated
-throughput metric for the exact configured prompt and decode length. It is not
-an isolated steady-state decode-token rate.
+NNIS also reports `generated_tokens_per_second_generation_median` for an already-allocated session; that secondary value must not be compared with Transformers `request_total`. The request metric includes fresh request/cache setup and prefill, so it is not an isolated steady-state decode-token rate.
 
 ## NNIS
 
@@ -81,7 +79,7 @@ The report contains:
   session resident;
 - CUDA free-memory deltas after model and session creation;
 - session-construction samples;
-- synchronized generation samples and distribution statistics;
+- synchronized generation-only samples plus paired fresh-request (`request_total`) samples;
 - deterministic generated IDs;
 - whether the qualified two-token greedy prefix was checked.
 

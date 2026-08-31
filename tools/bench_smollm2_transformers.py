@@ -193,7 +193,7 @@ def main() -> None:
     torch.cuda.synchronize(device)
     after_warmup = memory_snapshot(torch, device)
 
-    samples_ms: list[float] = []
+    request_total_samples_ms: list[float] = []
     expected_generated: list[int] | None = None
     qualified_prefix_checked = False
     peak_allocated_bytes = after_model["allocated_bytes"]
@@ -206,7 +206,7 @@ def main() -> None:
         generated = generate_once(torch, model, args.input_ids, args.decode_steps, device)
         torch.cuda.synchronize(device)
         elapsed_ms = (time.perf_counter() - start) * 1000.0
-        samples_ms.append(elapsed_ms)
+        request_total_samples_ms.append(elapsed_ms)
         qualified_prefix_checked |= require_qualified_prefix(args.input_ids, generated)
         if expected_generated is None:
             expected_generated = generated
@@ -222,20 +222,20 @@ def main() -> None:
             peak_reserved_bytes, int(torch.cuda.max_memory_reserved(device))
         )
 
-    timing = summarize(samples_ms)
-    median_ms = timing["median_ms"]
-    if median_ms <= 0:
+    request_total_timing = summarize(request_total_samples_ms)
+    request_total_median_ms = request_total_timing["median_ms"]
+    if request_total_median_ms <= 0:
         raise RuntimeError("end-to-end timer returned a non-positive median duration")
 
     properties = torch.cuda.get_device_properties(device)
     capability = torch.cuda.get_device_capability(device)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "benchmark": "smollm2-135m-greedy-e2e",
         "backend": "transformers",
         "measurement": (
             "host-wall-clock bracketed by torch.cuda.synchronize; model load excluded; "
-            "prefill plus fixed-length cached decode included"
+            "request_total includes prompt/cache setup, prefill and fixed-length cached decode"
         ),
         "source_repo": SOURCE_REPO,
         "source_revision": SOURCE_REVISION,
@@ -273,11 +273,13 @@ def main() -> None:
                 0, peak_allocated_bytes - after_model["allocated_bytes"]
             ),
         },
-        "generation": {
-            "statistics": timing,
-            "samples_ms": samples_ms,
+        "request_total": {
+            "statistics": request_total_timing,
+            "samples_ms": request_total_samples_ms,
         },
-        "generated_tokens_per_second_median": args.decode_steps / (median_ms / 1000.0),
+        "generated_tokens_per_second_request_median": (
+            args.decode_steps / (request_total_median_ms / 1000.0)
+        ),
         "generated_ids": expected_generated,
         "qualified_greedy_prefix_checked": qualified_prefix_checked,
     }

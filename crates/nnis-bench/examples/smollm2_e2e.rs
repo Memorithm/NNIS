@@ -85,7 +85,9 @@ struct Report {
     memory: MemoryReport,
     session_setup: TimingReport,
     generation: TimingReport,
-    generated_tokens_per_second_median: f64,
+    request_total: TimingReport,
+    generated_tokens_per_second_generation_median: f64,
+    generated_tokens_per_second_request_median: f64,
     generated_ids: Vec<u32>,
     qualified_greedy_prefix_checked: bool,
 }
@@ -292,10 +294,12 @@ fn run(arguments: Arguments) -> Result<Report> {
 
     let mut session_setup_samples_ms = Vec::with_capacity(arguments.config.iterations);
     let mut generation_samples_ms = Vec::with_capacity(arguments.config.iterations);
+    let mut request_total_samples_ms = Vec::with_capacity(arguments.config.iterations);
     let mut expected_generated: Option<Vec<u32>> = None;
     let mut qualified_greedy_prefix_checked = false;
 
     for _ in 0..arguments.config.iterations {
+        let request_start = Instant::now();
         let setup_start = Instant::now();
         let mut session = model.new_session()?;
         let setup_ms = elapsed_ms(setup_start);
@@ -303,6 +307,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         let generation_start = Instant::now();
         let generated = session.generate(&arguments.input_ids, generation)?;
         let generation_ms = elapsed_ms(generation_start);
+        let request_total_ms = elapsed_ms(request_start);
         if generated.len() != arguments.decode_steps {
             return Err(NnisError::invalid_input(format!(
                 "measured generation produced {} tokens; expected {}",
@@ -323,24 +328,28 @@ fn run(arguments: Arguments) -> Result<Report> {
         }
         session_setup_samples_ms.push(setup_ms);
         generation_samples_ms.push(generation_ms);
+        request_total_samples_ms.push(request_total_ms);
     }
 
     let session_setup_statistics = summarize_samples_ms(&session_setup_samples_ms)?;
     let generation_statistics = summarize_samples_ms(&generation_samples_ms)?;
-    if generation_statistics.median_ms <= 0.0 {
+    let request_total_statistics = summarize_samples_ms(&request_total_samples_ms)?;
+    if generation_statistics.median_ms <= 0.0 || request_total_statistics.median_ms <= 0.0 {
         return Err(NnisError::unsupported(
             "end-to-end timer returned a non-positive median duration",
         ));
     }
-    let generated_tokens_per_second_median =
+    let generated_tokens_per_second_generation_median =
         arguments.decode_steps as f64 / (generation_statistics.median_ms / 1_000.0);
+    let generated_tokens_per_second_request_median =
+        arguments.decode_steps as f64 / (request_total_statistics.median_ms / 1_000.0);
     let config = model.config();
 
     Ok(Report {
-        schema_version: 1,
+        schema_version: 2,
         benchmark: "smollm2-135m-greedy-e2e",
         backend: "nnis",
-        measurement: "host-wall-clock; generate() is synchronized before return; model load and session setup excluded from generation samples",
+        measurement: "host-wall-clock; request_total includes fresh session setup plus synchronized generate(); generation excludes session setup; model load excluded",
         source_repo: SOURCE_REPO,
         source_revision: SOURCE_REVISION,
         source_model_sha256: SOURCE_MODEL_SHA256,
@@ -376,7 +385,12 @@ fn run(arguments: Arguments) -> Result<Report> {
             statistics: generation_statistics,
             samples_ms: generation_samples_ms,
         },
-        generated_tokens_per_second_median,
+        request_total: TimingReport {
+            statistics: request_total_statistics,
+            samples_ms: request_total_samples_ms,
+        },
+        generated_tokens_per_second_generation_median,
+        generated_tokens_per_second_request_median,
         generated_ids: expected_generated.expect("iterations are validated non-zero"),
         qualified_greedy_prefix_checked,
     })
