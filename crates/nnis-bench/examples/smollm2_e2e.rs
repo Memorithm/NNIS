@@ -1,7 +1,5 @@
 use nnis_bench::{summarize_samples_ms, BenchConfig, BenchmarkMetadata, TimingStatistics};
-use nnis_model::{
-    F32ProjectionPlan, GenerationConfig, Model, WeightRepresentationPlan,
-};
+use nnis_model::{F32ProjectionPlan, GenerationConfig, Model, WeightRepresentationPlan};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::env;
