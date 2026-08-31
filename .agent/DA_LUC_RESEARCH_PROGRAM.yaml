@@ -1,0 +1,190 @@
+schema_version: 1
+kind: nnis_da_luc_research_program
+status: research_only
+last_updated: "2026-09-01"
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+name:
+  short: DA-LUC
+  expanded: Dynamic Asymmetric LUT-coded KV cache
+
+mission: >-
+  Investigate an NVIDIA-native KV-cache representation and decode path that
+  reduces resident KV traffic by combining asymmetric K/V representations,
+  subspace or codebook indexing, sparse outlier-preserving residuals, and a
+  decode kernel that consumes the compressed representation without
+  materializing a dense FP16/BF16 K/V tensor.
+
+scientific_positioning:
+  status: hypothesis_not_novelty_claim
+  rule: >-
+    Do not claim novelty for KV quantization, asymmetric K/V quantization,
+    outlier preservation, product/vector quantization, codebooks, LUT-based
+    scoring, or quantized KV kernels in isolation. Audit and compare relevant
+    prior art before any novelty statement.
+  comparison_targets_when_reproducible:
+    - KIVI
+    - KVQuant
+    - QServe
+    - PQCache
+    - TensorRT_LLM_quantized_KV
+  terminology_guardrails:
+    - prefer_no_dense_KV_materialization_over_zero_dequantization
+    - register_or_scalar_conversion_inside_a_kernel_is_not_zero_dequantization
+    - eight_to_sixteen_x_KV_reduction_is_a_target_not_a_result
+    - effective_bits_per_value_must_include_all_overheads
+
+ownership:
+  NNIS_owns:
+    - CUDA_Driver_NVRTC_execution
+    - NVIDIA_specific_physical_layouts_and_packing
+    - device_capability_specialization
+    - register_shared_memory_and_LUT_kernel_mapping
+    - CUDA_event_and_end_to_end_runtime_measurement
+    - explicit_runtime_plan_selection
+  NNIS_does_not_own:
+    - general_attention_semantics_owned_by_FLAT_ATTENTION
+    - generic_compressed_KV_cache_policy_owned_elsewhere_in_the_ecosystem
+    - fabricated_cross_repository_contracts
+  FLAT_ATTENTION_boundary: >-
+    Prefer a versioned attention-facing DA-LUC representation/view contract from
+    FLAT-ATTENTION when one exists. NNIS may prototype an NVIDIA-local candidate
+    first, but must not silently declare a private layout to be the ecosystem
+    semantic contract.
+
+reference_design_hypothesis:
+  keys: >-
+    Partition each key head into subspaces and represent each subspace by a
+    codebook index plus an optional sparse residual for preserved outliers.
+  key_decode_scoring: >-
+    For q_len=1, compute query-to-codebook lookup tables once per query/subspace,
+    score cached keys through index lookups and accumulation, then apply sparse
+    residual corrections without reconstructing a dense key tensor.
+  values: >-
+    Treat V separately from K. Initial candidates should include groupwise low-bit
+    V plus sparse residuals before assuming the same codebook scheme is optimal
+    for values.
+  dynamic_asymmetry: >-
+    K and V may use different bit widths, grouping, codebooks, residual budgets,
+    and hot/cold precision tiers. Every choice must be explicit in a versioned
+    plan and measured independently.
+
+exact_storage_accounting:
+  required_formula: >-
+    effective_bits_per_value =
+    (index_bits + codebook_bits + scale_zero_point_bits + residual_value_bits +
+    residual_index_or_bitmap_bits + page_metadata_bits + alignment_padding_bits)
+    / logical_KV_scalar_count
+  required_reports:
+    - logical_KV_scalar_count
+    - total_resident_bytes
+    - effective_bits_per_value
+    - compression_ratio_against_declared_dense_baseline
+    - codebook_overhead_bytes
+    - residual_overhead_bytes
+    - metadata_and_padding_bytes
+
+quality_and_performance_gates:
+  always_report_together:
+    - quality_or_reference_error
+    - exact_memory_or_VRAM
+    - decode_latency_distribution
+    - tokens_per_second
+    - workload_and_context_length
+    - exact_commit_and_environment_fingerprint
+  quality_evidence:
+    - deterministic_dense_reference_KV_path_retained
+    - numerical_attention_output_error_for_isolated_tests
+    - real_model_generation_or_quality_metric_for_promotion
+    - generated_token_identity_only_when_the_declared_semantics_require_it
+  performance_evidence:
+    - CUDA_event_timing_for_isolated_decode_kernel
+    - end_to_end_real_model_prefill_and_decode_measurement
+    - no_microbenchmark_only_runtime_promotion
+    - report_register_pressure_occupancy_and_memory_traffic_when_measured
+  promotion_rule: >-
+    A DA-LUC candidate may be promoted only for a declared objective such as
+    MinMemory, MinLatency, or BalancedLatencyMemory after the applicable quality,
+    exact-storage, fingerprint, exact-head CI, and end-to-end gates pass.
+
+research_phases:
+  - id: DAL0
+    name: Audit and contract
+    status: pending
+    deliverables:
+      - audit_current_NNIS_KV_layout_append_and_decode_paths
+      - audit_FLAT_ATTENTION_and_SLHAv2_KV_contracts_before_cross_repo_assumptions
+      - record_prior_art_comparison_matrix
+      - define_versioned_candidate_plan_without_changing_default_runtime
+  - id: DAL1
+    name: Exact representation oracle
+    status: blocked_on_DAL0
+    deliverables:
+      - host_reference_encode_decode
+      - exact_storage_accounting
+      - K_and_V_error_sweeps
+      - sparse_outlier_residual_accounting
+  - id: DAL2
+    name: LUT-coded key scoring
+    status: blocked_on_DAL1
+    deliverables:
+      - q_len_1_query_codebook_LUT_construction
+      - index_stream_scoring
+      - sparse_key_residual_correction
+      - no_dense_key_materialization_in_candidate_kernel
+  - id: DAL3
+    name: Asymmetric value path
+    status: blocked_on_DAL2
+    deliverables:
+      - evaluate_groupwise_INT4_INT2_or_other_supported_low_bit_V_candidates
+      - sparse_value_residual_path
+      - compare_against_codebook_V_before_selecting_a_default_candidate
+  - id: DAL4
+    name: Dynamic hot cold precision
+    status: blocked_on_DAL3
+    deliverables:
+      - explicit_page_or_segment_precision_tiers
+      - deterministic_recency_and_attention_mass_baselines
+      - versioned_transition_and_capacity_semantics
+  - id: DAL5
+    name: Real model qualification
+    status: blocked_on_DAL4
+    deliverables:
+      - same_model_same_prompt_dense_vs_DA_LUC_comparison
+      - quality_memory_latency_and_tokens_per_second_reported_together
+      - multiple_context_lengths_and_decode_lengths
+      - exact_head_green_CI_before_hardware_promotion
+  - id: DAL6
+    name: PHR-Lite semantic routing research
+    status: blocked_until_DAL5_has_a_qualified_non_semantic_baseline
+    scope: >-
+      PHR-Lite may only propose KV precision, retention, page, or offload tiers.
+      It does not replace tokenization, next-token prediction, the LM head, or the
+      language-model objective in this program.
+    required_controls:
+      - recency_only_router
+      - attention_mass_router
+      - deterministic_random_control
+      - same_storage_budget
+      - same_quality_and_workload_suite
+    promotion_rule: >-
+      Do not promote PHR-Lite unless it beats simpler routing controls under the
+      same storage and quality budget with reproducible real-model evidence.
+
+fail_closed_conditions:
+  - missing_dense_reference_path
+  - unknown_representation_schema_version
+  - missing_exact_storage_overhead
+  - missing_quality_evidence
+  - incompatible_environment_fingerprint
+  - performance_claim_from_isolated_kernel_only
+  - novelty_claim_without_prior_art_audit
+  - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
+  - claiming_eight_to_sixteen_x_without_measured_effective_bits_per_value
+
+next_action: >-
+  Begin DAL0 only after rereading the NNIS sovereignty roadmap, ML maturity
+  overlay, and the current FLAT-ATTENTION KV roadmap/contract. Do not implement
+  DA-LUC by bypassing the currently promoted NNIS runtime plan or changing the
+  default KV representation implicitly.
