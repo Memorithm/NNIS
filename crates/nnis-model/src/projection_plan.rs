@@ -48,16 +48,18 @@ impl F32ProjectionPlan {
         }
     }
 
-    /// E1 plan selected from the physical Thor MAXN candidate sweep.
+    /// E1.1 plan: only the LM-head uses the physically qualified GEMV64 candidate.
     ///
-    /// This is evidence-scoped to the qualified SmolLM2 f32 experiment and is
-    /// not claimed to be universally optimal on Thor or other models.
+    /// This narrows the rejected E1 hybrid plan to the single projection family
+    /// with the strongest isolated speedup while keeping all layer projections
+    /// on the historical GEMM path. It remains evidence-scoped to SmolLM2 f32
+    /// on Thor and is not claimed to be universally optimal.
     #[must_use]
-    pub const fn thor_e1_smollm2() -> Self {
+    pub const fn thor_e1_1_smollm2_lm_head() -> Self {
         Self {
-            q_o: F32ProjectionKernel::Gemv { block_size: 512 },
+            q_o: F32ProjectionKernel::Gemm,
             k_v: F32ProjectionKernel::Gemm,
-            gate_up: F32ProjectionKernel::Gemv { block_size: 128 },
+            gate_up: F32ProjectionKernel::Gemm,
             down: F32ProjectionKernel::Gemm,
             lm_head: F32ProjectionKernel::Gemv { block_size: 64 },
         }
@@ -93,11 +95,11 @@ mod tests {
     }
 
     #[test]
-    fn thor_e1_plan_matches_physical_sweep_promotion() {
-        let plan = F32ProjectionPlan::thor_e1_smollm2();
-        assert_eq!(plan.q_o, F32ProjectionKernel::Gemv { block_size: 512 });
+    fn thor_e1_1_plan_changes_only_lm_head() {
+        let plan = F32ProjectionPlan::thor_e1_1_smollm2_lm_head();
+        assert_eq!(plan.q_o, F32ProjectionKernel::Gemm);
         assert_eq!(plan.k_v, F32ProjectionKernel::Gemm);
-        assert_eq!(plan.gate_up, F32ProjectionKernel::Gemv { block_size: 128 });
+        assert_eq!(plan.gate_up, F32ProjectionKernel::Gemm);
         assert_eq!(plan.down, F32ProjectionKernel::Gemm);
         assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
         plan.validate().unwrap();
