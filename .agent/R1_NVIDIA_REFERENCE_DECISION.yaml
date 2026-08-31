@@ -1,0 +1,60 @@
+schema_version: 1
+kind: nnis_reference_runtime_decision
+status: active
+last_updated: "2026-08-31"
+roadmap_phase: R1
+hardware: NVIDIA_Jetson_AGX_Thor
+software_regime:
+  jetpack: "7.1-b112"
+  l4t: "38.4.0"
+  cuda: "13.0"
+  system_tensorrt: "10.13.3.9"
+
+decision:
+  primary_thor_nvidia_reference_candidate: TensorRT_Edge_LLM
+  pinned_release: "v0.10.0"
+  pinned_commit: "71dd1bae032e70771265917ec74d3ff4cad07a10"
+  secondary_server_reference: TensorRT_LLM
+  rule: >-
+    TensorRT Edge-LLM becomes the primary NVIDIA runtime to qualify on Jetson Thor
+    because NVIDIA explicitly lists Jetson Thor + JetPack 7.0/7.1 + CUDA 13.0 +
+    JetPack TensorRT as an officially supported platform. TensorRT-LLM remains a
+    server-class/secondary reference and is not accepted as the Thor baseline
+    unless a clean, reproducible Jetson-qualified environment is demonstrated.
+
+local_tensorrt_llm_diagnosis:
+  package_metadata_version: "1.3.0rc16"
+  editable_source: "/root/TensorRT-LLM"
+  source_head: "a1ec8dafb9cd3d4f3bc524c8bc2ed0c3f4f126cd"
+  source_describe: "v1.3.0rc15-53-ga1ec8dafb9-dirty"
+  clean_reference_eligible: false
+  reasons:
+    - editable_install_points_to_local_source_checkout
+    - local_source_checkout_is_dirty
+    - local_checkout_contains_modified_build_and_runtime_files
+    - local_checkout_contains_untracked_stubs_and_bindings
+    - declared_package_version_and_effective_source_identity_are_not_a_clean_release_identity
+    - tensorrt_llm_import_fails_before_runtime_use_with_PydanticInvalidForJsonSchema
+    - python_path_contains_two_TensorRT_distributions_10_15_1_29_and_10_13_3_9
+
+same_model_gate:
+  checkpoint: "HuggingFaceTB/SmolLM2-135M"
+  pinned_revision: "93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
+  requirement: >-
+    Do not claim an NNIS vs TensorRT Edge-LLM speedup or parity unless the exact
+    pinned SmolLM2 checkpoint is accepted and executed by Edge-LLM with explicitly
+    matched tokenizer, prompt, batch, decode length, precision semantics, and Thor
+    power/clock regime.
+  current_status: unqualified
+  note: >-
+    SmolLM2 uses LlamaForCausalLM/model_type=llama, but the Edge-LLM supported-model
+    tables qualify specific Llama 3.x families. Architecture similarity alone is
+    not evidence that this checkpoint is supported.
+
+next_steps:
+  - clone_clean_TensorRT_Edge_LLM_v0_10_0_into_separate_R1_checkout
+  - build_Cpp_runtime_on_Thor_against_TensorRT_under_/usr_using_official_jetson_thor_CMake_profile
+  - keep_existing_TensorRT_LLM_checkout_untouched
+  - probe_direct_builder_or_supported_export_path_for_exact_pinned_SmolLM2
+  - fail_closed_if_model_type_or_checkpoint_contract_is_rejected
+  - only_after_same_model_execution_create_machine_readable_reference_evidence
