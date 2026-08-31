@@ -18,62 +18,137 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          from textwrap import dedent
+
           path = Path("crates/nnis-model/src/smollm2_layerwise_diagnostic.rs")
           text = path.read_text()
 
-          helper = r'''
-fn report_host_vectors(name: &str, actual: &[f32], expected: &[f32]) {
-    assert_eq!(actual.len(), expected.len());
-    let mut max_abs = 0.0_f32;
-    let mut max_rel = 0.0_f32;
-    let mut worst_index = 0_usize;
-    let mut squared_sum = 0.0_f64;
-    let mut bitwise_mismatches = 0_usize;
-    for (index, (&got, &want)) in actual.iter().zip(expected).enumerate() {
-        assert!(got.is_finite(), "non-finite value in {name} at {index}");
-        if got.to_bits() != want.to_bits() {
-            bitwise_mismatches += 1;
-        }
-        let absolute = (got - want).abs();
-        let relative = if want == 0.0 {
-            if absolute == 0.0 { 0.0 } else { f32::INFINITY }
-        } else {
-            absolute / want.abs()
-        };
-        if absolute > max_abs {
-            max_abs = absolute;
-            worst_index = index;
-        }
-        max_rel = max_rel.max(relative);
-        squared_sum += f64::from(absolute) * f64::from(absolute);
-    }
-    let rms = (squared_sum / actual.len() as f64).sqrt();
-    println!(
-        "{name}: max_abs={max_abs:.8e} max_rel={max_rel:.8e} rms={rms:.8e} worst_index={worst_index} bitwise_mismatches={bitwise_mismatches}"
-    );
-}
+          helper = dedent(r'''
+          fn report_host_vectors(name: &str, actual: &[f32], expected: &[f32]) {
+              assert_eq!(actual.len(), expected.len());
+              let mut max_abs = 0.0_f32;
+              let mut max_rel = 0.0_f32;
+              let mut worst_index = 0_usize;
+              let mut squared_sum = 0.0_f64;
+              let mut bitwise_mismatches = 0_usize;
+              for (index, (&got, &want)) in actual.iter().zip(expected).enumerate() {
+                  assert!(got.is_finite(), "non-finite value in {name} at {index}");
+                  if got.to_bits() != want.to_bits() {
+                      bitwise_mismatches += 1;
+                  }
+                  let absolute = (got - want).abs();
+                  let relative = if want == 0.0 {
+                      if absolute == 0.0 { 0.0 } else { f32::INFINITY }
+                  } else {
+                      absolute / want.abs()
+                  };
+                  if absolute > max_abs {
+                      max_abs = absolute;
+                      worst_index = index;
+                  }
+                  max_rel = max_rel.max(relative);
+                  squared_sum += f64::from(absolute) * f64::from(absolute);
+              }
+              let rms = (squared_sum / actual.len() as f64).sqrt();
+              println!(
+                  "{name}: max_abs={max_abs:.8e} max_rel={max_rel:.8e} rms={rms:.8e} worst_index={worst_index} bitwise_mismatches={bitwise_mismatches}"
+              );
+          }
 
-fn ordered_projection(input: &[f32], weights: &[f32], output_size: usize) -> Vec<f32> {
-    assert_eq!(weights.len(), input.len() * output_size);
-    let mut output = vec![0.0_f32; output_size];
-    for (column, value) in output.iter_mut().enumerate() {
-        let mut accumulator = 0.0_f32;
-        for (depth, &input_value) in input.iter().enumerate() {
-            accumulator = input_value.mul_add(weights[depth * output_size + column], accumulator);
-        }
-        *value = accumulator;
-    }
-    output
-}
-'''
+          fn ordered_projection(input: &[f32], weights: &[f32], output_size: usize) -> Vec<f32> {
+              assert_eq!(weights.len(), input.len() * output_size);
+              let mut output = vec![0.0_f32; output_size];
+              for (column, value) in output.iter_mut().enumerate() {
+                  let mut accumulator = 0.0_f32;
+                  for (depth, &input_value) in input.iter().enumerate() {
+                      accumulator = input_value.mul_add(weights[depth * output_size + column], accumulator);
+                  }
+                  *value = accumulator;
+              }
+              output
+          }
+          ''')
           marker = '\n#[test]\nfn smollm2_prefill_layerwise_diagnostic_on_gpu() {'
           if 'fn ordered_projection(' not in text:
               if marker not in text:
                   raise SystemExit('test marker missing')
               text = text.replace(marker, '\n' + helper + marker, 1)
 
-          needle = '''        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_projected",\n                &session.workspace.projected,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }'''
-          repl = '''        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_projected",\n                &session.workspace.projected,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n\n            let nnis_pre_o = session\n                .workspace\n                .attention\n                .to_vec(&session.stream)\n                .expect("copy NNIS pre-O attention");\n            let nnis_projected = session\n                .workspace\n                .projected\n                .to_vec(&session.stream)\n                .expect("copy NNIS O-proj output");\n            let reference_pre_o = expected_stage(\n                &manifest,\n                &reference_dir,\n                "layer24.attention_pre_o",\n            );\n            let reference_projected = expected_stage(\n                &manifest,\n                &reference_dir,\n                "layer24.attention_projected",\n            );\n            let o_weights = layer\n                .o_proj\n                .tensor()\n                .as_f32()\n                .unwrap()\n                .to_vec(&session.stream)\n                .expect("copy layer-24 O-proj weights");\n            let ordered_from_nnis = ordered_projection(\n                &nnis_pre_o,\n                &o_weights,\n                model.config.hidden_size,\n            );\n            let ordered_from_reference = ordered_projection(\n                &reference_pre_o,\n                &o_weights,\n                model.config.hidden_size,\n            );\n            report_host_vectors(\n                "layer24.o_proj.gpu_vs_ordered_same_input",\n                &nnis_projected,\n                &ordered_from_nnis,\n            );\n            report_host_vectors(\n                "layer24.o_proj.input_amplification_ordered",\n                &ordered_from_nnis,\n                &ordered_from_reference,\n            );\n            report_host_vectors(\n                "layer24.o_proj.ordered_reference_vs_transformers",\n                &ordered_from_reference,\n                &reference_projected,\n            );\n        }'''
+          needle = dedent('''
+                  if layer_index == 24 {
+                      report_stage(
+                          "layer24.attention_projected",
+                          &session.workspace.projected,
+                          &session.stream,
+                          &manifest,
+                          &reference_dir,
+                      );
+                  }
+          ''').strip('\n')
+          repl = dedent('''
+                  if layer_index == 24 {
+                      report_stage(
+                          "layer24.attention_projected",
+                          &session.workspace.projected,
+                          &session.stream,
+                          &manifest,
+                          &reference_dir,
+                      );
+
+                      let nnis_pre_o = session
+                          .workspace
+                          .attention
+                          .to_vec(&session.stream)
+                          .expect("copy NNIS pre-O attention");
+                      let nnis_projected = session
+                          .workspace
+                          .projected
+                          .to_vec(&session.stream)
+                          .expect("copy NNIS O-proj output");
+                      let reference_pre_o = expected_stage(
+                          &manifest,
+                          &reference_dir,
+                          "layer24.attention_pre_o",
+                      );
+                      let reference_projected = expected_stage(
+                          &manifest,
+                          &reference_dir,
+                          "layer24.attention_projected",
+                      );
+                      let o_weights = layer
+                          .o_proj
+                          .tensor()
+                          .as_f32()
+                          .unwrap()
+                          .to_vec(&session.stream)
+                          .expect("copy layer-24 O-proj weights");
+                      let ordered_from_nnis = ordered_projection(
+                          &nnis_pre_o,
+                          &o_weights,
+                          model.config.hidden_size,
+                      );
+                      let ordered_from_reference = ordered_projection(
+                          &reference_pre_o,
+                          &o_weights,
+                          model.config.hidden_size,
+                      );
+                      report_host_vectors(
+                          "layer24.o_proj.gpu_vs_ordered_same_input",
+                          &nnis_projected,
+                          &ordered_from_nnis,
+                      );
+                      report_host_vectors(
+                          "layer24.o_proj.input_amplification_ordered",
+                          &ordered_from_nnis,
+                          &ordered_from_reference,
+                      );
+                      report_host_vectors(
+                          "layer24.o_proj.ordered_reference_vs_transformers",
+                          &ordered_from_reference,
+                          &reference_projected,
+                      );
+                  }
+          ''').strip('\n')
           if 'layer24.o_proj.gpu_vs_ordered_same_input' not in text:
               if needle not in text:
                   raise SystemExit('O-proj insertion point missing')
