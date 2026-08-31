@@ -17,9 +17,7 @@ mod runtime;
 mod runtime_kernels;
 mod weights;
 
-pub use attention_plan::{
-    F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION,
-};
+pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
 pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use format::{

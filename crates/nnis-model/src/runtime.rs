@@ -503,9 +503,8 @@ impl Model {
             F32CachedAttentionKernel::SerialSingleThread => {
                 // SAFETY: forwarded from the caller with the same lifetime contract.
                 unsafe {
-                    self.decoder.enqueue_cached_attention_decode(
-                        stream, query, cache, layer, output, scale,
-                    )
+                    self.decoder
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
                 }
             }
             F32CachedAttentionKernel::ParallelValue { .. } => {
@@ -516,9 +515,8 @@ impl Model {
                 })?;
                 // SAFETY: forwarded from the caller with the same lifetime contract.
                 unsafe {
-                    kernel.enqueue_cached_attention_decode(
-                        stream, query, cache, layer, output, scale,
-                    )
+                    kernel
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
                 }
             }
         }
