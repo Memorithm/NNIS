@@ -6,7 +6,9 @@ on:
       - "Cargo.lock"
       - "crates/nnis-bench/Cargo.toml"
       - "crates/nnis-bench/examples/smollm2_e2e.rs"
+      - "crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs"
       - "tools/bench_smollm2_transformers.py"
+      - "tools/run_w1_lm_head_bf16_sweep.py"
       - "tools/requirements-smollm2-benchmark-gpu.txt"
       - "docs/SMOLLM2_BENCHMARK.md"
       - ".github/workflows/smollm2-benchmark-harness.yml"
@@ -30,16 +32,22 @@ jobs:
       - name: Rust format
         run: cargo fmt --all -- --check
 
-      - name: Check NNIS benchmark example
-        run: cargo check --locked -p nnis-bench --example smollm2_e2e
+      - name: Check NNIS benchmark examples
+        run: |
+          cargo check --locked -p nnis-bench --example smollm2_e2e
+          cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
 
-      - name: Clippy NNIS benchmark example
-        run: cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
+      - name: Clippy NNIS benchmark examples
+        run: |
+          cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
+          cargo clippy --locked -p nnis-bench --example smollm2_lm_head_weight_representation -- -D warnings
 
-      - name: Validate Transformers harness syntax
+      - name: Validate benchmark Python harnesses
         run: |
           python3 -m py_compile tools/bench_smollm2_transformers.py
+          python3 -m py_compile tools/run_w1_lm_head_bf16_sweep.py
           python3 tools/bench_smollm2_transformers.py --help >/dev/null
+          python3 tools/run_w1_lm_head_bf16_sweep.py --help >/dev/null
           grep -q '^transformers==4.40.1$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^safetensors==0.4.5$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^huggingface_hub==0.24.7$' tools/requirements-smollm2-benchmark-gpu.txt
