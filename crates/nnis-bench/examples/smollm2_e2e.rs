@@ -1,5 +1,5 @@
 use nnis_bench::{summarize_samples_ms, BenchConfig, BenchmarkMetadata, TimingStatistics};
-use nnis_model::{F32ProjectionPlan, GenerationConfig, Model};
+use nnis_model::{F32ProjectionPlan, GenerationConfig, Model, WeightRepresentationPlan};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -22,6 +22,7 @@ struct Arguments {
     decode_steps: usize,
     config: BenchConfig,
     projection_plan: F32ProjectionPlan,
+    representation_plan: WeightRepresentationPlan,
 }
 
 #[derive(Debug, Deserialize)]
@@ -92,6 +93,7 @@ struct Report {
     generated_ids: Vec<u32>,
     qualified_greedy_prefix_checked: bool,
     projection_plan: F32ProjectionPlan,
+    representation_plan: WeightRepresentationPlan,
 }
 
 fn parse_usize(name: &str, value: String) -> std::result::Result<usize, String> {
@@ -123,6 +125,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     let mut warmups = 2_usize;
     let mut iterations = 5_usize;
     let mut projection_plan = F32ProjectionPlan::baseline_gemm();
+    let mut representation_plan = WeightRepresentationPlan::all_f32();
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -162,17 +165,31 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
             "--projection-plan" => {
                 projection_plan = match args
                     .next()
-                    .ok_or("--projection-plan requires baseline-gemm or thor-e1-1-lm-head")?
+                    .ok_or("--projection-plan requires baseline-gemm, thor-e1-1-lm-head, or w1-lm-head-gemv32")?
                     .as_str()
                 {
                     "baseline-gemm" => F32ProjectionPlan::baseline_gemm(),
                     "thor-e1-1-lm-head" => F32ProjectionPlan::thor_e1_1_smollm2_lm_head(),
+                    "w1-lm-head-gemv32" => {
+                        F32ProjectionPlan::w1_smollm2_lm_head_gemv32_candidate()
+                    }
                     other => return Err(format!("unknown --projection-plan {other:?}")),
+                };
+            }
+            "--representation-plan" => {
+                representation_plan = match args
+                    .next()
+                    .ok_or("--representation-plan requires all-f32 or w1-lm-head-bf16")?
+                    .as_str()
+                {
+                    "all-f32" => WeightRepresentationPlan::all_f32(),
+                    "w1-lm-head-bf16" => WeightRepresentationPlan::w1_lm_head_bf16(),
+                    other => return Err(format!("unknown --representation-plan {other:?}")),
                 };
             }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head]"
+                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head|w1-lm-head-gemv32] [--representation-plan all-f32|w1-lm-head-bf16]"
                         .to_string(),
                 );
             }
@@ -200,6 +217,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
         decode_steps,
         config: BenchConfig::new(warmups, iterations),
         projection_plan,
+        representation_plan,
     })
 }
 
@@ -278,17 +296,20 @@ fn validate_qualified_prefix(input_ids: &[u32], generated: &[u32]) -> Result<boo
 
 fn run(arguments: Arguments) -> Result<Report> {
     arguments.config.validate()?;
+    arguments.projection_plan.validate()?;
+    arguments.representation_plan.validate()?;
     validate_provenance(&arguments.model_dir)?;
 
     let device = Device::get(arguments.device)?;
     let context = Context::new(&device)?;
     let construction_stream = Stream::new(&context)?;
     let before_model = memory_snapshot(&context)?;
-    let model = Model::load_directory_with_projection_plan(
+    let model = Model::load_directory_with_plans(
         &context,
         &construction_stream,
         &arguments.model_dir,
         arguments.projection_plan,
+        arguments.representation_plan,
     )?;
     construction_stream.synchronize()?;
     validate_shape(&model)?;
@@ -414,6 +435,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         generated_ids: expected_generated.expect("iterations are validated non-zero"),
         qualified_greedy_prefix_checked,
         projection_plan: model.projection_plan(),
+        representation_plan: model.representation_plan(),
     })
 }
 

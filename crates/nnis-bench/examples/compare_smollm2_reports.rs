@@ -28,6 +28,8 @@ struct ComparableReport {
     generation: TimingReport,
     request_total: TimingReport,
     generated_ids: Vec<u32>,
+    #[serde(default)]
+    representation_plan: Option<serde_json::Value>,
 }
 
 fn read_report(path: &Path) -> Result<ComparableReport, String> {
@@ -103,6 +105,11 @@ fn run() -> Result<(), String> {
     require_same("iterations", &left.iterations, &right.iterations)?;
     require_same("model", &left.model, &right.model)?;
     require_same("generated_ids", &left.generated_ids, &right.generated_ids)?;
+    require_same(
+        "representation_plan",
+        &left.representation_plan,
+        &right.representation_plan,
+    )?;
     left.metadata
         .require_compatible_environment(&right.metadata)
         .map_err(|error| error.to_string())?;
