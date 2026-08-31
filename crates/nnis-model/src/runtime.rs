@@ -1,5 +1,6 @@
 use crate::{
     load_model_directory, load_model_directory_with_representation_plan, DeviceTensor,
+    F32AttentionPlan, F32CachedAttentionDecodeParallelValue, F32CachedAttentionKernel,
     F32DecoderKernels, F32FusionPlan, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels,
     F32SiluMultiply, F32SiluMultiplyKernel, GenerationConfig, ModelConfig, ModelWeights,
     PhysicalWeightRepresentation, WeightDType, WeightRepresentationPlan,
@@ -105,8 +106,10 @@ pub struct Model {
     projection_plan: F32ProjectionPlan,
     representation_plan: WeightRepresentationPlan,
     fusion_plan: F32FusionPlan,
+    attention_plan: F32AttentionPlan,
     projection_kernels: ProjectionKernels,
     fused_silu_multiply: Option<F32SiluMultiply>,
+    parallel_value_attention: Option<F32CachedAttentionDecodeParallelValue>,
     elementwise: F32Elementwise,
     top_k: F32TopK,
     decoder: F32DecoderKernels,
@@ -160,6 +163,10 @@ impl Model {
         )
     }
 
+    /// Construct with the historical projection/representation/fusion axes.
+    ///
+    /// Attention remains on the historical serial kernel so existing callers do
+    /// not opt into an R2 candidate merely by upgrading NNIS.
     pub fn new_with_all_plans(
         config: ModelConfig,
         weights: ModelWeights,
@@ -168,14 +175,48 @@ impl Model {
         representation_plan: WeightRepresentationPlan,
         fusion_plan: F32FusionPlan,
     ) -> Result<Self> {
+        Self::new_with_execution_plans(
+            config,
+            weights,
+            stream,
+            projection_plan,
+            representation_plan,
+            fusion_plan,
+            F32AttentionPlan::baseline(),
+        )
+    }
+
+    /// Construct with every explicit execution-policy axis.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_execution_plans(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+        fusion_plan: F32FusionPlan,
+        attention_plan: F32AttentionPlan,
+    ) -> Result<Self> {
         projection_plan.validate()?;
         representation_plan.validate()?;
         fusion_plan.validate()?;
+        attention_plan.validate()?;
         config.validate_execution_support()?;
         if config.weight_dtype != WeightDType::F32 {
             return Err(NnisError::unsupported(
                 "the first decoder execution path currently requires an f32 model-format-v1 base graph",
             ));
+        }
+        if let F32CachedAttentionKernel::ParallelValue {
+            threads_per_query_head,
+        } = attention_plan.cached_decode
+        {
+            if config.head_dim() != threads_per_query_head as usize {
+                return Err(NnisError::unsupported(format!(
+                    "R2 parallel-value attention was physically qualified only for head_dim={threads_per_query_head}; model head_dim is {}",
+                    config.head_dim()
+                )));
+            }
         }
         representation_plan.validate_weights(&config, &weights)?;
         if !Arc::ptr_eq(weights.context(), stream.ctx()) {
@@ -195,6 +236,12 @@ impl Model {
                 F32SiluMultiply::load_with_block_size(&context, &compiler, block_size)?,
             ),
         };
+        let parallel_value_attention = match attention_plan.cached_decode {
+            F32CachedAttentionKernel::SerialSingleThread => None,
+            F32CachedAttentionKernel::ParallelValue { .. } => Some(
+                F32CachedAttentionDecodeParallelValue::load(&context, &compiler)?,
+            ),
+        };
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let decoder = F32DecoderKernels::load(&context, &compiler)?;
@@ -211,8 +258,10 @@ impl Model {
             projection_plan,
             representation_plan,
             fusion_plan,
+            attention_plan,
             projection_kernels,
             fused_silu_multiply,
+            parallel_value_attention,
             elementwise,
             top_k,
             decoder,
@@ -258,6 +307,7 @@ impl Model {
         )
     }
 
+    /// Load with historical execution-policy axes and baseline attention.
     pub fn load_directory_with_all_plans(
         context: &Arc<Context>,
         stream: &Stream,
@@ -266,19 +316,42 @@ impl Model {
         representation_plan: WeightRepresentationPlan,
         fusion_plan: F32FusionPlan,
     ) -> Result<Self> {
+        Self::load_directory_with_execution_plans(
+            context,
+            stream,
+            directory,
+            projection_plan,
+            representation_plan,
+            fusion_plan,
+            F32AttentionPlan::baseline(),
+        )
+    }
+
+    /// Load model weights and construct with every explicit execution-policy axis.
+    #[allow(clippy::too_many_arguments)]
+    pub fn load_directory_with_execution_plans(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+        fusion_plan: F32FusionPlan,
+        attention_plan: F32AttentionPlan,
+    ) -> Result<Self> {
         let (config, weights) = load_model_directory_with_representation_plan(
             context,
             stream,
             directory,
             representation_plan,
         )?;
-        Self::new_with_all_plans(
+        Self::new_with_execution_plans(
             config,
             weights,
             stream,
             projection_plan,
             representation_plan,
             fusion_plan,
+            attention_plan,
         )
     }
 
@@ -299,6 +372,11 @@ impl Model {
     #[must_use]
     pub const fn fusion_plan(&self) -> F32FusionPlan {
         self.fusion_plan
+    }
+
+    #[must_use]
+    pub const fn attention_plan(&self) -> F32AttentionPlan {
+        self.attention_plan
     }
 
     fn projection_choice(&self, family: ProjectionFamily) -> F32ProjectionKernel {
@@ -408,6 +486,38 @@ impl Model {
                 })?;
                 // SAFETY: forwarded from the caller with the same lifetime contract.
                 unsafe { fused.enqueue_silu_multiply(stream, gate, up, gated) }
+            }
+        }
+    }
+
+    unsafe fn enqueue_cached_attention_decode(
+        &self,
+        stream: &Stream,
+        query: &DeviceBuffer<f32>,
+        cache: &KvCache<f32>,
+        layer: usize,
+        output: &DeviceBuffer<f32>,
+        scale: f32,
+    ) -> Result<()> {
+        match self.attention_plan.cached_decode {
+            F32CachedAttentionKernel::SerialSingleThread => {
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe {
+                    self.decoder
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
+                }
+            }
+            F32CachedAttentionKernel::ParallelValue { .. } => {
+                let kernel = self.parallel_value_attention.as_ref().ok_or_else(|| {
+                    NnisError::unsupported(
+                        "attention plan selected parallel-value cached attention but the kernel was not loaded",
+                    )
+                })?;
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe {
+                    kernel
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
+                }
             }
         }
     }
@@ -800,7 +910,7 @@ impl<'model> InferenceSession<'model> {
             // the cache/session stream; the cache and every workspace buffer
             // remain session-owned through the final synchronization.
             unsafe {
-                self.model.decoder.enqueue_cached_attention_decode(
+                self.model.enqueue_cached_attention_decode(
                     &self.stream,
                     &self.workspace.q_rope,
                     &self.cache,

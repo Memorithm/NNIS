@@ -32,6 +32,8 @@ struct ComparableReport {
     representation_plan: Option<serde_json::Value>,
     #[serde(default)]
     fusion_plan: Option<serde_json::Value>,
+    #[serde(default)]
+    attention_plan: Option<serde_json::Value>,
 }
 
 fn read_report(path: &Path) -> Result<ComparableReport, String> {
@@ -113,6 +115,11 @@ fn run() -> Result<(), String> {
         &right.representation_plan,
     )?;
     require_same("fusion_plan", &left.fusion_plan, &right.fusion_plan)?;
+    require_same(
+        "attention_plan",
+        &left.attention_plan,
+        &right.attention_plan,
+    )?;
     left.metadata
         .require_compatible_environment(&right.metadata)
         .map_err(|error| error.to_string())?;

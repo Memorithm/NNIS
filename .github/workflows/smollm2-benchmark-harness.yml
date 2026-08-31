@@ -10,16 +10,20 @@ on:
       - "crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs"
       - "crates/nnis-bench/examples/compare_smollm2_reports.rs"
       - "crates/nnis-bench/examples/silu_multiply_fusion.rs"
+      - "crates/nnis-bench/examples/cached_attention_parallel_value.rs"
       - "tools/bench_smollm2_transformers.py"
       - "tools/run_w1_lm_head_bf16_sweep.py"
       - "tools/run_w1_e2e_abba.py"
       - "tools/run_r2_silu_fusion_e2e_abba.py"
+      - "tools/run_r2_attention_parallel_value_e2e_abba.py"
       - "tools/requirements-smollm2-benchmark-gpu.txt"
       - "docs/SMOLLM2_BENCHMARK.md"
       - "docs/W1_LM_HEAD_BF16_SWEEP.md"
       - "docs/W1_E2E_ABBA.md"
       - "docs/R2_SILU_MULTIPLY_FUSION.md"
       - "docs/R2_SILU_MULTIPLY_FUSION_E2E.md"
+      - "docs/R2_CACHED_ATTENTION_PARALLEL_VALUE.md"
+      - "docs/R2_CACHED_ATTENTION_PARALLEL_VALUE_E2E.md"
       - ".github/workflows/smollm2-benchmark-harness.yml"
   workflow_dispatch:
 
@@ -47,6 +51,7 @@ jobs:
           cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
           cargo check --locked -p nnis-bench --example compare_smollm2_reports
           cargo check --locked -p nnis-bench --example silu_multiply_fusion
+          cargo check --locked -p nnis-bench --example cached_attention_parallel_value
 
       - name: Clippy NNIS benchmark examples
         run: |
@@ -54,6 +59,7 @@ jobs:
           cargo clippy --locked -p nnis-bench --example smollm2_lm_head_weight_representation -- -D warnings
           cargo clippy --locked -p nnis-bench --example compare_smollm2_reports -- -D warnings
           cargo clippy --locked -p nnis-bench --example silu_multiply_fusion -- -D warnings
+          cargo clippy --locked -p nnis-bench --example cached_attention_parallel_value -- -D warnings
 
       - name: Validate benchmark Python harnesses
         run: |
@@ -61,10 +67,12 @@ jobs:
           python3 -m py_compile tools/run_w1_lm_head_bf16_sweep.py
           python3 -m py_compile tools/run_w1_e2e_abba.py
           python3 -m py_compile tools/run_r2_silu_fusion_e2e_abba.py
+          python3 -m py_compile tools/run_r2_attention_parallel_value_e2e_abba.py
           python3 tools/bench_smollm2_transformers.py --help >/dev/null
           python3 tools/run_w1_lm_head_bf16_sweep.py --help >/dev/null
           python3 tools/run_w1_e2e_abba.py --help >/dev/null
           python3 tools/run_r2_silu_fusion_e2e_abba.py --help >/dev/null
+          python3 tools/run_r2_attention_parallel_value_e2e_abba.py --help >/dev/null
           grep -q '^transformers==4.40.1$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^safetensors==0.4.5$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^huggingface_hub==0.24.7$' tools/requirements-smollm2-benchmark-gpu.txt

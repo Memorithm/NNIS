@@ -1,8 +1,9 @@
 # R2 cached-attention parallel-value candidate
 
-R2 now has a full-model CUDA profile for the promoted E1.1 parent on the
-physical Jetson AGX Thor. That evidence makes cached attention a measured target
-rather than a speculative fusion.
+R2 has a full-model CUDA profile for the promoted E1.1 parent on the physical
+Jetson AGX Thor. That evidence made cached attention a measured target rather
+than a speculative fusion, and physical isolated gates now qualify the
+parallel-value candidate for an explicit end-to-end ABBA test.
 
 ## Nsight Systems evidence
 
@@ -56,11 +57,11 @@ a position are known.
 
 ## Candidate
 
-`F32CachedAttentionDecodeParallelValue` is candidate-only. It keeps lane zero as
-the sole owner of the score and online-softmax chain, preserving the same
-increasing-dimension score FMA order and the same increasing-position softmax
-order. A 64-thread block then updates the 64 independent value/output components
-in parallel, with a barrier before advancing to the next KV position.
+`F32CachedAttentionDecodeParallelValue` keeps lane zero as the sole owner of the
+score and online-softmax chain, preserving the same increasing-dimension score
+FMA order and the same increasing-position softmax order. A 64-thread block then
+updates the 64 independent value/output components in parallel, with a barrier
+before advancing to the next KV position.
 
 The candidate intentionally does **not**:
 
@@ -68,34 +69,55 @@ The candidate intentionally does **not**:
 - reassociate the score FMA chain;
 - change cache layout;
 - change the number of attention launches;
-- alter the production decoder path or any plan.
+- alter weight representation or projection selection.
 
-The isolated gate requires bitwise-equal f32 output for the deterministic
-SmolLM2-shaped fixture before reporting performance.
+## Physical isolated gate at `kv_rows=35`
 
-## Physical isolated gate
+Exact candidate infrastructure head:
+`1af93c133e5d81d08746de525a4e986902d6105c`.
 
-Run only from a clean exact candidate checkout with the Thor fingerprint held
-stable:
+Run context: `r2-attention-pv-20260831T195542Z`.
 
-```bash
-cd /root/NNIS && \
-test -z "$(git status --porcelain --untracked-files=no)" && \
-export NNIS_BENCH_RUN_CONTEXT_ID="r2-attention-pv-$(date -u +%Y%m%dT%H%M%SZ)" && \
-export NNIS_BENCH_ENVIRONMENT_LABEL="native-thor" && \
-export NNIS_ATTENTION_KV_ROWS=35 && \
-export NNIS_PROFILE_WARMUPS=20 && \
-export NNIS_PROFILE_ITERATIONS=100 && \
-cargo run --locked --release -p nnis-bench --example cached_attention_parallel_value
-```
+- NVIDIA Thor, compute capability 11.0;
+- MAXN and fixed CPU/GPU/NVD/EMC clocks;
+- 20 warmups, 100 measured iterations;
+- query heads 9, KV heads 3, head dimension 64;
+- 576 output values checked bitwise;
+- bitwise equality: **true**;
+- reference median: `0.19043199717998505 ms`;
+- candidate median: `0.08195199817419052 ms`;
+- candidate/reference latency ratio: `0.4303478374841301`;
+- reference/candidate speed ratio: `2.323701696390834`.
 
-`kv_rows=35` is the first gate because it matches the longest active prefix in
-the qualifying 3+32-token profile. Longer-context sweeps may follow only after
-this exact target passes correctness and shows a useful isolated signal.
+This is isolated evidence only, not an end-to-end speed claim.
 
-## Promotion boundary
+## Physical prefix-length sweep
 
-An isolated win does not promote anything. If the physical gate is strong and
-bitwise equal, a later PR may add an explicit versioned attention-kernel plan and
-a fingerprint-compatible end-to-end ABBA campaign. The production decoder must
-remain on the existing kernel until that later gate succeeds.
+The same fail-closed deterministic fixture was then evaluated across the active
+prefix lengths below. Every tested case remained bitwise equal, and the
+parallel-value candidate was faster at every tested length.
+
+| KV rows | Reference median (ms) | Candidate median (ms) | Ref/candidate speed ratio |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.01228800043463707 | 0.008224000222980976 | 1.494163436462433 |
+| 2 | 0.016416000202298164 | 0.010304000228643417 | 1.5931676861442994 |
+| 4 | 0.026688000187277794 | 0.014399999752640724 | 1.8533333781747914 |
+| 8 | 0.049056001007556915 | 0.0225600004196167 | 2.1744680893224198 |
+| 16 | 0.09016000106930733 | 0.04095999896526337 | 2.201171956712417 |
+| 24 | 0.13312000036239624 | 0.05777600035071373 | 2.3040708867752517 |
+| 35 | 0.19041600078344345 | 0.08188799768686295 | 2.325322466811169 |
+
+No threshold is therefore introduced into the candidate plan. The physically
+qualified geometry is simply 64 threads per query head, and runtime integration
+fails closed if a model head dimension differs from 64.
+
+## Explicit plan boundary
+
+The next-stage integration uses a separate `F32AttentionPlan` v1 axis. Existing
+constructors retain baseline serial attention. Only the new all-execution-plan
+constructors can opt into `r2_parallel_value_candidate()`.
+
+This isolated sweep justifies an end-to-end gate; it does **not** justify
+promotion by itself. MinLatency promotion still requires fingerprint-compatible
+ABBA evidence with an unchanged greedy trajectory and a credible margin relative
+to end-to-end variation.
