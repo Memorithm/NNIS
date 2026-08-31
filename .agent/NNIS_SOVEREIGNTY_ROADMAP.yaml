@@ -105,26 +105,67 @@ verified_history:
       Isolated gain was smaller than or comparable to reference variation, so no
       end-to-end promotion was justified.
   W1_lm_head_BF16_weight:
-    status: candidate_infrastructure_merged_pending_physical_sweep
-    pr: 54
-    candidate_head: cf15c2b3c4b78d5f2935d1e917fcc8c19f7b3546
-    merge_sha: f39ebbbba6952c6b96476d17c13eccf868471440
-    runtime_promotion: false
+    status: promoted_explicit_plan
+    infrastructure_pr: 54
+    infrastructure_merge_sha: f39ebbbba6952c6b96476d17c13eccf868471440
+    representation_plan_pr: 58
+    representation_plan_merge_sha: b78dad912209b6d334f29663304e17e51e938794
     model_format_change: false
+    default_runtime_change: false
     hypothesis: >-
       Keep activation/output f32, store only LM-head weights as BF16, widen to f32
       in-kernel, and preserve increasing-K fmaf accumulation.
+    physical_sweep:
+      exact_head: 0bc901ddec76bd23208090a60d8151a894d12ad1
+      run_context_id: w1-thor-20260831T155039Z
+      isolated_winner_block_size: 32
+      candidate_median_ms: 0.28412000089883804
+      reference_median_ms: 0.5800560116767883
+      median_speedup_reference_over_candidate: 2.039359247937281
+      all_49152_logits_bitwise_equal: true
+    end_to_end_abba:
+      exact_head: b78dad912209b6d334f29663304e17e51e938794
+      run_context_id: w1-e2e-thor-20260831T163219Z
+      rounds: 2
+      order_per_round: [A, B, B, A]
+      parent: E1_1_all_f32_lm_head_GEMV64
+      candidate: W1_lm_head_BF16_GEMV32
+      generation_parent_median_ms: 695.5211704999999
+      generation_candidate_median_ms: 681.444086
+      generation_latency_reduction_fraction: 0.020239620441575012
+      generation_throughput_gain_fraction: 0.020657724953827
+      request_parent_median_ms: 699.5111105000001
+      request_candidate_median_ms: 685.8835590000001
+      request_latency_reduction_fraction: 0.019481536884037753
+      request_throughput_gain_fraction: 0.0198686079017094
+      all_four_candidate_generation_medians_below_all_four_parent_medians: true
+      generation_separation_min_parent_minus_max_candidate_ms: 2.57014300000003
+      identical_greedy_trajectory: true
+      decode_steps: 32
+      fingerprint_compatible: true
+      git_dirty: false
     exact_storage:
+      scope: SmolLM2_tied_LM_head_copy_only
       elements: 28311552
       f32_bytes: 113246208
       bf16_bytes: 56623104
       bytes_saved: 56623104
       reduction_fraction: 0.5
+    promotion:
+      explicit_plan: true
+      default_runtime: false
+      MinLatency: promoted
+      MinMemory: promoted
+      BalancedLatencyMemory: requires_explicit_tradeoff_policy
+      DeterministicOnly: eligible_identical_greedy_trajectory
     gates:
       - all_49152_logits_bitwise_equal
       - fingerprint_compatible_reference_and_candidate
-      - isolated_sweep_before_runtime_or_format_change
-      - end_to_end_ABBA_before_promotion
+      - isolated_sweep_complete
+      - versioned_representation_plan_separate_from_kernel_plan
+      - heterogeneous_f32_BF16_model_format_v1_preserved
+      - end_to_end_ABBA_complete
+      - identical_greedy_trajectory
 
 roadmap:
   - id: R0
@@ -157,16 +198,21 @@ roadmap:
 
   - id: R3
     name: Elastic weight representation
-    status: active
+    status: active_W1_promoted
     principle: >-
       Logical weights remain fixed; physical representation may vary per tensor,
       component or layer only through explicit, versioned plans.
-    sequence:
-      - complete W1 LM-head BF16 isolated physical sweep
-      - if justified, introduce representation plan schema separate from kernel plan
-      - support heterogeneous f32/BF16 execution without breaking model format v1
-      - later evaluate lower-bit or structured representations only when executable
-        reconstruction/layout contracts exist
+    completed:
+      - W1_LM_head_BF16_isolated_physical_sweep_on_Thor
+      - representation_plan_v1_separate_from_kernel_plan
+      - heterogeneous_f32_activation_BF16_LM_head_execution
+      - model_format_v1_preserved
+      - fingerprint_compatible_end_to_end_ABBA_with_identical_greedy_trajectory
+      - W1_explicit_plan_promoted_for_MinLatency_and_MinMemory
+    next:
+      - retain_W1_as_explicit_plan_not_silent_global_default
+      - make_future_representation_candidates_use_the_same_versioned_evidence_contract
+      - evaluate_lower_bit_or_structured_representations_only_with_executable_reconstruction_and_layout_contracts
     forbid:
       - global_BF16_switch_as_shortcut
       - unsupported_INT4_or_sub2bit_claims
