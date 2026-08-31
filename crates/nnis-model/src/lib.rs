@@ -4,6 +4,7 @@
 //! model-level CUDA operations that are not already covered by `nnis-kernels`.
 //! It intentionally does not claim Hugging Face compatibility.
 
+mod cached_attention_candidate;
 mod config;
 mod format;
 mod fused_swiglu;
@@ -15,6 +16,7 @@ mod runtime;
 mod runtime_kernels;
 mod weights;
 
+pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use format::{
     load_model_directory, ModelManifest, TensorManifest, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
