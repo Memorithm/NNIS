@@ -104,6 +104,54 @@ verified_history:
     reason: >-
       Isolated gain was smaller than or comparable to reference variation, so no
       end-to-end promotion was justified.
+  R2_silu_multiply_fusion:
+    status: rejected_candidate_only
+    infrastructure_pr: 59
+    infrastructure_merge_sha: 143a5d5870cebb539b1ab68de0e3025755dcc26a
+    explicit_plan_pr: 60
+    explicit_plan_merge_sha: fab2bcb2ccd6a4d3966f41dfd964708769c8aeef
+    default_runtime_change: false
+    model_format_change: false
+    isolated_physical:
+      exact_head: 143a5d5870cebb539b1ab68de0e3025755dcc26a
+      run_context_id: r2-silu-fusion-20260831T174722Z
+      elements: 1536
+      bitwise_equal: true
+      reference_median_ms: 0.007215999998152256
+      candidate_median_ms: 0.004832000005990267
+      candidate_over_reference_latency_ratio: 0.6696230608685642
+      reference_over_candidate_speed_ratio: 1.49337748120996
+    end_to_end_abba:
+      exact_head: fab2bcb2ccd6a4d3966f41dfd964708769c8aeef
+      run_context_id: r2-silu-e2e-20260831T181308Z
+      rounds: 2
+      order_per_round: [A, B, B, A]
+      decode_steps: 32
+      parent_generation_median_ms: 702.1377445
+      candidate_generation_median_ms: 700.7615225
+      parent_request_median_ms: 706.86527
+      candidate_request_median_ms: 705.442756
+      parent_over_candidate_generation_throughput_ratio: 1.0019638949283207
+      parent_over_candidate_request_throughput_ratio: 1.0020164839569208
+      all_candidate_generation_medians_below_all_parent_medians: false
+      generation_separation_min_parent_minus_max_candidate_ms: -74.62618199999997
+      identical_greedy_trajectory: true
+      fingerprint_compatible: true
+      git_dirty: false
+    structural_change:
+      launches_removed_per_layer: 1
+      launches_removed_per_token: 30
+      activated_workspace_f32_elements_removed_per_session: 1536
+      activated_workspace_logical_bytes_removed_per_session: 6144
+      logical_intermediate_bytes_avoided_per_layer: 12288
+      logical_intermediate_bytes_avoided_per_token: 368640
+    rejection_reason: >-
+      The isolated kernel improvement did not translate into a credible end-to-end
+      MinLatency win. The observed approximately 0.196% generation throughput ratio
+      is small relative to ABBA variation, candidate and parent samples overlap, and
+      the worst candidate median exceeds the best parent median by 74.626182 ms.
+      Preserve the explicit candidate and evidence, but do not promote it or change
+      the runtime default.
   W1_lm_head_BF16_weight:
     status: promoted_explicit_plan
     infrastructure_pr: 54
@@ -190,6 +238,8 @@ roadmap:
     name: Kernel-only Elastic optimization
     status: active
     parent_plan: E1_1_lm_head_GEMV64
+    completed_or_recorded:
+      - R2_silu_multiply_fusion_isolated_and_end_to_end_rejected_for_MinLatency
     goals:
       - profile launch/submission overhead explicitly
       - prefer fewer higher-value substitutions over thousands of tiny launches
