@@ -1,5 +1,7 @@
 use nnis_bench::{summarize_samples_ms, BenchConfig, BenchmarkMetadata, TimingStatistics};
-use nnis_model::{F32ProjectionPlan, GenerationConfig, Model, WeightRepresentationPlan};
+use nnis_model::{
+    F32FusionPlan, F32ProjectionPlan, GenerationConfig, Model, WeightRepresentationPlan,
+};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -23,6 +25,7 @@ struct Arguments {
     config: BenchConfig,
     projection_plan: F32ProjectionPlan,
     representation_plan: WeightRepresentationPlan,
+    fusion_plan: F32FusionPlan,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +97,7 @@ struct Report {
     qualified_greedy_prefix_checked: bool,
     projection_plan: F32ProjectionPlan,
     representation_plan: WeightRepresentationPlan,
+    fusion_plan: F32FusionPlan,
 }
 
 fn parse_usize(name: &str, value: String) -> std::result::Result<usize, String> {
@@ -126,6 +130,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     let mut iterations = 5_usize;
     let mut projection_plan = F32ProjectionPlan::baseline_gemm();
     let mut representation_plan = WeightRepresentationPlan::all_f32();
+    let mut fusion_plan = F32FusionPlan::baseline();
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -187,9 +192,20 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     other => return Err(format!("unknown --representation-plan {other:?}")),
                 };
             }
+            "--fusion-plan" => {
+                fusion_plan = match args
+                    .next()
+                    .ok_or("--fusion-plan requires baseline or r2-silu-multiply-fused")?
+                    .as_str()
+                {
+                    "baseline" => F32FusionPlan::baseline(),
+                    "r2-silu-multiply-fused" => F32FusionPlan::r2_silu_multiply_fused_candidate(),
+                    other => return Err(format!("unknown --fusion-plan {other:?}")),
+                };
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head|w1-lm-head-gemv32] [--representation-plan all-f32|w1-lm-head-bf16]"
+                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head|w1-lm-head-gemv32] [--representation-plan all-f32|w1-lm-head-bf16] [--fusion-plan baseline|r2-silu-multiply-fused]"
                         .to_string(),
                 );
             }
@@ -218,6 +234,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
         config: BenchConfig::new(warmups, iterations),
         projection_plan,
         representation_plan,
+        fusion_plan,
     })
 }
 
@@ -298,18 +315,20 @@ fn run(arguments: Arguments) -> Result<Report> {
     arguments.config.validate()?;
     arguments.projection_plan.validate()?;
     arguments.representation_plan.validate()?;
+    arguments.fusion_plan.validate()?;
     validate_provenance(&arguments.model_dir)?;
 
     let device = Device::get(arguments.device)?;
     let context = Context::new(&device)?;
     let construction_stream = Stream::new(&context)?;
     let before_model = memory_snapshot(&context)?;
-    let model = Model::load_directory_with_plans(
+    let model = Model::load_directory_with_all_plans(
         &context,
         &construction_stream,
         &arguments.model_dir,
         arguments.projection_plan,
         arguments.representation_plan,
+        arguments.fusion_plan,
     )?;
     construction_stream.synchronize()?;
     validate_shape(&model)?;
@@ -436,6 +455,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         qualified_greedy_prefix_checked,
         projection_plan: model.projection_plan(),
         representation_plan: model.representation_plan(),
+        fusion_plan: model.fusion_plan(),
     })
 }
 

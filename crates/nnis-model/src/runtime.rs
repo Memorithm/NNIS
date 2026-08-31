@@ -1,7 +1,8 @@
 use crate::{
     load_model_directory, load_model_directory_with_representation_plan, DeviceTensor,
-    F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels, GenerationConfig,
-    ModelConfig, ModelWeights, PhysicalWeightRepresentation, WeightDType, WeightRepresentationPlan,
+    F32DecoderKernels, F32FusionPlan, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels,
+    F32SiluMultiply, F32SiluMultiplyKernel, GenerationConfig, ModelConfig, ModelWeights,
+    PhysicalWeightRepresentation, WeightDType, WeightRepresentationPlan,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{
@@ -103,7 +104,9 @@ pub struct Model {
     gemm: F32Gemm,
     projection_plan: F32ProjectionPlan,
     representation_plan: WeightRepresentationPlan,
+    fusion_plan: F32FusionPlan,
     projection_kernels: ProjectionKernels,
+    fused_silu_multiply: Option<F32SiluMultiply>,
     elementwise: F32Elementwise,
     top_k: F32TopK,
     decoder: F32DecoderKernels,
@@ -114,12 +117,13 @@ pub struct Model {
 
 impl Model {
     pub fn new(config: ModelConfig, weights: ModelWeights, stream: &Stream) -> Result<Self> {
-        Self::new_with_plans(
+        Self::new_with_all_plans(
             config,
             weights,
             stream,
             F32ProjectionPlan::baseline_gemm(),
             WeightRepresentationPlan::all_f32(),
+            F32FusionPlan::baseline(),
         )
     }
 
@@ -129,12 +133,13 @@ impl Model {
         stream: &Stream,
         projection_plan: F32ProjectionPlan,
     ) -> Result<Self> {
-        Self::new_with_plans(
+        Self::new_with_all_plans(
             config,
             weights,
             stream,
             projection_plan,
             WeightRepresentationPlan::all_f32(),
+            F32FusionPlan::baseline(),
         )
     }
 
@@ -145,8 +150,27 @@ impl Model {
         projection_plan: F32ProjectionPlan,
         representation_plan: WeightRepresentationPlan,
     ) -> Result<Self> {
+        Self::new_with_all_plans(
+            config,
+            weights,
+            stream,
+            projection_plan,
+            representation_plan,
+            F32FusionPlan::baseline(),
+        )
+    }
+
+    pub fn new_with_all_plans(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+        fusion_plan: F32FusionPlan,
+    ) -> Result<Self> {
         projection_plan.validate()?;
         representation_plan.validate()?;
+        fusion_plan.validate()?;
         config.validate_execution_support()?;
         if config.weight_dtype != WeightDType::F32 {
             return Err(NnisError::unsupported(
@@ -165,6 +189,12 @@ impl Model {
         let gemm = F32Gemm::load(&context, &compiler)?;
         let projection_kernels =
             ProjectionKernels::load(&context, &compiler, projection_plan, representation_plan)?;
+        let fused_silu_multiply = match fusion_plan.silu_multiply {
+            F32SiluMultiplyKernel::Separate => None,
+            F32SiluMultiplyKernel::Fused { block_size } => Some(
+                F32SiluMultiply::load_with_block_size(&context, &compiler, block_size)?,
+            ),
+        };
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let decoder = F32DecoderKernels::load(&context, &compiler)?;
@@ -180,7 +210,9 @@ impl Model {
             gemm,
             projection_plan,
             representation_plan,
+            fusion_plan,
             projection_kernels,
+            fused_silu_multiply,
             elementwise,
             top_k,
             decoder,
@@ -216,18 +248,37 @@ impl Model {
         projection_plan: F32ProjectionPlan,
         representation_plan: WeightRepresentationPlan,
     ) -> Result<Self> {
+        Self::load_directory_with_all_plans(
+            context,
+            stream,
+            directory,
+            projection_plan,
+            representation_plan,
+            F32FusionPlan::baseline(),
+        )
+    }
+
+    pub fn load_directory_with_all_plans(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+        fusion_plan: F32FusionPlan,
+    ) -> Result<Self> {
         let (config, weights) = load_model_directory_with_representation_plan(
             context,
             stream,
             directory,
             representation_plan,
         )?;
-        Self::new_with_plans(
+        Self::new_with_all_plans(
             config,
             weights,
             stream,
             projection_plan,
             representation_plan,
+            fusion_plan,
         )
     }
 
@@ -243,6 +294,11 @@ impl Model {
     #[must_use]
     pub const fn representation_plan(&self) -> WeightRepresentationPlan {
         self.representation_plan
+    }
+
+    #[must_use]
+    pub const fn fusion_plan(&self) -> F32FusionPlan {
+        self.fusion_plan
     }
 
     fn projection_choice(&self, family: ProjectionFamily) -> F32ProjectionKernel {
@@ -323,6 +379,39 @@ impl Model {
         }
     }
 
+    unsafe fn enqueue_silu_multiply(
+        &self,
+        stream: &Stream,
+        gate: &DeviceBuffer<f32>,
+        up: &DeviceBuffer<f32>,
+        activated: Option<&DeviceBuffer<f32>>,
+        gated: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        match self.fusion_plan.silu_multiply {
+            F32SiluMultiplyKernel::Separate => {
+                let activated = activated.ok_or_else(|| {
+                    NnisError::invalid_input(
+                        "baseline SiLU-multiply plan requires the activated workspace buffer",
+                    )
+                })?;
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe {
+                    self.elementwise.enqueue_silu(stream, gate, activated)?;
+                    self.decoder.enqueue_multiply(stream, activated, up, gated)
+                }
+            }
+            F32SiluMultiplyKernel::Fused { .. } => {
+                let fused = self.fused_silu_multiply.as_ref().ok_or_else(|| {
+                    NnisError::unsupported(
+                        "fusion plan selected fused SiLU-multiply but the kernel was not loaded",
+                    )
+                })?;
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe { fused.enqueue_silu_multiply(stream, gate, up, gated) }
+            }
+        }
+    }
+
     pub fn new_session(&self) -> Result<InferenceSession<'_>> {
         InferenceSession::new(self)
     }
@@ -343,7 +432,7 @@ struct DecodeWorkspace {
     residual: DeviceBuffer<f32>,
     gate: DeviceBuffer<f32>,
     up: DeviceBuffer<f32>,
-    activated: DeviceBuffer<f32>,
+    activated: Option<DeviceBuffer<f32>>,
     gated: DeviceBuffer<f32>,
     mlp: DeviceBuffer<f32>,
     logits: DeviceBuffer<f32>,
@@ -359,6 +448,10 @@ impl DecodeWorkspace {
         let intermediate = model.config.intermediate_size;
         let vocab = model.config.vocab_size;
         let kv_width = model.config.key_value_width()?;
+        let activated = match model.fusion_plan.silu_multiply {
+            F32SiluMultiplyKernel::Separate => Some(DeviceBuffer::new(context, intermediate)?),
+            F32SiluMultiplyKernel::Fused { .. } => None,
+        };
         Ok(Self {
             hidden: DeviceBuffer::new(context, hidden)?,
             normed: DeviceBuffer::new(context, hidden)?,
@@ -372,7 +465,7 @@ impl DecodeWorkspace {
             residual: DeviceBuffer::new(context, hidden)?,
             gate: DeviceBuffer::new(context, intermediate)?,
             up: DeviceBuffer::new(context, intermediate)?,
-            activated: DeviceBuffer::new(context, intermediate)?,
+            activated,
             gated: DeviceBuffer::new(context, intermediate)?,
             mlp: DeviceBuffer::new(context, hidden)?,
             logits: DeviceBuffer::new(context, vocab)?,
@@ -757,15 +850,11 @@ impl<'model> InferenceSession<'model> {
                     config.hidden_size,
                     config.intermediate_size,
                 )?;
-                self.model.elementwise.enqueue_silu(
+                self.model.enqueue_silu_multiply(
                     &self.stream,
                     &self.workspace.gate,
-                    &self.workspace.activated,
-                )?;
-                self.model.decoder.enqueue_multiply(
-                    &self.stream,
-                    &self.workspace.activated,
                     &self.workspace.up,
+                    self.workspace.activated.as_ref(),
                     &self.workspace.gated,
                 )?;
                 self.model.enqueue_projection(
