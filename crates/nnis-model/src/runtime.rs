@@ -1,8 +1,7 @@
 use crate::{
     load_model_directory, load_model_directory_with_representation_plan, DeviceTensor,
-    F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels,
-    GenerationConfig, ModelConfig, ModelWeights, PhysicalWeightRepresentation,
-    WeightDType, WeightRepresentationPlan,
+    F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels, GenerationConfig,
+    ModelConfig, ModelWeights, PhysicalWeightRepresentation, WeightDType, WeightRepresentationPlan,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{
@@ -69,9 +68,7 @@ impl ProjectionKernels {
                     }
                 };
                 Some(F32Bf16Gemv::load_with_block_size(
-                    context,
-                    compiler,
-                    block_size,
+                    context, compiler, block_size,
                 )?)
             }
         };
@@ -166,12 +163,8 @@ impl Model {
         let compiler = JitCompiler::new();
         let gather = F32Gather::load(&context, &compiler)?;
         let gemm = F32Gemm::load(&context, &compiler)?;
-        let projection_kernels = ProjectionKernels::load(
-            &context,
-            &compiler,
-            projection_plan,
-            representation_plan,
-        )?;
+        let projection_kernels =
+            ProjectionKernels::load(&context, &compiler, projection_plan, representation_plan)?;
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let decoder = F32DecoderKernels::load(&context, &compiler)?;
@@ -938,7 +931,7 @@ mod tests {
             weight_dtype: WeightDType::F32,
         };
         let embedding = vec![
-            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let zeros = vec![0.0_f32; 16];
         let kv_zeros = vec![0.0_f32; 8];
