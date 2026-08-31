@@ -1,0 +1,219 @@
+schema_version: 1
+kind: nnis_agent_execution_roadmap
+status: active
+last_updated: "2026-08-31"
+repository: Memorithm/NVIDIA-Native-Inference-Stack
+intended_consumer: autonomous_agent
+visibility_note: >-
+  This roadmap is intentionally kept off main on an agent-oriented branch.
+  GitHub cannot make repository content visible only to an AI assistant; humans
+  with sufficient repository access may discover it. Never store secrets here.
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+mission:
+  primary: >-
+    Build NNIS into a sovereign, inspectable, Rust-native LLM inference runtime
+    capable of approaching specialized NVIDIA software performance while keeping
+    runtime semantics, kernel selection, weight representation policy, evidence,
+    and adaptive control under ecosystem ownership.
+  near_term_sovereignty: >-
+    Avoid mandatory runtime dependence on PyTorch, TensorRT, TensorRT-LLM and
+    Triton while accepting CUDA Driver API and NVRTC as an NVIDIA hardware backend.
+  long_term_sovereignty: >-
+    Make NVIDIA one backend among several through backend-neutral execution and
+    representation contracts, with CUDA first and other backends only when real
+    implementations and evidence exist.
+
+reference_products:
+  primary_nvidia_reference: TensorRT-LLM
+  secondary_nvidia_reference: TensorRT
+  general_framework_reference: Transformers/PyTorch CUDA
+  rule: >-
+    Never claim equivalence to TensorRT-LLM without same-model, same-precision,
+    same-workload, same-device and fingerprint-compatible evidence.
+
+invariants:
+  - correctness_and_declared_semantics_dominate_performance
+  - no_fabricated_performance_claims
+  - no_fabricated_scientific_novelty
+  - never_promote_from_microbenchmark_only
+  - every_candidate_requires_end_to_end_verify_before_runtime_promotion
+  - incompatible_environment_fingerprints_fail_closed
+  - distinguish_exact_greedy_trajectory_from_numerical_equivalence
+  - kernel_elasticity_and_weight_representation_elasticity_are_separate_axes
+  - never_silently_change_weight_representation_to_win_a_benchmark
+  - preserve_Rust_1_77_MSRV_unless_explicitly_revised
+  - preserve_model_format_v1_until_versioned_migration_is_justified
+  - do_not_make_NNIS_runtime_depend_directly_on_newer_ElasticAutoTuner_toolchains
+
+control_loop:
+  - OBSERVE
+  - FINGERPRINT_ENVIRONMENT
+  - DEFINE_BASELINE
+  - PROPOSE_CANDIDATE
+  - VALIDATE_STATIC_INVARIANTS
+  - VALIDATE_NUMERICAL_OR_SEMANTIC_CORRECTNESS
+  - MEASURE_ISOLATED_IF_USEFUL
+  - ACT_WITH_EXPLICIT_OPT_IN_PLAN
+  - VERIFY_END_TO_END
+  - COMMIT_OR_ROLLBACK
+  - RECORD_EVIDENCE
+
+promotion_policy:
+  MinLatency: >-
+    Promote only if a fingerprint-compatible end-to-end comparison beats the
+    parent plan by a credible margin relative to observed run variance.
+  MinMemory: >-
+    Exact storage savings may justify a candidate without latency improvement,
+    but semantics must pass and latency trade-offs must be explicit.
+  BalancedLatencyMemory: >-
+    Require an explicit trade-off policy; never convert storage savings into an
+    implicit speed claim.
+
+verified_history:
+  environment_fingerprint_v1:
+    status: merged
+    merge_sha: 06020d3c6873d3ad34145f2ce3957b2d085a647e
+    guarantees:
+      - run_context_id_required_for_inter_run_comparison
+      - Jetson_power_and_clock_state_recorded
+      - CUDA_device_uuid_driver_NVRTC_kernel_recorded
+      - comparator_rejects_run_context_mismatch
+      - comparator_rejects_clock_state_mismatch
+  E1_hybrid_GEMV:
+    status: rejected
+    end_to_end_result: "generation throughput -5.57%"
+  E1_1_lm_head_GEMV64:
+    status: promoted
+    end_to_end_result: "+3.786% generation throughput in its same-regime ABBA"
+    correctness: identical_generated_ids
+  E1_2_gate_up_plus_lm_head:
+    status: rejected
+    marginal_result: "-1.715% versus E1.1"
+  E2_fused_lm_head_argmax:
+    status: rejected_candidate_only
+    reason: >-
+      Isolated gain was smaller than or comparable to reference variation, so no
+      end-to-end promotion was justified.
+  W1_lm_head_BF16_weight:
+    status: active_candidate_only
+    pr: 54
+    candidate_head: cf15c2b3c4b78d5f2935d1e917fcc8c19f7b3546
+    hypothesis: >-
+      Keep activation/output f32, store only LM-head weights as BF16, widen to f32
+      in-kernel, and preserve increasing-K fmaf accumulation.
+    exact_storage:
+      elements: 28311552
+      f32_bytes: 113246208
+      bf16_bytes: 56623104
+      bytes_saved: 56623104
+      reduction_fraction: 0.5
+    gates:
+      - all_49152_logits_bitwise_equal
+      - fingerprint_compatible_reference_and_candidate
+      - isolated_sweep_before_runtime_or_format_change
+      - end_to_end_ABBA_before_promotion
+
+roadmap:
+  - id: R0
+    name: Trustworthy evidence substrate
+    status: substantially_complete
+    next:
+      - require fingerprint linkage in every new optimization campaign
+      - prevent cross-regime comparisons from being reported as speedups
+      - retain exact-head SHA and clean-worktree provenance
+
+  - id: R1
+    name: TensorRT-LLM reference line on Thor
+    status: pending
+    goals:
+      - same pinned SmolLM2 checkpoint and tokenizer
+      - same prompt, batch, decode length and precision semantics
+      - same Thor power/clock regime and compatible fingerprint context
+      - record TensorRT-LLM version, CUDA/container digest and resolved features
+      - publish no equivalence claim unless semantic conditions match
+
+  - id: R2
+    name: Kernel-only Elastic optimization
+    status: active
+    parent_plan: E1_1_lm_head_GEMV64
+    goals:
+      - profile launch/submission overhead explicitly
+      - prefer fewer higher-value substitutions over thousands of tiny launches
+      - evaluate fusion only when it removes measurable work or traffic
+      - keep rejected candidates as evidence, not hidden failures
+
+  - id: R3
+    name: Elastic weight representation
+    status: active
+    principle: >-
+      Logical weights remain fixed; physical representation may vary per tensor,
+      component or layer only through explicit, versioned plans.
+    sequence:
+      - W1 LM-head BF16-only candidate
+      - if justified, introduce representation plan schema separate from kernel plan
+      - support heterogeneous f32/BF16 execution without breaking model format v1
+      - later evaluate lower-bit or structured representations only when executable
+        reconstruction/layout contracts exist
+    forbid:
+      - global_BF16_switch_as_shortcut
+      - unsupported_INT4_or_sub2bit_claims
+      - silent_quality_tolerance_relaxation
+
+  - id: R4
+    name: ElasticAutoTuner bridge
+    status: pending_after_R2_R3_contracts
+    architecture: >-
+      NNIS exports candidates, hardware/problem fingerprints, measurements and
+      correctness evidence. ElasticAutoTuner runs in a separate newer-toolchain
+      environment and emits a versioned validated plan. NNIS production runtime
+      replays only qualified plans and preserves Rust 1.77 MSRV.
+    required_modes:
+      - MinLatency
+      - MinMemory
+      - BalancedLatencyMemory
+      - DeterministicOnly
+    required_behavior:
+      - correction_evidence_before_promotion
+      - plan_cache_keyed_by_hardware_problem_objective_and_representation
+      - rollback_on_failed_end_to_end_verification
+
+  - id: R5
+    name: Runtime capability gap toward TensorRT-LLM
+    status: pending
+    candidate_areas:
+      - paged_or_segmented_KV_cache
+      - in_flight_batching
+      - decode_native_fusions
+      - speculative_decoding
+      - multi_sequence_scheduler
+      - explicit_precision_and_quantization_plans
+      - multi_GPU_only_after_single_GPU_contracts_are_stable
+    rule: implement_from_measured_gaps_not_feature_checklists
+
+  - id: R6
+    name: Backend sovereignty
+    status: long_term
+    goals:
+      - separate NNIS execution IR from CUDA-specific launch details
+      - define backend capability contracts
+      - keep CUDA as first production backend
+      - add CPU/reference backend where it improves verification
+      - investigate ROCm_or_other_accelerators_only_with_real_hardware_or_CI_evidence
+
+agent_operating_protocol:
+  must_read_this_file:
+    - at_start_of_every_agent_session_on_this_repository
+    - before_selecting_the_next_major_task
+    - after_any_user_change_to_strategy_or_invariants
+    - after_any_physical_benchmark_that_changes_promotion_state
+    - before_opening_or_merging_a_performance_or_representation_PR
+  must_update_this_file:
+    - when_a_candidate_is_promoted_or_rejected
+    - when_a_new_invariant_or_sovereignty_constraint_is_added
+    - when_the_primary_reference_baseline_changes
+    - when_a_roadmap_phase_changes_status
+  fail_closed: >-
+    If the roadmap cannot be read, an autonomous agent must not make a major
+    architectural, performance-promotion, representation-format or merge decision.
+    It may perform read-only diagnosis and report that the roadmap is unavailable.
