@@ -71,6 +71,7 @@ impl Default for F32FusionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn default_is_unfused_and_versioned() {
@@ -94,6 +95,24 @@ mod tests {
             silu_multiply: F32SiluMultiplyKernel::Fused { block_size: 128 },
         };
         assert!(unsupported.validate().is_err());
+    }
+
+    #[test]
+    fn serialized_shape_is_stable_for_evidence_consumers() {
+        assert_eq!(
+            serde_json::to_value(F32FusionPlan::baseline()).unwrap(),
+            json!({
+                "schema_version": 1,
+                "silu_multiply": {"kernel": "separate"}
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(F32FusionPlan::r2_silu_multiply_fused_candidate()).unwrap(),
+            json!({
+                "schema_version": 1,
+                "silu_multiply": {"kernel": "fused", "block_size": 256}
+            })
+        );
     }
 
     #[test]
