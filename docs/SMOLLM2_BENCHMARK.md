@@ -114,16 +114,27 @@ Do not use the CPU-only environment used to construct the correctness oracle.
 The script records the actual Torch, Transformers and CUDA versions instead of
 pretending they are interchangeable across installations.
 
-On Jetson AGX Thor/CUDA 13.0, keep the correctness oracle untouched and create a
-separate GPU environment. One supported setup is to install the CUDA 13.0
-PyTorch wheel first, then install the pinned Python-side benchmark dependencies:
+On Jetson AGX Thor running JetPack 7.0/CUDA 13.0, NVIDIA's Jetson
+compatibility matrix maps the platform to the 25.08 PyTorch framework
+container (PyTorch 2.8.0a0+34c6371d24) and does not list a standalone Jetson
+framework wheel. NVIDIA's Thor Docker guide demonstrates the image
+`nvcr.io/nvidia/pytorch:25.08-py3` with CUDA enabled on `NVIDIA Thor`.
+
+Keep the CPU correctness-oracle venv untouched. Use the NVIDIA container for
+the performance baseline, install only the pinned Python-side benchmark
+dependencies into an ephemeral venv, and record the exact image label:
 
 ```bash
-python3 -m venv /tmp/nnis-smollm2-gpu-venv
-source /tmp/nnis-smollm2-gpu-venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install torch --index-url https://download.pytorch.org/whl/cu130
-python -m pip install -r tools/requirements-smollm2-benchmark-gpu.txt
+IMAGE=nvcr.io/nvidia/pytorch:25.08-py3
+docker pull "$IMAGE"
+IMAGE_LABEL="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+docker run --rm --runtime=nvidia   -v "$PWD:/workspace/NNIS:ro"   -v "/root/.cache/huggingface:/root/.cache/huggingface"   -v "/tmp:/host-tmp"   -w /workspace/NNIS   "$IMAGE"   bash -lc '
+    python3 -m venv --system-site-packages /tmp/nnis-smollm2-gpu-venv
+    . /tmp/nnis-smollm2-gpu-venv/bin/activate
+    unset PIP_CONSTRAINT
+    python -m pip install --no-cache-dir -r tools/requirements-smollm2-benchmark-gpu.txt
+    python tools/bench_smollm2_transformers.py       --device 0       --decode-steps 32       --warmups 2       --iterations 5       --environment-label "'"$IMAGE_LABEL"'"       > /host-tmp/transformers-smollm2-e2e.json
+  '
 ```
 
 Verify that the installed build is really CUDA-enabled before collecting any

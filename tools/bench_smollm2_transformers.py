@@ -45,6 +45,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--iterations", type=int, default=5)
     parser.add_argument(
+        "--environment-label",
+        default=None,
+        help="Optional immutable environment/container label retained in the JSON report.",
+    )
+    parser.add_argument(
         "--attn-implementation",
         default="default",
         choices=["default", "eager", "sdpa", "flash_attention_2"],
@@ -243,6 +248,7 @@ def main() -> None:
         "iterations": args.iterations,
         "environment": {
             "python": platform.python_version(),
+            "environment_label": args.environment_label,
             "torch": torch.__version__,
             "transformers": transformers.__version__,
             "torch_cuda": torch.version.cuda,

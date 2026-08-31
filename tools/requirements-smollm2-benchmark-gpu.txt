@@ -1,10 +1,11 @@
 # Python-side dependencies for the SmolLM2 GPU performance baseline.
 #
-# Intentionally does NOT pin/install torch. On Jetson AGX Thor, install a
-# CUDA-enabled SBSA/aarch64 PyTorch build first (for example from PyTorch's
-# cu130 index when the host is on CUDA 13.0), then install this file. Keeping
-# torch separate prevents this benchmark environment from replacing the
-# torch==2.4.0 CPU oracle used by tools/requirements-smollm2-135m.txt.
+# Intentionally does NOT pin/install torch. For Jetson AGX Thor on JetPack 7.0,
+# NVIDIA's compatibility matrix provides the 25.08 PyTorch framework
+# container rather than a standalone Jetson wheel. Install these Python-side
+# dependencies inside that CUDA-enabled container. Keeping torch separate
+# also prevents the benchmark from replacing the torch==2.4.0 CPU oracle
+# used by tools/requirements-smollm2-135m.txt.
 transformers==4.40.1
 safetensors==0.4.5
 huggingface_hub==0.24.7
