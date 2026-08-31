@@ -1,0 +1,82 @@
+schema_version: 1
+kind: nnis_kernel_agent_integration_program
+status: active
+last_updated: "2026-09-01"
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+mission: >-
+  Expose NNIS as a trustworthy native NVIDIA execution and evidence backend for
+  Forge kernel search without moving search policy, LLM mutation, evolutionary
+  selection or candidate promotion authority into NNIS.
+
+principles:
+  - NNIS_owns_runtime_kernel_semantics_reference_paths_and_final_promotion
+  - Forge_owns_candidate_search_mutation_and_selection
+  - no_PyTorch_runtime_dependency_is_introduced
+  - candidate_and_baseline_must_share_explicit_numerical_semantics
+  - TF32_mixed_precision_or_relaxed_tolerance_requires_an_explicit_distinct_campaign
+  - compile_success_never_substitutes_for_correctness
+  - isolated_kernel_measurement_never_substitutes_for_real_model_end_to_end_evidence
+  - benchmark_environment_compatibility_remains_fail_closed
+  - exact_head_CI_and_real_GPU_evidence_gate_any_NNIS_promotion
+
+integration_contract:
+  inputs_from_Forge:
+    - versioned_kernel_task
+    - candidate_source_and_content_identity
+    - explicit_numerical_contract
+    - requested_compile_options_with_no_hidden_precision_relaxation
+  NNIS_backend_outputs:
+    - NVRTC_compile_result_and_artifact_identity
+    - kernel_resource_metadata_when_available
+    - independent_verification_result_using_NNIS_or_destination_owned_oracle
+    - CUDA_event_measurement_report
+    - environment_fingerprint_and_exact_git_identity
+  forbidden_outputs:
+    - self_authorizing_runtime_promotion
+    - speedup_claim_without_compatible_baseline_evidence
+
+initial_vertical_slice:
+  name: f32_elementwise_AXPBY_like_candidate
+  gates:
+    - compile_candidate_with_NNIS_JIT
+    - launch_through_NNIS_runtime
+    - compare_against_independent_host_oracle
+    - record_CUDA_event_samples
+    - preserve_environment_fingerprint
+    - reject_wrong_candidate_before_measurement_selection
+
+phases:
+  - id: NK0
+    name: Adapter surface audit
+    status: active
+    goals:
+      - identify_minimal_public_nnis_jit_nnis_rt_and_nnis_bench_interfaces_needed_by_Forge
+      - avoid_new_public_API_when_existing_interfaces_are_sufficient
+  - id: NK1
+    name: Forge NNIS adapter qualification
+    status: next
+    goals:
+      - run_first_AXPBY_like_closed_loop_without_PyTorch
+      - prove_verification_precedes_measurement
+      - prove_incompatible_environment_comparison_fails_closed
+  - id: NK2
+    name: Native transformer kernel search
+    status: planned
+    goals:
+      - RMSNorm_softmax_GEMV_GEMM_RoPE_attention
+      - retain_existing_NNIS_reference_paths_as_oracles
+      - require_destination_end_to_end_requalification_before_plan_promotion
+  - id: NK3
+    name: Attention_and_decode_search
+    status: planned
+    goals:
+      - expose_measured_bottlenecks_as_search_tasks
+      - integrate_FLAT_ATTENTION_only_through_versioned_semantics
+      - qualify_winners_on_real_prefill_and_autoregressive_decode
+
+success_definition: >-
+  Forge can use NNIS as a native CUDA compilation execution verification and
+  measurement backend while NNIS keeps sovereign correctness and promotion
+  control and no candidate is promoted from microbenchmark evidence alone.
