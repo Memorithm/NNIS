@@ -1,5 +1,5 @@
 use nnis_bench::{summarize_samples_ms, BenchConfig, BenchmarkMetadata, TimingStatistics};
-use nnis_model::{GenerationConfig, Model};
+use nnis_model::{F32ProjectionPlan, GenerationConfig, Model};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -21,6 +21,7 @@ struct Arguments {
     input_ids: Vec<u32>,
     decode_steps: usize,
     config: BenchConfig,
+    projection_plan: F32ProjectionPlan,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +91,7 @@ struct Report {
     generated_tokens_per_second_request_median: f64,
     generated_ids: Vec<u32>,
     qualified_greedy_prefix_checked: bool,
+    projection_plan: F32ProjectionPlan,
 }
 
 fn parse_usize(name: &str, value: String) -> std::result::Result<usize, String> {
@@ -120,6 +122,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     let mut decode_steps = 32_usize;
     let mut warmups = 2_usize;
     let mut iterations = 5_usize;
+    let mut projection_plan = F32ProjectionPlan::baseline_gemm();
 
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -156,9 +159,20 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     args.next().ok_or("--iterations requires a value")?,
                 )?;
             }
+            "--projection-plan" => {
+                projection_plan = match args
+                    .next()
+                    .ok_or("--projection-plan requires baseline-gemm or thor-e1-1-lm-head")?
+                    .as_str()
+                {
+                    "baseline-gemm" => F32ProjectionPlan::baseline_gemm(),
+                    "thor-e1-1-lm-head" => F32ProjectionPlan::thor_e1_1_smollm2_lm_head(),
+                    other => return Err(format!("unknown --projection-plan {other:?}")),
+                };
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N]"
+                    "usage: smollm2_e2e --model DIR [--device N] [--input-ids CSV] [--decode-steps N] [--warmups N] [--iterations N] [--projection-plan baseline-gemm|thor-e1-1-lm-head]"
                         .to_string(),
                 );
             }
@@ -185,6 +199,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
         input_ids,
         decode_steps,
         config: BenchConfig::new(warmups, iterations),
+        projection_plan,
     })
 }
 
@@ -269,7 +284,12 @@ fn run(arguments: Arguments) -> Result<Report> {
     let context = Context::new(&device)?;
     let construction_stream = Stream::new(&context)?;
     let before_model = memory_snapshot(&context)?;
-    let model = Model::load_directory(&context, &construction_stream, &arguments.model_dir)?;
+    let model = Model::load_directory_with_projection_plan(
+        &context,
+        &construction_stream,
+        &arguments.model_dir,
+        arguments.projection_plan,
+    )?;
     construction_stream.synchronize()?;
     validate_shape(&model)?;
     let after_model = memory_snapshot(&context)?;
@@ -393,6 +413,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         generated_tokens_per_second_request_median,
         generated_ids: expected_generated.expect("iterations are validated non-zero"),
         qualified_greedy_prefix_checked,
+        projection_plan: model.projection_plan(),
     })
 }
 

@@ -1,12 +1,57 @@
 use crate::{
-    load_model_directory, F32DecoderKernels, F32RuntimeKernels, GenerationConfig, ModelConfig,
-    ModelWeights, WeightDType,
+    load_model_directory, F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan,
+    F32RuntimeKernels, GenerationConfig, ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
-use nnis_kernels::{F32Elementwise, F32Gather, F32Gemm, F32TopK, F32TopKWorkspace};
+use nnis_kernels::{F32Elementwise, F32Gather, F32Gemm, F32Gemv, F32TopK, F32TopKWorkspace};
 use nnis_rt::{Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, NnisError, Result, Stream};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Copy)]
+enum ProjectionFamily {
+    QO,
+    KV,
+    GateUp,
+    Down,
+    LmHead,
+}
+
+#[derive(Debug)]
+struct ProjectionKernels {
+    gemv_by_block_size: BTreeMap<u32, F32Gemv>,
+}
+
+impl ProjectionKernels {
+    fn load(
+        context: &Arc<Context>,
+        compiler: &JitCompiler,
+        plan: F32ProjectionPlan,
+    ) -> Result<Self> {
+        plan.validate()?;
+        let mut gemv_by_block_size = BTreeMap::new();
+        for choice in [plan.q_o, plan.k_v, plan.gate_up, plan.down, plan.lm_head] {
+            if let F32ProjectionKernel::Gemv { block_size } = choice {
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    gemv_by_block_size.entry(block_size)
+                {
+                    let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;
+                    entry.insert(kernel);
+                }
+            }
+        }
+        Ok(Self { gemv_by_block_size })
+    }
+
+    fn gemv(&self, block_size: u32) -> Result<&F32Gemv> {
+        self.gemv_by_block_size.get(&block_size).ok_or_else(|| {
+            NnisError::unsupported(format!(
+                "projection plan selected unavailable GEMV block size {block_size}"
+            ))
+        })
+    }
+}
 
 /// Compiled, immutable decoder model. Sessions own all mutable execution state.
 #[derive(Debug)]
@@ -16,6 +61,8 @@ pub struct Model {
     context: Arc<Context>,
     gather: F32Gather,
     gemm: F32Gemm,
+    projection_plan: F32ProjectionPlan,
+    projection_kernels: ProjectionKernels,
     elementwise: F32Elementwise,
     top_k: F32TopK,
     decoder: F32DecoderKernels,
@@ -26,6 +73,16 @@ pub struct Model {
 
 impl Model {
     pub fn new(config: ModelConfig, weights: ModelWeights, stream: &Stream) -> Result<Self> {
+        Self::new_with_projection_plan(config, weights, stream, F32ProjectionPlan::baseline_gemm())
+    }
+
+    pub fn new_with_projection_plan(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        projection_plan: F32ProjectionPlan,
+    ) -> Result<Self> {
+        projection_plan.validate()?;
         config.validate_execution_support()?;
         if config.weight_dtype != WeightDType::F32 {
             return Err(NnisError::unsupported(
@@ -42,6 +99,7 @@ impl Model {
         let compiler = JitCompiler::new();
         let gather = F32Gather::load(&context, &compiler)?;
         let gemm = F32Gemm::load(&context, &compiler)?;
+        let projection_kernels = ProjectionKernels::load(&context, &compiler, projection_plan)?;
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let decoder = F32DecoderKernels::load(&context, &compiler)?;
@@ -55,6 +113,8 @@ impl Model {
             context,
             gather,
             gemm,
+            projection_plan,
+            projection_kernels,
             elementwise,
             top_k,
             decoder,
@@ -73,8 +133,60 @@ impl Model {
         Self::new(config, weights, stream)
     }
 
+    pub fn load_directory_with_projection_plan(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        projection_plan: F32ProjectionPlan,
+    ) -> Result<Self> {
+        let (config, weights) = load_model_directory(context, stream, directory)?;
+        Self::new_with_projection_plan(config, weights, stream, projection_plan)
+    }
+
     pub fn config(&self) -> &ModelConfig {
         &self.config
+    }
+
+    #[must_use]
+    pub const fn projection_plan(&self) -> F32ProjectionPlan {
+        self.projection_plan
+    }
+
+    fn projection_choice(&self, family: ProjectionFamily) -> F32ProjectionKernel {
+        match family {
+            ProjectionFamily::QO => self.projection_plan.q_o,
+            ProjectionFamily::KV => self.projection_plan.k_v,
+            ProjectionFamily::GateUp => self.projection_plan.gate_up,
+            ProjectionFamily::Down => self.projection_plan.down,
+            ProjectionFamily::LmHead => self.projection_plan.lm_head,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn enqueue_projection(
+        &self,
+        stream: &Stream,
+        family: ProjectionFamily,
+        input: &DeviceBuffer<f32>,
+        weight: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        match self.projection_choice(family) {
+            F32ProjectionKernel::Gemm => {
+                // SAFETY: forwarded from the caller with the same buffer lifetime contract.
+                unsafe {
+                    self.gemm
+                        .enqueue_gemm(stream, input, weight, output, 1, n, k)
+                }
+            }
+            F32ProjectionKernel::Gemv { block_size } => {
+                let gemv = self.projection_kernels.gemv(block_size)?;
+                // SAFETY: forwarded from the caller with the same buffer lifetime contract.
+                unsafe { gemv.enqueue_project_kn(stream, input, weight, output, k, n) }
+            }
+        }
     }
 
     pub fn new_session(&self) -> Result<InferenceSession<'_>> {
@@ -398,32 +510,32 @@ impl<'model> InferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::QO,
                     &self.workspace.normed,
                     layer.q_proj.tensor().as_f32()?,
                     &self.workspace.q,
-                    1,
                     config.hidden_size,
                     config.hidden_size,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::KV,
                     &self.workspace.normed,
                     layer.k_proj.tensor().as_f32()?,
                     &self.workspace.k,
-                    1,
-                    kv_width,
                     config.hidden_size,
+                    kv_width,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::KV,
                     &self.workspace.normed,
                     layer.v_proj.tensor().as_f32()?,
                     &self.workspace.v,
-                    1,
-                    kv_width,
                     config.hidden_size,
+                    kv_width,
                 )?;
                 self.model.runtime.enqueue_rope_position(
                     &self.stream,
@@ -469,12 +581,12 @@ impl<'model> InferenceSession<'model> {
                     &self.workspace.attention,
                     attention_scale,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::QO,
                     &self.workspace.attention,
                     layer.o_proj.tensor().as_f32()?,
                     &self.workspace.projected,
-                    1,
                     config.hidden_size,
                     config.hidden_size,
                 )?;
@@ -493,23 +605,23 @@ impl<'model> InferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::GateUp,
                     &self.workspace.normed,
                     layer.gate_proj.tensor().as_f32()?,
                     &self.workspace.gate,
-                    1,
-                    config.intermediate_size,
                     config.hidden_size,
+                    config.intermediate_size,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::GateUp,
                     &self.workspace.normed,
                     layer.up_proj.tensor().as_f32()?,
                     &self.workspace.up,
-                    1,
-                    config.intermediate_size,
                     config.hidden_size,
+                    config.intermediate_size,
                 )?;
                 self.model.elementwise.enqueue_silu(
                     &self.stream,
@@ -522,14 +634,14 @@ impl<'model> InferenceSession<'model> {
                     &self.workspace.up,
                     &self.workspace.gated,
                 )?;
-                self.model.gemm.enqueue_gemm(
+                self.model.enqueue_projection(
                     &self.stream,
+                    ProjectionFamily::Down,
                     &self.workspace.gated,
                     layer.down_proj.tensor().as_f32()?,
                     &self.workspace.mlp,
-                    1,
-                    config.hidden_size,
                     config.intermediate_size,
+                    config.hidden_size,
                 )?;
                 self.model.elementwise.enqueue_vector_add(
                     &self.stream,
@@ -552,14 +664,14 @@ impl<'model> InferenceSession<'model> {
                 config.hidden_size,
                 config.rms_norm_eps,
             )?;
-            self.model.gemm.enqueue_gemm(
+            self.model.enqueue_projection(
                 &self.stream,
+                ProjectionFamily::LmHead,
                 &self.workspace.normed,
                 self.model.weights.lm_head.tensor().as_f32()?,
                 &self.workspace.logits,
-                1,
-                config.vocab_size,
                 config.hidden_size,
+                config.vocab_size,
             )?;
         }
         self.position += 1;
