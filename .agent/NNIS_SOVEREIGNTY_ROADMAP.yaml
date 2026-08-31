@@ -152,6 +152,73 @@ verified_history:
       the worst candidate median exceeds the best parent median by 74.626182 ms.
       Preserve the explicit candidate and evidence, but do not promote it or change
       the runtime default.
+  R2_cached_attention_parallel_value:
+    status: promoted_explicit_plan
+    infrastructure_pr: 61
+    infrastructure_merge_sha: 1af93c133e5d81d08746de525a4e986902d6105c
+    explicit_plan_pr: 63
+    explicit_plan_merge_sha: befc70790485385bce81b33eb4956fc7de3984f9
+    model_format_change: false
+    default_runtime_change: false
+    hypothesis: >-
+      Preserve the serial query/key score and online-softmax order in lane zero,
+      but update the 64 independent value/output dimensions in parallel instead
+      of using one CUDA thread for the entire query head.
+    profiler_evidence:
+      exact_head: fab2bcb2ccd6a4d3966f41dfd964708769c8aeef
+      run_context_id: r2-nsys-e1-1-20260831T184211Z
+      attention_gpu_time_ms: 194.850528
+      captured_gpu_kernel_time_share: 0.311
+      attention_instances: 1050
+      note: Nsight_profile_time_is_diagnostic_not_a_clean_end_to_end_benchmark
+    isolated_physical:
+      exact_head: 1af93c133e5d81d08746de525a4e986902d6105c
+      head_dim: 64
+      tested_kv_rows: [1, 2, 4, 8, 16, 24, 35]
+      bitwise_equal_at_every_tested_length: true
+      candidate_faster_at_every_tested_length: true
+      kv_rows_35_reference_median_ms: 0.19041600078344345
+      kv_rows_35_candidate_median_ms: 0.08188799768686295
+      kv_rows_35_reference_over_candidate_speed_ratio: 2.325322466811169
+    end_to_end_abba:
+      exact_head: befc70790485385bce81b33eb4956fc7de3984f9
+      run_context_id: r2-attention-e2e-20260831T204137Z
+      rounds: 2
+      order_per_round: [A, B, B, A]
+      decode_steps: 32
+      iterations_per_run: 5
+      warmups_per_run: 2
+      parent: E1_1_all_f32_lm_head_GEMV64_plus_serial_cached_attention
+      candidate: E1_1_all_f32_lm_head_GEMV64_plus_parallel_value64_cached_attention
+      generation_parent_median_ms: 688.191749
+      generation_candidate_median_ms: 597.418587
+      generation_latency_reduction_fraction: 0.13190097401182288
+      generation_throughput_gain_fraction: 0.1519423131038271
+      request_parent_median_ms: 692.670355
+      request_candidate_median_ms: 601.6822599999999
+      request_latency_reduction_fraction: 0.13135843672709224
+      request_throughput_gain_fraction: 0.151222831465897
+      all_four_candidate_generation_medians_below_all_four_parent_medians: true
+      generation_separation_min_parent_minus_max_candidate_ms: 86.597579
+      identical_greedy_trajectory: true
+      fingerprint_compatible: true
+      git_dirty: false
+    promotion:
+      explicit_plan: true
+      default_runtime: false
+      MinLatency: promoted
+      MinMemory: not_claimed
+      DeterministicOnly: eligible_identical_greedy_trajectory
+    gates:
+      - real_SmolLM2_end_to_end_execution
+      - physical_Thor_CC11_fixed_MAXN_fingerprint
+      - bitwise_equal_isolated_outputs_at_every_tested_KV_length
+      - candidate_faster_at_every_tested_KV_length
+      - fingerprint_compatible_end_to_end_ABBA
+      - all_candidate_generation_medians_below_all_parent_medians
+      - positive_86_597579_ms_generation_distribution_separation
+      - identical_greedy_trajectory
+      - exact_head_required_CI_green_before_physical_gate
   W1_lm_head_BF16_weight:
     status: promoted_explicit_plan
     infrastructure_pr: 54
@@ -211,7 +278,8 @@ verified_history:
       - fingerprint_compatible_reference_and_candidate
       - isolated_sweep_complete
       - versioned_representation_plan_separate_from_kernel_plan
-      - heterogeneous_f32_BF16_model_format_v1_preserved
+      - heterogeneous_f32_activation_BF16_LM_head_execution
+      - model_format_v1_preserved
       - end_to_end_ABBA_complete
       - identical_greedy_trajectory
 
@@ -236,15 +304,21 @@ roadmap:
 
   - id: R2
     name: Kernel-only Elastic optimization
-    status: active
-    parent_plan: E1_1_lm_head_GEMV64
+    status: active_parallel_value64_promoted
+    parent_plan: E1_1_lm_head_GEMV64_plus_R2_parallel_value64_attention_all_f32
     completed_or_recorded:
+      - R2_launch_submission_control_profiled_without_decoder_speedup_extrapolation
       - R2_silu_multiply_fusion_isolated_and_end_to_end_rejected_for_MinLatency
+      - R2_cached_attention_parallel_value_isolated_sweep_and_end_to_end_promoted_for_MinLatency
+    next:
+      - reprofile_the_promoted_R2_parent_before_selecting_another_kernel_candidate
+      - preserve_serial_cached_attention_as_correctness_oracle
+      - qualify_cross_axis_composition_with_R3_W1_separately_before_calling_it_a_combined_best_plan
     goals:
-      - profile launch/submission overhead explicitly
-      - prefer fewer higher-value substitutions over thousands of tiny launches
-      - evaluate fusion only when it removes measurable work or traffic
-      - keep rejected candidates as evidence, not hidden failures
+      - prefer_measured_full_decode_bottlenecks_over_launch_count_proxies
+      - prefer_fewer_higher_value_substitutions_over_thousands_of_tiny_launches
+      - evaluate_fusion_only_when_it_removes_measurable_work_or_traffic
+      - keep_rejected_candidates_as_evidence_not_hidden_failures
 
   - id: R3
     name: Elastic weight representation
@@ -304,10 +378,10 @@ roadmap:
     status: long_term
     goals:
       - separate NNIS execution IR from CUDA-specific launch details
-      - define backend capability contracts
-      - keep CUDA as first production backend
-      - add CPU/reference backend where it improves verification
-      - investigate ROCm_or_other_accelerators_only_with_real_hardware_or_CI_evidence
+      - define_backend_capability_contracts
+      - keep_CUDA_as_first_production_backend
+      - add_CPU_reference_backend_where_it_improves_verification
+      - investigate_ROCm_or_other_accelerators_only_with_real_hardware_or_CI_evidence
 
 agent_operating_protocol:
   must_read_this_file:
