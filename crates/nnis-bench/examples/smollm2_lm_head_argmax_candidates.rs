@@ -28,11 +28,9 @@ fn parse_model_dir() -> Result<PathBuf> {
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--model" => {
-                model = Some(PathBuf::from(
-                    args.next().ok_or_else(|| {
-                        NnisError::invalid_input("--model requires a directory")
-                    })?,
-                ));
+                model = Some(PathBuf::from(args.next().ok_or_else(|| {
+                    NnisError::invalid_input("--model requires a directory")
+                })?));
             }
             "--help" | "-h" => {
                 return Err(NnisError::invalid_input(
@@ -112,11 +110,7 @@ fn run() -> Result<()> {
     let top_k = F32TopK::load(&context, &compiler)?;
     let candidate_block_size = u32::try_from(env_usize("NNIS_LM_HEAD_ARGMAX_BLOCK_SIZE", 64)?)
         .map_err(|_| NnisError::invalid_input("NNIS_LM_HEAD_ARGMAX_BLOCK_SIZE exceeds u32"))?;
-    let fused = F32LmHeadArgmax::load_with_block_size(
-        &context,
-        &compiler,
-        candidate_block_size,
-    )?;
+    let fused = F32LmHeadArgmax::load_with_block_size(&context, &compiler, candidate_block_size)?;
 
     let warmups = env_usize("NNIS_PROFILE_WARMUPS", 20)?;
     let iterations = env_usize("NNIS_PROFILE_ITERATIONS", 100)?;
@@ -144,13 +138,7 @@ fn run() -> Result<()> {
         config.hidden_size,
         config.vocab_size,
     )?;
-    top_k.top_k(
-        &stream,
-        &logits,
-        &reference_value,
-        &reference_index,
-        1,
-    )?;
+    top_k.top_k(&stream, &logits, &reference_value, &reference_index, 1)?;
     fused.argmax_kn(
         &stream,
         &hidden,
@@ -180,57 +168,45 @@ fn run() -> Result<()> {
         .with_dimension("block_size", candidate_block_size as u64)
         .with_work_items(work_items);
 
-    let reference_report = benchmark_gpu(
-        &context,
-        &stream,
-        reference_case,
-        bench_config,
-        || {
-            // SAFETY: buffers/workspaces remain alive through the benchmark;
-            // the harness serializes and drains the stream.
-            unsafe {
-                reference_gemv.enqueue_project_kn(
-                    &stream,
-                    &hidden,
-                    lm_head,
-                    &logits,
-                    config.hidden_size,
-                    config.vocab_size,
-                )?;
-                top_k.enqueue_top_k(
-                    &stream,
-                    &logits,
-                    &reference_value,
-                    &reference_index,
-                    1,
-                    &reference_top_k_workspace,
-                )
-            }
-        },
-    )?;
+    let reference_report = benchmark_gpu(&context, &stream, reference_case, bench_config, || {
+        // SAFETY: buffers/workspaces remain alive through the benchmark;
+        // the harness serializes and drains the stream.
+        unsafe {
+            reference_gemv.enqueue_project_kn(
+                &stream,
+                &hidden,
+                lm_head,
+                &logits,
+                config.hidden_size,
+                config.vocab_size,
+            )?;
+            top_k.enqueue_top_k(
+                &stream,
+                &logits,
+                &reference_value,
+                &reference_index,
+                1,
+                &reference_top_k_workspace,
+            )
+        }
+    })?;
 
-    let candidate_report = benchmark_gpu(
-        &context,
-        &stream,
-        candidate_case,
-        bench_config,
-        || {
-            // SAFETY: buffers/workspace remain alive through the benchmark;
-            // the harness serializes and drains the stream.
-            unsafe {
-                fused.enqueue_argmax_kn(
-                    &stream,
-                    &hidden,
-                    lm_head,
-                    &candidate_value,
-                    &candidate_index,
-                    config.hidden_size,
-                    config.vocab_size,
-                    &candidate_workspace,
-                )
-            }
-        },
-    )?;
+    let candidate_report = benchmark_gpu(&context, &stream, candidate_case, bench_config, || {
+        // SAFETY: buffers/workspace remain alive through the benchmark;
+        // the harness serializes and drains the stream.
+        unsafe {
+            fused.enqueue_argmax_kn(
+                &stream,
+                &hidden,
+                lm_head,
+                &candidate_value,
+                &candidate_index,
+                config.hidden_size,
+                config.vocab_size,
+                &candidate_workspace,
+            )
+        }
+    })?;
 
     let winner_after = assert_same_winner(
         &stream,

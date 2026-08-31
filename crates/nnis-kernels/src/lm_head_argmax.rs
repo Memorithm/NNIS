@@ -172,16 +172,12 @@ impl F32LmHeadArgmax {
             )));
         }
         let shared_memory_bytes = block_size
-            .checked_mul(
-                (std::mem::size_of::<f32>() + std::mem::size_of::<u32>()) as u32,
-            )
+            .checked_mul((std::mem::size_of::<f32>() + std::mem::size_of::<u32>()) as u32)
             .ok_or_else(|| {
                 NnisError::invalid_input("LM-head argmax shared-memory size overflows")
             })?;
-        let code = compiler.compile_cubin(
-            LM_HEAD_ARGMAX_SOURCE,
-            &CompileOptions::for_device(context),
-        )?;
+        let code =
+            compiler.compile_cubin(LM_HEAD_ARGMAX_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let candidates = module.get_function("nnis_lm_head_argmax_candidates_f32")?;
         let reduce = module.get_function("nnis_lm_head_argmax_reduce_f32")?;
@@ -193,9 +189,7 @@ impl F32LmHeadArgmax {
                     attributes.max_threads_per_block
                 )));
             }
-            if shared_memory_bytes as usize
-                > attributes.max_dynamic_shared_memory_bytes as usize
-            {
+            if shared_memory_bytes as usize > attributes.max_dynamic_shared_memory_bytes as usize {
                 return Err(NnisError::invalid_input(format!(
                     "LM-head argmax requires {shared_memory_bytes} shared-memory bytes; function limit is {}",
                     attributes.max_dynamic_shared_memory_bytes
@@ -324,18 +318,14 @@ impl F32LmHeadArgmax {
         })?;
         let shared_memory_bytes = self
             .block_size
-            .checked_mul(
-                (std::mem::size_of::<f32>() + std::mem::size_of::<u32>()) as u32,
-            )
+            .checked_mul((std::mem::size_of::<f32>() + std::mem::size_of::<u32>()) as u32)
             .ok_or_else(|| {
                 NnisError::invalid_input("LM-head argmax shared-memory size overflows")
             })?;
 
-        let candidate_config = LaunchConfig::new(
-            Dim3::x(candidate_count_u32),
-            Dim3::x(self.block_size),
-        )
-        .with_dynamic_shared_memory(shared_memory_bytes);
+        let candidate_config =
+            LaunchConfig::new(Dim3::x(candidate_count_u32), Dim3::x(self.block_size))
+                .with_dynamic_shared_memory(shared_memory_bytes);
         let mut candidate_args = KernelArgs::with_capacity(6, 4);
         candidate_args
             .push_buffer(input)
