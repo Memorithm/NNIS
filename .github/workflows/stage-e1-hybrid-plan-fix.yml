@@ -1,0 +1,70 @@
+name: Repair E1 hybrid staging
+on:
+  push:
+    branches: [perf/e1-hybrid-projection-plan]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/e1-hybrid-projection-plan
+          fetch-depth: 0
+      - name: Reuse generator and repair map entry
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path('.github/workflows/stage-e1-hybrid-plan.yml').read_text().splitlines()
+          marker = '      - name: Add explicit projection plan and opt-in runtime dispatch'
+          start = workflow.index(marker)
+          run_line = next(i for i in range(start + 1, len(workflow)) if workflow[i] == '        run: |')
+          body = []
+          for line in workflow[run_line + 1:]:
+              if line.startswith('      - name:'):
+                  break
+              if line.startswith('          '):
+                  body.append(line[10:])
+              elif not line.strip():
+                  body.append('')
+              else:
+                  raise SystemExit(f'unexpected staging indentation: {line!r}')
+          Path('/tmp/e1-generate.sh').write_text('\n'.join(body) + '\n')
+          PY
+          bash /tmp/e1-generate.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/nnis-model/src/runtime.rs')
+          s = p.read_text()
+          old = '''                if !gemv_by_block_size.contains_key(&block_size) {
+                      let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;
+                      gemv_by_block_size.insert(block_size, kernel);
+                  }'''
+          new = '''                if let std::collections::btree_map::Entry::Vacant(entry) =
+                      gemv_by_block_size.entry(block_size)
+                  {
+                      let kernel = F32Gemv::load_with_block_size(context, compiler, block_size)?;
+                      entry.insert(kernel);
+                  }'''
+          if old not in s:
+              raise SystemExit('expected map-entry staging fragment not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Validate repaired E1 plan
+        run: |
+          cargo fmt --all
+          cargo check --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked -p nnis-model --lib
+          cargo test --locked -p nnis-kernels --lib
+          cargo check --locked -p nnis-bench --example smollm2_e2e
+      - name: Commit clean E1 source only
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/stage-e1-hybrid-plan.yml .github/workflows/stage-e1-hybrid-plan-fix.yml
+          git add crates/nnis-model/src/projection_plan.rs crates/nnis-model/src/lib.rs crates/nnis-model/src/runtime.rs crates/nnis-bench/examples/smollm2_e2e.rs
+          git commit -m "perf(model): add opt-in E1 hybrid projection plan"
+          git push origin HEAD:perf/e1-hybrid-projection-plan
