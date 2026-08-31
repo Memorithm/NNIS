@@ -82,23 +82,8 @@ fn benchmark_case(
     let gemm_output = DeviceBuffer::<f32>::new(context, case.n)?;
     let gemv_output = DeviceBuffer::<f32>::new(context, case.n)?;
 
-    gemm.gemm(
-        stream,
-        &input,
-        &weight,
-        &gemm_output,
-        1,
-        case.n,
-        case.k,
-    )?;
-    gemv.project_kn(
-        stream,
-        &input,
-        &weight,
-        &gemv_output,
-        case.k,
-        case.n,
-    )?;
+    gemm.gemm(stream, &input, &weight, &gemm_output, 1, case.n, case.k)?;
+    gemv.project_kn(stream, &input, &weight, &gemv_output, case.k, case.n)?;
     compare_bits(
         case.name,
         &gemm_output.to_vec(stream)?,
@@ -118,17 +103,7 @@ fn benchmark_case(
 
     let gemm_report = benchmark_gpu(context, stream, base_case, config, || {
         // SAFETY: all buffers outlive the benchmark and the harness drains the stream.
-        unsafe {
-            gemm.enqueue_gemm(
-                stream,
-                &input,
-                &weight,
-                &gemm_output,
-                1,
-                case.n,
-                case.k,
-            )
-        }
+        unsafe { gemm.enqueue_gemm(stream, &input, &weight, &gemm_output, 1, case.n, case.k) }
     })?;
     let gemv_report = benchmark_gpu(context, stream, candidate_case, config, || {
         // SAFETY: all buffers outlive the benchmark and the harness drains the stream.
