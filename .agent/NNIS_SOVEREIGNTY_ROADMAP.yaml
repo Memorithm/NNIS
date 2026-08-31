@@ -71,6 +71,15 @@ promotion_policy:
     implicit speed claim.
 
 verified_history:
+  agent_bootstrap_v1:
+    status: merged
+    pr: 55
+    merge_sha: fadf0078093332729921e7c4c736a324178e6aa7
+    guarantees:
+      - root_AGENTS_md_requires_roadmap_read_before_major_agent_work
+      - GitHub_agent_instructions_mirror_the_bootstrap_contract
+      - roadmap_reread_required_after_strategy_or_physical_promotion_state_changes
+      - major_decisions_fail_closed_if_roadmap_is_unavailable
   environment_fingerprint_v1:
     status: merged
     merge_sha: 06020d3c6873d3ad34145f2ce3957b2d085a647e
@@ -96,9 +105,12 @@ verified_history:
       Isolated gain was smaller than or comparable to reference variation, so no
       end-to-end promotion was justified.
   W1_lm_head_BF16_weight:
-    status: active_candidate_only
+    status: candidate_infrastructure_merged_pending_physical_sweep
     pr: 54
     candidate_head: cf15c2b3c4b78d5f2935d1e917fcc8c19f7b3546
+    merge_sha: f39ebbbba6952c6b96476d17c13eccf868471440
+    runtime_promotion: false
+    model_format_change: false
     hypothesis: >-
       Keep activation/output f32, store only LM-head weights as BF16, widen to f32
       in-kernel, and preserve increasing-K fmaf accumulation.
@@ -150,7 +162,7 @@ roadmap:
       Logical weights remain fixed; physical representation may vary per tensor,
       component or layer only through explicit, versioned plans.
     sequence:
-      - W1 LM-head BF16-only candidate
+      - complete W1 LM-head BF16 isolated physical sweep
       - if justified, introduce representation plan schema separate from kernel plan
       - support heterogeneous f32/BF16 execution without breaking model format v1
       - later evaluate lower-bit or structured representations only when executable
