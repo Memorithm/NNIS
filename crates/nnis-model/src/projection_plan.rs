@@ -65,6 +65,23 @@ impl F32ProjectionPlan {
         }
     }
 
+    /// W1 end-to-end candidate kernel axis: only the LM-head uses GEMV32.
+    ///
+    /// The physical W1 sweep selected block 32 for the BF16-weight primitive.
+    /// This constructor changes only execution geometry; it does not select
+    /// BF16 storage. Callers must opt into the separate weight representation
+    /// plan explicitly. This is candidate-only until end-to-end evidence exists.
+    #[must_use]
+    pub const fn w1_smollm2_lm_head_gemv32_candidate() -> Self {
+        Self {
+            q_o: F32ProjectionKernel::Gemm,
+            k_v: F32ProjectionKernel::Gemm,
+            gate_up: F32ProjectionKernel::Gemm,
+            down: F32ProjectionKernel::Gemm,
+            lm_head: F32ProjectionKernel::Gemv { block_size: 32 },
+        }
+    }
+
     pub fn validate(self) -> Result<()> {
         for choice in [self.q_o, self.k_v, self.gate_up, self.down, self.lm_head] {
             choice.validate()?;
@@ -102,6 +119,17 @@ mod tests {
         assert_eq!(plan.gate_up, F32ProjectionKernel::Gemm);
         assert_eq!(plan.down, F32ProjectionKernel::Gemm);
         assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 64 });
+        plan.validate().unwrap();
+    }
+
+    #[test]
+    fn w1_candidate_changes_only_lm_head_geometry() {
+        let plan = F32ProjectionPlan::w1_smollm2_lm_head_gemv32_candidate();
+        assert_eq!(plan.q_o, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.k_v, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.gate_up, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.down, F32ProjectionKernel::Gemm);
+        assert_eq!(plan.lm_head, F32ProjectionKernel::Gemv { block_size: 32 });
         plan.validate().unwrap();
     }
 
