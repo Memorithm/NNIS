@@ -69,9 +69,7 @@ impl ProjectionKernels {
                     }
                 };
                 Some(F32Bf16Gemv::load_with_block_size(
-                    context,
-                    compiler,
-                    block_size,
+                    context, compiler, block_size,
                 )?)
             }
         };
@@ -399,8 +397,7 @@ impl Model {
                 // SAFETY: forwarded from the caller with the same lifetime contract.
                 unsafe {
                     self.elementwise.enqueue_silu(stream, gate, activated)?;
-                    self.decoder
-                        .enqueue_multiply(stream, activated, up, gated)
+                    self.decoder.enqueue_multiply(stream, activated, up, gated)
                 }
             }
             F32SiluMultiplyKernel::Fused { .. } => {
