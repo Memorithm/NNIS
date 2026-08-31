@@ -1,0 +1,126 @@
+name: Stage SmolLM2 validation policy
+
+on:
+  push:
+    branches: [product/smollm2-validation-policy]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add explicit report policy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/nnis-model/examples/compare_smollm2_135m.rs")
+          text = path.read_text()
+
+          anchor = '''const SOURCE_MODEL_SHA256: &str =\n    "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1";\n'''
+          enum_code = '''\n#[derive(Debug, Clone, Copy, PartialEq, Eq)]\nenum LogitPolicy {\n    Strict,\n    Report,\n}\n\nimpl LogitPolicy {\n    fn parse(value: &str) -> std::result::Result<Self, String> {\n        match value {\n            "strict" => Ok(Self::Strict),\n            "report" => Ok(Self::Report),\n            other => Err(format!(\n                "invalid --logit-policy {other:?}; expected strict or report"\n            )),\n        }\n    }\n\n    fn as_str(self) -> &'static str {\n        match self {\n            Self::Strict => "strict",\n            Self::Report => "report",\n        }\n    }\n}\n'''
+          if 'enum LogitPolicy' not in text:
+              if anchor not in text:
+                  raise SystemExit('source hash anchor missing')
+              text = text.replace(anchor, anchor + enum_code, 1)
+
+          text = text.replace(
+              '''    atol: f32,\n    rtol: f32,\n}''',
+              '''    atol: f32,\n    rtol: f32,\n    logit_policy: LogitPolicy,\n}''',
+              1,
+          )
+          text = text.replace(
+              '''    failures: usize,\n}''',
+              '''    failures: usize,\n    non_finite: usize,\n}''',
+              1,
+          )
+          text = text.replace(
+              '''    let mut atol = 1.0e-4_f32;\n    let mut rtol = 1.0e-3_f32;''',
+              '''    let mut atol = 1.0e-4_f32;\n    let mut rtol = 1.0e-3_f32;\n    let mut logit_policy = LogitPolicy::Strict;''',
+              1,
+          )
+          parse_anchor = '''            "--rtol" => {\n                rtol = args\n                    .next()\n                    .ok_or("--rtol requires a value")?\n                    .parse()\n                    .map_err(|error| format!("invalid --rtol: {error}"))?;\n            }\n'''
+          parse_code = '''            "--logit-policy" => {\n                logit_policy = LogitPolicy::parse(\n                    &args.next().ok_or("--logit-policy requires strict or report")?,\n                )?;\n            }\n'''
+          if '"--logit-policy" =>' not in text:
+              if parse_anchor not in text:
+                  raise SystemExit('rtol parse anchor missing')
+              text = text.replace(parse_anchor, parse_anchor + parse_code, 1)
+
+          text = text.replace(
+              'usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32]',
+              'usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32] [--logit-policy strict|report]',
+              1,
+          )
+          text = text.replace(
+              '''        atol,\n        rtol,\n    })''',
+              '''        atol,\n        rtol,\n        logit_policy,\n    })''',
+              1,
+          )
+          text = text.replace(
+              '''        failures: 0,\n    };''',
+              '''        failures: 0,\n        non_finite: 0,\n    };''',
+              1,
+          )
+          old_condition = '''        if !actual.is_finite() || absolute > atol + rtol * expected.abs() {\n            metrics.failures += 1;\n        }'''
+          new_condition = '''        if !actual.is_finite() {\n            metrics.non_finite += 1;\n            metrics.failures += 1;\n        } else if absolute > atol + rtol * expected.abs() {\n            metrics.failures += 1;\n        }'''
+          if old_condition in text:
+              text = text.replace(old_condition, new_condition, 1)
+
+          text = text.replace(
+              '''    rtol: f32,\n) -> Result<()> {\n    let metrics = compare(actual, expected, atol, rtol);''',
+              '''    rtol: f32,\n    logit_policy: LogitPolicy,\n) -> Result<()> {\n    let metrics = compare(actual, expected, atol, rtol);''',
+              1,
+          )
+          old_reject = '''    if metrics.failures != 0 {\n        return Err(NnisError::invalid_input(format!(\n            "{label} differs from trusted reference at {} logits (atol={atol}, rtol={rtol})",\n            metrics.failures\n        )));\n    }\n    Ok(())'''
+          new_reject = '''    if metrics.non_finite != 0 {\n        return Err(NnisError::invalid_input(format!(\n            "{label} contains {} non-finite NNIS logits",\n            metrics.non_finite\n        )));\n    }\n    if logit_policy == LogitPolicy::Strict && metrics.failures != 0 {\n        return Err(NnisError::invalid_input(format!(\n            "{label} differs from trusted reference at {} logits (atol={atol}, rtol={rtol})",\n            metrics.failures\n        )));\n    }\n    if logit_policy == LogitPolicy::Report && metrics.failures != 0 {\n        println!(\n            "{label}: report policy observed {} values outside the supplied tolerance; numeric equivalence is not asserted",\n            metrics.failures\n        );\n    }\n    Ok(())'''
+          if old_reject in text:
+              text = text.replace(old_reject, new_reject, 1)
+
+          text = text.replace(
+              '''    println!("atol={} rtol={}", arguments.atol, arguments.rtol);''',
+              '''    println!("atol={} rtol={}", arguments.atol, arguments.rtol);\n    println!("logit_policy={}", arguments.logit_policy.as_str());''',
+              1,
+          )
+
+          # Add the policy argument to both report calls.
+          text = text.replace(
+              '''        arguments.atol,\n        arguments.rtol,\n    )?;''',
+              '''        arguments.atol,\n        arguments.rtol,\n        arguments.logit_policy,\n    )?;''',
+              1,
+          )
+          text = text.replace(
+              '''            arguments.atol,\n            arguments.rtol,\n        )?;''',
+              '''            arguments.atol,\n            arguments.rtol,\n            arguments.logit_policy,\n        )?;''',
+              1,
+          )
+
+          text = text.replace(
+              '''    println!("greedy_ids={generated:?}");\n    println!("SmolLM2 reference comparison passed");''',
+              '''    println!("greedy_ids={generated:?}");\n    match arguments.logit_policy {\n        LogitPolicy::Strict => println!("SmolLM2 strict reference comparison passed"),\n        LogitPolicy::Report => println!(\n            "SmolLM2 semantic trajectory passed; numeric equivalence is not asserted"\n        ),\n    }''',
+              1,
+          )
+
+          path.write_text(text)
+          PY
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+      - name: Commit staged changes
+        run: |
+          if ! git diff --quiet; then
+            git config user.name MEMOPERF
+            git config user.email contact@checkupauto.fr
+            git add crates/nnis-model/examples/compare_smollm2_135m.rs
+            git commit -m "feat(model): separate strict and report logit validation"
+            git push origin HEAD:product/smollm2-validation-policy
+          fi
