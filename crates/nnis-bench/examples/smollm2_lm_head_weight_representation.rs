@@ -328,6 +328,10 @@ fn run(arguments: Arguments) -> Result<Report> {
         },
     )?;
 
+    reference
+        .metadata
+        .require_compatible_environment(&candidate.metadata)?;
+
     let reference_after = reference_output.to_vec(&stream)?;
     let candidate_after = candidate_output.to_vec(&stream)?;
     for (index, (&candidate, &reference)) in
