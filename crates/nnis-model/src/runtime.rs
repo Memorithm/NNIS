@@ -1,9 +1,13 @@
 use crate::{
-    load_model_directory, F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan,
-    F32RuntimeKernels, GenerationConfig, ModelConfig, ModelWeights, WeightDType,
+    load_model_directory, load_model_directory_with_representation_plan, DeviceTensor,
+    F32DecoderKernels, F32ProjectionKernel, F32ProjectionPlan, F32RuntimeKernels,
+    GenerationConfig, ModelConfig, ModelWeights, PhysicalWeightRepresentation,
+    WeightDType, WeightRepresentationPlan,
 };
 use nnis_jit::JitCompiler;
-use nnis_kernels::{F32Elementwise, F32Gather, F32Gemm, F32Gemv, F32TopK, F32TopKWorkspace};
+use nnis_kernels::{
+    F32Bf16Gemv, F32Elementwise, F32Gather, F32Gemm, F32Gemv, F32TopK, F32TopKWorkspace,
+};
 use nnis_rt::{Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, NnisError, Result, Stream};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -21,17 +25,29 @@ enum ProjectionFamily {
 #[derive(Debug)]
 struct ProjectionKernels {
     gemv_by_block_size: BTreeMap<u32, F32Gemv>,
+    bf16_lm_head_gemv: Option<F32Bf16Gemv>,
 }
 
 impl ProjectionKernels {
     fn load(
         context: &Arc<Context>,
         compiler: &JitCompiler,
-        plan: F32ProjectionPlan,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
     ) -> Result<Self> {
-        plan.validate()?;
+        projection_plan.validate()?;
+        representation_plan.validate()?;
         let mut gemv_by_block_size = BTreeMap::new();
-        for choice in [plan.q_o, plan.k_v, plan.gate_up, plan.down, plan.lm_head] {
+        let mut f32_choices = vec![
+            projection_plan.q_o,
+            projection_plan.k_v,
+            projection_plan.gate_up,
+            projection_plan.down,
+        ];
+        if representation_plan.lm_head == PhysicalWeightRepresentation::F32 {
+            f32_choices.push(projection_plan.lm_head);
+        }
+        for choice in f32_choices {
             if let F32ProjectionKernel::Gemv { block_size } = choice {
                 if let std::collections::btree_map::Entry::Vacant(entry) =
                     gemv_by_block_size.entry(block_size)
@@ -41,7 +57,28 @@ impl ProjectionKernels {
                 }
             }
         }
-        Ok(Self { gemv_by_block_size })
+        let bf16_lm_head_gemv = match representation_plan.lm_head {
+            PhysicalWeightRepresentation::F32 => None,
+            PhysicalWeightRepresentation::Bf16 => {
+                let block_size = match projection_plan.lm_head {
+                    F32ProjectionKernel::Gemv { block_size } => block_size,
+                    F32ProjectionKernel::Gemm => {
+                        return Err(NnisError::unsupported(
+                            "BF16 LM-head representation currently requires an explicit GEMV kernel plan",
+                        ));
+                    }
+                };
+                Some(F32Bf16Gemv::load_with_block_size(
+                    context,
+                    compiler,
+                    block_size,
+                )?)
+            }
+        };
+        Ok(Self {
+            gemv_by_block_size,
+            bf16_lm_head_gemv,
+        })
     }
 
     fn gemv(&self, block_size: u32) -> Result<&F32Gemv> {
@@ -49,6 +86,12 @@ impl ProjectionKernels {
             NnisError::unsupported(format!(
                 "projection plan selected unavailable GEMV block size {block_size}"
             ))
+        })
+    }
+
+    fn bf16_lm_head_gemv(&self) -> Result<&F32Bf16Gemv> {
+        self.bf16_lm_head_gemv.as_ref().ok_or_else(|| {
+            NnisError::unsupported("BF16 LM-head GEMV was not loaded for this representation plan")
         })
     }
 }
@@ -62,6 +105,7 @@ pub struct Model {
     gather: F32Gather,
     gemm: F32Gemm,
     projection_plan: F32ProjectionPlan,
+    representation_plan: WeightRepresentationPlan,
     projection_kernels: ProjectionKernels,
     elementwise: F32Elementwise,
     top_k: F32TopK,
@@ -73,7 +117,13 @@ pub struct Model {
 
 impl Model {
     pub fn new(config: ModelConfig, weights: ModelWeights, stream: &Stream) -> Result<Self> {
-        Self::new_with_projection_plan(config, weights, stream, F32ProjectionPlan::baseline_gemm())
+        Self::new_with_plans(
+            config,
+            weights,
+            stream,
+            F32ProjectionPlan::baseline_gemm(),
+            WeightRepresentationPlan::all_f32(),
+        )
     }
 
     pub fn new_with_projection_plan(
@@ -82,14 +132,31 @@ impl Model {
         stream: &Stream,
         projection_plan: F32ProjectionPlan,
     ) -> Result<Self> {
+        Self::new_with_plans(
+            config,
+            weights,
+            stream,
+            projection_plan,
+            WeightRepresentationPlan::all_f32(),
+        )
+    }
+
+    pub fn new_with_plans(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+    ) -> Result<Self> {
         projection_plan.validate()?;
+        representation_plan.validate()?;
         config.validate_execution_support()?;
         if config.weight_dtype != WeightDType::F32 {
             return Err(NnisError::unsupported(
-                "the first decoder execution path currently requires f32 model weights",
+                "the first decoder execution path currently requires an f32 model-format-v1 base graph",
             ));
         }
-        weights.validate(&config)?;
+        representation_plan.validate_weights(&config, &weights)?;
         if !Arc::ptr_eq(weights.context(), stream.ctx()) {
             return Err(NnisError::invalid_input(
                 "model weights and construction stream must share one CUDA context",
@@ -99,7 +166,12 @@ impl Model {
         let compiler = JitCompiler::new();
         let gather = F32Gather::load(&context, &compiler)?;
         let gemm = F32Gemm::load(&context, &compiler)?;
-        let projection_kernels = ProjectionKernels::load(&context, &compiler, projection_plan)?;
+        let projection_kernels = ProjectionKernels::load(
+            &context,
+            &compiler,
+            projection_plan,
+            representation_plan,
+        )?;
         let elementwise = F32Elementwise::load(&context, &compiler)?;
         let top_k = F32TopK::load(&context, &compiler)?;
         let decoder = F32DecoderKernels::load(&context, &compiler)?;
@@ -114,6 +186,7 @@ impl Model {
             gather,
             gemm,
             projection_plan,
+            representation_plan,
             projection_kernels,
             elementwise,
             top_k,
@@ -143,6 +216,28 @@ impl Model {
         Self::new_with_projection_plan(config, weights, stream, projection_plan)
     }
 
+    pub fn load_directory_with_plans(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        projection_plan: F32ProjectionPlan,
+        representation_plan: WeightRepresentationPlan,
+    ) -> Result<Self> {
+        let (config, weights) = load_model_directory_with_representation_plan(
+            context,
+            stream,
+            directory,
+            representation_plan,
+        )?;
+        Self::new_with_plans(
+            config,
+            weights,
+            stream,
+            projection_plan,
+            representation_plan,
+        )
+    }
+
     pub fn config(&self) -> &ModelConfig {
         &self.config
     }
@@ -150,6 +245,11 @@ impl Model {
     #[must_use]
     pub const fn projection_plan(&self) -> F32ProjectionPlan {
         self.projection_plan
+    }
+
+    #[must_use]
+    pub const fn representation_plan(&self) -> WeightRepresentationPlan {
+        self.representation_plan
     }
 
     fn projection_choice(&self, family: ProjectionFamily) -> F32ProjectionKernel {
@@ -185,6 +285,47 @@ impl Model {
                 let gemv = self.projection_kernels.gemv(block_size)?;
                 // SAFETY: forwarded from the caller with the same buffer lifetime contract.
                 unsafe { gemv.enqueue_project_kn(stream, input, weight, output, k, n) }
+            }
+        }
+    }
+
+    unsafe fn enqueue_lm_head(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        weight: &DeviceTensor,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        match self.representation_plan.lm_head {
+            PhysicalWeightRepresentation::F32 => {
+                let weight = weight.as_f32()?;
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe {
+                    self.enqueue_projection(
+                        stream,
+                        ProjectionFamily::LmHead,
+                        input,
+                        weight,
+                        output,
+                        k,
+                        n,
+                    )
+                }
+            }
+            PhysicalWeightRepresentation::Bf16 => {
+                let weight = match weight {
+                    DeviceTensor::Bf16(buffer) => buffer.as_ref(),
+                    DeviceTensor::F32(_) => {
+                        return Err(NnisError::invalid_input(
+                            "representation plan selects BF16 LM-head but resident tensor is f32",
+                        ));
+                    }
+                };
+                let kernel = self.projection_kernels.bf16_lm_head_gemv()?;
+                // SAFETY: forwarded from the caller with the same lifetime contract.
+                unsafe { kernel.enqueue_project_kn(stream, input, weight, output, k, n) }
             }
         }
     }
@@ -664,11 +805,10 @@ impl<'model> InferenceSession<'model> {
                 config.hidden_size,
                 config.rms_norm_eps,
             )?;
-            self.model.enqueue_projection(
+            self.model.enqueue_lm_head(
                 &self.stream,
-                ProjectionFamily::LmHead,
                 &self.workspace.normed,
-                self.model.weights.lm_head.tensor().as_f32()?,
+                self.model.weights.lm_head.tensor(),
                 &self.workspace.logits,
                 config.hidden_size,
                 config.vocab_size,
@@ -798,7 +938,7 @@ mod tests {
             weight_dtype: WeightDType::F32,
         };
         let embedding = vec![
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
         ];
         let zeros = vec![0.0_f32; 16];
         let kv_zeros = vec![0.0_f32; 8];
