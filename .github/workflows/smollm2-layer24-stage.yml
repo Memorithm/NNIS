@@ -1,0 +1,68 @@
+name: Stage SmolLM2 layer 24 block diagnostic
+
+on:
+  push:
+    branches: [research/smollm2-layerwise-diagnostic]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add layer 24 observation points
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("crates/nnis-model/src/smollm2_layerwise_diagnostic.rs")
+          text = path.read_text()
+          if '"layer24.attention_projected"' not in text:
+              text = text.replace(
+                  '        let layer = &model.weights.layers[layer_index];\n        model\n            .decoder\n            .weighted_rms_norm(',
+                  '        let layer = &model.weights.layers[layer_index];\n        if layer_index == 24 {\n            report_stage(\n                "layer24.input",\n                &session.workspace.hidden,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .decoder\n            .weighted_rms_norm(',
+                  1,
+              )
+              text = text.replace(
+                  '                model.config.hidden_size,\n            )\n            .unwrap();\n        model\n            .elementwise\n            .vector_add(\n                &session.stream,\n                &session.workspace.hidden,\n                &session.workspace.projected,',
+                  '                model.config.hidden_size,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_projected",\n                &session.workspace.projected,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .elementwise\n            .vector_add(\n                &session.stream,\n                &session.workspace.hidden,\n                &session.workspace.projected,',
+                  1,
+              )
+              text = text.replace(
+                  '                &session.workspace.residual,\n            )\n            .unwrap();\n        model\n            .decoder\n            .weighted_rms_norm(\n                &session.stream,\n                &session.workspace.residual,',
+                  '                &session.workspace.residual,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_residual",\n                &session.workspace.residual,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .decoder\n            .weighted_rms_norm(\n                &session.stream,\n                &session.workspace.residual,',
+                  1,
+              )
+              text = text.replace(
+                  '                model.config.rms_norm_eps,\n            )\n            .unwrap();\n        model\n            .gemm\n            .gemm(\n                &session.stream,\n                &session.workspace.normed,\n                layer.gate_proj.tensor().as_f32().unwrap(),',
+                  '                model.config.rms_norm_eps,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.post_attention_norm",\n                &session.workspace.normed,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .gemm\n            .gemm(\n                &session.stream,\n                &session.workspace.normed,\n                layer.gate_proj.tensor().as_f32().unwrap(),',
+                  1,
+              )
+              text = text.replace(
+                  '                model.config.intermediate_size,\n            )\n            .unwrap();\n        model\n            .elementwise\n            .vector_add(\n                &session.stream,\n                &session.workspace.residual,\n                &session.workspace.mlp,',
+                  '                model.config.intermediate_size,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.mlp",\n                &session.workspace.mlp,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .elementwise\n            .vector_add(\n                &session.stream,\n                &session.workspace.residual,\n                &session.workspace.mlp,',
+                  1,
+              )
+              path.write_text(text)
+          PY
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate Rust and Python
+        run: |
+          python -m py_compile tools/smollm2_layerwise_reference.py
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p nnis-model --lib
+      - name: Commit diagnostic
+        run: |
+          if ! git diff --quiet; then
+            git config user.name MEMOPERF
+            git config user.email contact@checkupauto.fr
+            git add crates/nnis-model/src/smollm2_layerwise_diagnostic.rs tools/smollm2_layerwise_reference.py
+            git commit -m "diagnostic(model): split SmolLM2 layer 24 blocks"
+            git push origin HEAD:research/smollm2-layerwise-diagnostic
+          fi
