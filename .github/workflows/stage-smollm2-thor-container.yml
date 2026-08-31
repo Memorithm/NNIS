@@ -1,0 +1,126 @@
+name: Stage Thor Transformers container guidance
+
+on:
+  push:
+    branches:
+      - perf/smollm2-e2e-benchmark
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: perf/smollm2-e2e-benchmark
+
+      - name: Correct Thor baseline environment and provenance
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          req = Path('tools/requirements-smollm2-benchmark-gpu.txt')
+          text = req.read_text()
+          old = '''# Intentionally does NOT pin/install torch. On Jetson AGX Thor, install a
+          # CUDA-enabled SBSA/aarch64 PyTorch build first (for example from PyTorch's
+          # cu130 index when the host is on CUDA 13.0), then install this file. Keeping
+          # torch separate prevents this benchmark environment from replacing the
+          # torch==2.4.0 CPU oracle used by tools/requirements-smollm2-135m.txt.
+          '''
+          new = '''# Intentionally does NOT pin/install torch. For Jetson AGX Thor on JetPack 7.0,
+          # NVIDIA's compatibility matrix provides the 25.08 PyTorch framework
+          # container rather than a standalone Jetson wheel. Install these Python-side
+          # dependencies inside that CUDA-enabled container. Keeping torch separate
+          # also prevents the benchmark from replacing the torch==2.4.0 CPU oracle
+          # used by tools/requirements-smollm2-135m.txt.
+          '''
+          if old not in text:
+              raise SystemExit('requirements guidance marker not found')
+          req.write_text(text.replace(old, new))
+
+          docs = Path('docs/SMOLLM2_BENCHMARK.md')
+          text = docs.read_text()
+          old = '''On Jetson AGX Thor/CUDA 13.0, keep the correctness oracle untouched and create a
+          separate GPU environment. One supported setup is to install the CUDA 13.0
+          PyTorch wheel first, then install the pinned Python-side benchmark dependencies:
+
+          ```bash
+          python3 -m venv /tmp/nnis-smollm2-gpu-venv
+          source /tmp/nnis-smollm2-gpu-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cu130
+          python -m pip install -r tools/requirements-smollm2-benchmark-gpu.txt
+          ```
+          '''
+          new = '''On Jetson AGX Thor running JetPack 7.0/CUDA 13.0, NVIDIA's Jetson
+          compatibility matrix maps the platform to the 25.08 PyTorch framework
+          container (PyTorch 2.8.0a0+34c6371d24) and does not list a standalone Jetson
+          framework wheel. NVIDIA's Thor Docker guide demonstrates the image
+          `nvcr.io/nvidia/pytorch:25.08-py3` with CUDA enabled on `NVIDIA Thor`.
+
+          Keep the CPU correctness-oracle venv untouched. Use the NVIDIA container for
+          the performance baseline, install only the pinned Python-side benchmark
+          dependencies into an ephemeral venv, and record the exact image label:
+
+          ```bash
+          IMAGE=nvcr.io/nvidia/pytorch:25.08-py3
+          docker pull "$IMAGE"
+          IMAGE_LABEL="$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE")"
+          docker run --rm --runtime=nvidia \
+            -v "$PWD:/workspace/NNIS:ro" \
+            -v "/root/.cache/huggingface:/root/.cache/huggingface" \
+            -v "/tmp:/host-tmp" \
+            -w /workspace/NNIS \
+            "$IMAGE" \
+            bash -lc '
+              python3 -m venv --system-site-packages /tmp/nnis-smollm2-gpu-venv
+              . /tmp/nnis-smollm2-gpu-venv/bin/activate
+              unset PIP_CONSTRAINT
+              python -m pip install --no-cache-dir -r tools/requirements-smollm2-benchmark-gpu.txt
+              python tools/bench_smollm2_transformers.py \
+                --device 0 \
+                --decode-steps 32 \
+                --warmups 2 \
+                --iterations 5 \
+                --environment-label "'"$IMAGE_LABEL"'" \
+                > /host-tmp/transformers-smollm2-e2e.json
+            '
+          ```
+          '''
+          if old not in text:
+              raise SystemExit('documentation wheel section marker not found')
+          docs.write_text(text.replace(old, new))
+
+          script = Path('tools/bench_smollm2_transformers.py')
+          text = script.read_text()
+          parser_marker = '    parser.add_argument("--iterations", type=int, default=5)\n'
+          parser_insert = parser_marker + '    parser.add_argument(\n        "--environment-label",\n        default=None,\n        help="Optional immutable environment/container label retained in the JSON report.",\n    )\n'
+          if parser_marker not in text or '--environment-label' in text:
+              raise SystemExit('environment-label parser marker invalid')
+          text = text.replace(parser_marker, parser_insert, 1)
+          env_marker = '            "python": platform.python_version(),\n'
+          env_insert = env_marker + '            "environment_label": args.environment_label,\n'
+          if env_marker not in text:
+              raise SystemExit('environment report marker not found')
+          script.write_text(text.replace(env_marker, env_insert, 1))
+          PY
+
+      - name: Validate staged changes
+        run: |
+          python3 -m py_compile tools/bench_smollm2_transformers.py
+          python3 tools/bench_smollm2_transformers.py --help >/dev/null
+
+      - name: Commit staged changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/SMOLLM2_BENCHMARK.md tools/bench_smollm2_transformers.py tools/requirements-smollm2-benchmark-gpu.txt
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          git commit -m "bench: use NVIDIA Thor PyTorch container baseline"
+          git push origin HEAD:perf/smollm2-e2e-benchmark
