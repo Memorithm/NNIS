@@ -4,7 +4,8 @@
 This is checkpoint-specific and diagnostic-only. It loads the same pinned
 SmolLM2-135M checkpoint used by the NNIS trained-model qualification harness,
 widens the persisted BF16 weights to f32, and records the last-token hidden
-vector after every decoder layer plus the final RMSNorm output.
+vector after every decoder layer plus a focused layer-24 block trace and the
+final RMSNorm output.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ TRANSFORMERS_VERSION = "4.40.1"
 INPUT_IDS = [22007, 6463, 314]
 HIDDEN_SIZE = 576
 LAYERS = 30
+TARGET_LAYER = 24
 
 
 def sha256(path: Path) -> str:
@@ -41,6 +43,10 @@ def write_f32(path: Path, tensor: torch.Tensor) -> None:
     if vector.ndim != 1 or vector.numel() != HIDDEN_SIZE:
         raise RuntimeError(f"expected [{HIDDEN_SIZE}] vector, got {tuple(vector.shape)}")
     vector.numpy().astype("<f4", copy=False).tofile(path)
+
+
+def last_token(tensor: torch.Tensor) -> torch.Tensor:
+    return tensor[0, -1].detach().float().cpu().clone()
 
 
 def main() -> None:
@@ -80,13 +86,34 @@ def main() -> None:
         )
 
     captured: dict[int, torch.Tensor] = {}
+    block: dict[str, torch.Tensor] = {}
     handles = []
     for index, layer in enumerate(model.model.layers):
         def capture(_module, _inputs, output, *, layer_index=index):
             hidden = output[0] if isinstance(output, tuple) else output
-            captured[layer_index] = hidden[0, -1].detach().float().cpu().clone()
+            captured[layer_index] = last_token(hidden)
 
         handles.append(layer.register_forward_hook(capture))
+
+    target = model.model.layers[TARGET_LAYER]
+
+    def capture_input(_module, inputs):
+        block["input"] = last_token(inputs[0])
+
+    def capture_attention(_module, _inputs, output):
+        attention = output[0] if isinstance(output, tuple) else output
+        block["attention_projected"] = last_token(attention)
+
+    def capture_post_attention_norm(_module, _inputs, output):
+        block["post_attention_norm"] = last_token(output)
+
+    def capture_mlp(_module, _inputs, output):
+        block["mlp"] = last_token(output)
+
+    handles.append(target.register_forward_pre_hook(capture_input))
+    handles.append(target.self_attn.register_forward_hook(capture_attention))
+    handles.append(target.post_attention_layernorm.register_forward_hook(capture_post_attention_norm))
+    handles.append(target.mlp.down_proj.register_forward_hook(capture_mlp))
 
     ids = torch.tensor([INPUT_IDS], dtype=torch.long)
     with torch.inference_mode():
@@ -98,6 +125,10 @@ def main() -> None:
         handle.remove()
     if set(captured) != set(range(LAYERS)):
         raise RuntimeError(f"missing layer captures: {sorted(set(range(LAYERS)) - set(captured))}")
+    expected_block = {"input", "attention_projected", "post_attention_norm", "mlp"}
+    if set(block) != expected_block:
+        raise RuntimeError(f"missing layer-{TARGET_LAYER} block captures: {sorted(expected_block - set(block))}")
+    block["attention_residual"] = block["input"] + block["attention_projected"]
 
     args.output.mkdir(parents=True, exist_ok=True)
     stages = []
@@ -110,6 +141,11 @@ def main() -> None:
     store("embedding", embedding)
     for index in range(LAYERS):
         store(f"layer{index:02d}.hidden", captured[index])
+    store(f"layer{TARGET_LAYER:02d}.input", block["input"])
+    store(f"layer{TARGET_LAYER:02d}.attention_projected", block["attention_projected"])
+    store(f"layer{TARGET_LAYER:02d}.attention_residual", block["attention_residual"])
+    store(f"layer{TARGET_LAYER:02d}.post_attention_norm", block["post_attention_norm"])
+    store(f"layer{TARGET_LAYER:02d}.mlp", block["mlp"])
     store("final_norm", final_norm)
 
     manifest = {
