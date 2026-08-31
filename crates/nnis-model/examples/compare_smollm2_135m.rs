@@ -10,6 +10,31 @@ const SOURCE_REVISION: &str = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2";
 const SOURCE_MODEL_SHA256: &str =
     "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogitPolicy {
+    Strict,
+    Report,
+}
+
+impl LogitPolicy {
+    fn parse(value: &str) -> std::result::Result<Self, String> {
+        match value {
+            "strict" => Ok(Self::Strict),
+            "report" => Ok(Self::Report),
+            other => Err(format!(
+                "invalid --logit-policy {other:?}; expected strict or report"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Report => "report",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct ReferenceManifest {
     format: String,
@@ -34,6 +59,7 @@ struct Arguments {
     reference_dir: PathBuf,
     atol: f32,
     rtol: f32,
+    logit_policy: LogitPolicy,
 }
 
 #[derive(Debug)]
@@ -43,6 +69,7 @@ struct ErrorMetrics {
     rms: f64,
     worst_index: usize,
     failures: usize,
+    non_finite: usize,
 }
 
 fn parse_arguments() -> std::result::Result<Arguments, String> {
@@ -53,6 +80,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     // Physical-CUDA qualification must report measured errors before release.
     let mut atol = 1.0e-4_f32;
     let mut rtol = 1.0e-3_f32;
+    let mut logit_policy = LogitPolicy::Strict;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--model" => {
@@ -79,9 +107,16 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .parse()
                     .map_err(|error| format!("invalid --rtol: {error}"))?;
             }
+            "--logit-policy" => {
+                logit_policy = LogitPolicy::parse(
+                    &args
+                        .next()
+                        .ok_or("--logit-policy requires strict or report")?,
+                )?;
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32]"
+                    "usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32] [--logit-policy strict|report]"
                         .to_string(),
                 );
             }
@@ -96,6 +131,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
         reference_dir: reference_dir.ok_or("missing --reference DIR")?,
         atol,
         rtol,
+        logit_policy,
     })
 }
 
@@ -180,6 +216,7 @@ fn compare(actual: &[f32], expected: &[f32], atol: f32, rtol: f32) -> ErrorMetri
         rms: 0.0,
         worst_index: 0,
         failures: 0,
+        non_finite: 0,
     };
     let mut squared_sum = 0.0_f64;
     for (index, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
@@ -199,7 +236,10 @@ fn compare(actual: &[f32], expected: &[f32], atol: f32, rtol: f32) -> ErrorMetri
         }
         metrics.max_rel = metrics.max_rel.max(relative);
         squared_sum += f64::from(absolute) * f64::from(absolute);
-        if !actual.is_finite() || absolute > atol + rtol * expected.abs() {
+        if !actual.is_finite() {
+            metrics.non_finite += 1;
+            metrics.failures += 1;
+        } else if absolute > atol + rtol * expected.abs() {
             metrics.failures += 1;
         }
     }
@@ -225,17 +265,30 @@ fn report_and_require(
     expected: &[f32],
     atol: f32,
     rtol: f32,
+    logit_policy: LogitPolicy,
 ) -> Result<()> {
     let metrics = compare(actual, expected, atol, rtol);
     println!(
         "{label}: max_abs={:.8e} max_rel={:.8e} rms={:.8e} worst_index={} failures={}",
         metrics.max_abs, metrics.max_rel, metrics.rms, metrics.worst_index, metrics.failures
     );
-    if metrics.failures != 0 {
+    if metrics.non_finite != 0 {
+        return Err(NnisError::invalid_input(format!(
+            "{label} contains {} non-finite NNIS logits",
+            metrics.non_finite
+        )));
+    }
+    if logit_policy == LogitPolicy::Strict && metrics.failures != 0 {
         return Err(NnisError::invalid_input(format!(
             "{label} differs from trusted reference at {} logits (atol={atol}, rtol={rtol})",
             metrics.failures
         )));
+    }
+    if logit_policy == LogitPolicy::Report && metrics.failures != 0 {
+        println!(
+            "{label}: report policy observed {} values outside the supplied tolerance; numeric equivalence is not asserted",
+            metrics.failures
+        );
     }
     Ok(())
 }
@@ -288,6 +341,7 @@ fn run(arguments: Arguments) -> Result<()> {
     println!("prompt={:?}", reference.prompt);
     println!("input_ids={:?}", reference.input_ids);
     println!("atol={} rtol={}", arguments.atol, arguments.rtol);
+    println!("logit_policy={}", arguments.logit_policy.as_str());
 
     let mut actual_logits = session.prefill(&reference.input_ids)?;
     let expected_prefill = read_f32_le(
@@ -300,6 +354,7 @@ fn run(arguments: Arguments) -> Result<()> {
         &expected_prefill,
         arguments.atol,
         arguments.rtol,
+        arguments.logit_policy,
     )?;
 
     for step in 0..reference.decode_steps {
@@ -318,6 +373,7 @@ fn run(arguments: Arguments) -> Result<()> {
             &expected,
             arguments.atol,
             arguments.rtol,
+            arguments.logit_policy,
         )?;
     }
 
@@ -332,7 +388,12 @@ fn run(arguments: Arguments) -> Result<()> {
         )));
     }
     println!("greedy_ids={generated:?}");
-    println!("SmolLM2 reference comparison passed");
+    match arguments.logit_policy {
+        LogitPolicy::Strict => println!("SmolLM2 strict reference comparison passed"),
+        LogitPolicy::Report => {
+            println!("SmolLM2 semantic trajectory passed; numeric equivalence is not asserted")
+        }
+    }
     Ok(())
 }
 
