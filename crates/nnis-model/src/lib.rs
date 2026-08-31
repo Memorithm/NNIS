@@ -6,6 +6,7 @@
 
 mod config;
 mod format;
+mod fused_swiglu;
 mod kernels;
 mod projection_plan;
 mod representation_plan;
@@ -18,6 +19,7 @@ pub use format::{
     load_model_directory, ModelManifest, TensorManifest, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
     NNIS_MODEL_VERSION,
 };
+pub use fused_swiglu::F32SiluMultiply;
 pub use kernels::F32DecoderKernels;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
 pub use representation_plan::{
