@@ -56,10 +56,8 @@ impl F32SiluMultiply {
                 "SiLU-multiply block size must be non-zero",
             ));
         }
-        let code = compiler.compile_cubin(
-            SILU_MULTIPLY_SOURCE,
-            &CompileOptions::for_device(context),
-        )?;
+        let code =
+            compiler.compile_cubin(SILU_MULTIPLY_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let kernel = module.get_function("nnis_silu_multiply_f32")?;
         let attributes = kernel.attributes()?;
