@@ -47,16 +47,28 @@ initial_vertical_slice:
     - preserve_environment_fingerprint
     - reject_wrong_candidate_before_measurement_selection
 
+phase_evidence:
+  NK0:
+    nnis_main_commit: a4635547f3e46abd6652f8d319093dabc0baee6f
+    forge_contract_main_commit: 01587804d9e321bc89c606b4215850cb202a907f
+    finding: >-
+      Existing public NNIS interfaces are sufficient for the first adapter:
+      nnis-jit exports JitCompiler, CompileOptions, CompiledCode, Module,
+      Kernel, KernelLaunch and launch configuration; nnis-rt exports Context,
+      Stream, Event and DeviceBuffer; nnis-bench provides CUDA-event reports and
+      fail-closed environment compatibility. No new NNIS CUDA API is required
+      before the AXPBY-like qualification slice.
+
 phases:
   - id: NK0
     name: Adapter surface audit
-    status: active
+    status: completed
     goals:
       - identify_minimal_public_nnis_jit_nnis_rt_and_nnis_bench_interfaces_needed_by_Forge
       - avoid_new_public_API_when_existing_interfaces_are_sufficient
   - id: NK1
     name: Forge NNIS adapter qualification
-    status: next
+    status: active
     goals:
       - run_first_AXPBY_like_closed_loop_without_PyTorch
       - prove_verification_precedes_measurement
