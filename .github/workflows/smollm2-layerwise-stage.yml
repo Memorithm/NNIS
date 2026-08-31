@@ -1,0 +1,44 @@
+name: Stage SmolLM2 layerwise diagnostic
+
+on:
+  push:
+    branches: [research/smollm2-layerwise-diagnostic]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Attach diagnostic module
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("crates/nnis-model/src/runtime.rs")
+          text = path.read_text()
+          marker = '#[path = "smollm2_layerwise_diagnostic.rs"]'
+          if marker not in text:
+              text += '\n#[cfg(test)]\n#[path = "smollm2_layerwise_diagnostic.rs"]\nmod smollm2_layerwise_diagnostic;\n'
+              path.write_text(text)
+          PY
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate Rust
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p nnis-model --lib
+      - name: Commit staged diagnostic
+        run: |
+          if ! git diff --quiet; then
+            git config user.name MEMOPERF
+            git config user.email contact@checkupauto.fr
+            git add crates/nnis-model/src/runtime.rs crates/nnis-model/src/smollm2_layerwise_diagnostic.rs tools/smollm2_layerwise_reference.py
+            git commit -m "test(model): wire SmolLM2 layerwise diagnostic"
+            git push origin HEAD:research/smollm2-layerwise-diagnostic
+          fi
