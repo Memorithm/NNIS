@@ -1,0 +1,36 @@
+name: Stage SmolLM2 benchmark lockfile
+
+on:
+  push:
+    branches:
+      - perf/smollm2-e2e-benchmark
+
+permissions:
+  contents: write
+
+jobs:
+  stage-lock:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: perf/smollm2-e2e-benchmark
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Refresh lockfile for benchmark dependencies
+        run: cargo check -p nnis-bench --example smollm2_e2e
+
+      - name: Commit lockfile if Cargo changed it
+        run: |
+          if git diff --quiet -- Cargo.lock; then
+            echo "Cargo.lock already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: lock SmolLM2 benchmark dependency"
+          git push origin HEAD:perf/smollm2-e2e-benchmark
