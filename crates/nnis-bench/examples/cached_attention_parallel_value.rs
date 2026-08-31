@@ -1,9 +1,7 @@
 use nnis_bench::{benchmark_gpu, BenchConfig, BenchmarkCase, BenchmarkReport};
 use nnis_jit::JitCompiler;
 use nnis_model::{F32CachedAttentionDecodeParallelValue, F32DecoderKernels};
-use nnis_rt::{
-    Context, Device, DeviceBuffer, KvCache, KvCacheConfig, NnisError, Result, Stream,
-};
+use nnis_rt::{Context, Device, DeviceBuffer, KvCache, KvCacheConfig, NnisError, Result, Stream};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -76,7 +74,12 @@ fn require_run_context() -> Result<()> {
     }
 }
 
-fn deterministic_values(elements: usize, multiplier: usize, modulus: usize, scale: f32) -> Vec<f32> {
+fn deterministic_values(
+    elements: usize,
+    multiplier: usize,
+    modulus: usize,
+    scale: f32,
+) -> Vec<f32> {
     (0..elements)
         .map(|index| {
             let centered = ((index * multiplier + 11) % modulus) as i32 - (modulus as i32 / 2);
@@ -115,10 +118,7 @@ fn main() -> Result<()> {
     let query = DeviceBuffer::from_host(&context, &stream, &query_host)?;
     let source_keys = Arc::new(DeviceBuffer::from_host(&context, &stream, &keys_host)?);
     let source_values = Arc::new(DeviceBuffer::from_host(&context, &stream, &values_host)?);
-    let mut cache = KvCache::new(
-        &stream,
-        KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?,
-    )?;
+    let mut cache = KvCache::new(&stream, KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?)?;
     cache.append_layer(0, source_keys, source_values, kv_rows)?;
 
     let reference_output = DeviceBuffer::<f32>::new(&context, query_elements)?;
