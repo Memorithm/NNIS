@@ -1,0 +1,65 @@
+name: Stage SmolLM2 layer 24 attention diagnostic
+
+on:
+  push:
+    branches: [research/smollm2-layerwise-diagnostic]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add QKV and pre-O observation points
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("crates/nnis-model/src/smollm2_layerwise_diagnostic.rs")
+          text = path.read_text()
+          text = text.replace('    assert_eq!(stage.elements, 576);\n', '', 1)
+
+          needle = '''                model.config.rms_norm_eps,\n            )\n            .unwrap();\n        model\n            .gemm\n            .gemm(\n                &session.stream,\n                &session.workspace.normed,\n                layer.q_proj.tensor().as_f32().unwrap(),'''
+          repl = '''                model.config.rms_norm_eps,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.input_norm",\n                &session.workspace.normed,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n        model\n            .gemm\n            .gemm(\n                &session.stream,\n                &session.workspace.normed,\n                layer.q_proj.tensor().as_f32().unwrap(),'''
+          if '"layer24.input_norm"' not in text:
+              if needle not in text:
+                  raise SystemExit('input norm insertion point missing')
+              text = text.replace(needle, repl, 1)
+
+          needle = '''                model.config.hidden_size,\n            )\n            .unwrap();\n\n        unsafe {'''
+          repl = '''                model.config.hidden_size,\n            )\n            .unwrap();\n        if layer_index == 24 {\n            report_stage(\n                "layer24.q_raw",\n                &session.workspace.q,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n            report_stage(\n                "layer24.k_raw",\n                &session.workspace.k,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n            report_stage(\n                "layer24.v_raw",\n                &session.workspace.v,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n\n        unsafe {'''
+          if '"layer24.q_raw"' not in text:
+              if needle not in text:
+                  raise SystemExit('QKV insertion point missing')
+              text = text.replace(needle, repl, 1)
+
+          needle = '''                attention_scale,\n            )\n            .unwrap();\n        drop(append);\n\n        model'''
+          repl = '''                attention_scale,\n            )\n            .unwrap();\n        drop(append);\n        if layer_index == 24 {\n            report_stage(\n                "layer24.attention_pre_o",\n                &session.workspace.attention,\n                &session.stream,\n                &manifest,\n                &reference_dir,\n            );\n        }\n\n        model'''
+          if '"layer24.attention_pre_o"' not in text:
+              if needle not in text:
+                  raise SystemExit('attention pre-O insertion point missing')
+              text = text.replace(needle, repl, 1)
+
+          path.write_text(text)
+          PY
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate diagnostic
+        run: |
+          python -m py_compile tools/smollm2_layerwise_reference.py
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test -p nnis-model --lib
+      - name: Commit diagnostic
+        run: |
+          if ! git diff --quiet; then
+            git config user.name MEMOPERF
+            git config user.email contact@checkupauto.fr
+            git add crates/nnis-model/src/smollm2_layerwise_diagnostic.rs tools/smollm2_layerwise_reference.py
+            git commit -m "diagnostic(model): trace SmolLM2 layer 24 QKV attention"
+            git push origin HEAD:research/smollm2-layerwise-diagnostic
+          fi
