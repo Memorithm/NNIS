@@ -1,8 +1,8 @@
 schema_version: 1
 kind: nnis_agent_execution_roadmap
 status: active
-last_updated: "2026-08-31"
-repository: Memorithm/NVIDIA-Native-Inference-Stack
+last_updated: "2026-09-01"
+repository: Memorithm/NNIS
 intended_consumer: autonomous_agent
 visibility_note: >-
   This roadmap is intentionally kept off main on an agent-oriented branch.
@@ -17,20 +17,25 @@ mission:
     runtime semantics, kernel selection, weight representation policy, evidence,
     and adaptive control under ecosystem ownership.
   near_term_sovereignty: >-
-    Avoid mandatory runtime dependence on PyTorch, TensorRT, TensorRT-LLM and
-    Triton while accepting CUDA Driver API and NVRTC as an NVIDIA hardware backend.
+    Avoid mandatory runtime dependence on PyTorch, TensorRT, TensorRT-LLM,
+    TensorRT Edge-LLM and Triton while accepting CUDA Driver API and NVRTC as an
+    NVIDIA hardware backend.
   long_term_sovereignty: >-
     Make NVIDIA one backend among several through backend-neutral execution and
     representation contracts, with CUDA first and other backends only when real
     implementations and evidence exist.
 
 reference_products:
-  primary_nvidia_reference: TensorRT-LLM
+  primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
+  secondary_server_reference: TensorRT_LLM
   secondary_nvidia_reference: TensorRT
   general_framework_reference: Transformers/PyTorch CUDA
   rule: >-
-    Never claim equivalence to TensorRT-LLM without same-model, same-precision,
-    same-workload, same-device and fingerprint-compatible evidence.
+    Never claim performance equivalence, speedup or slowdown against an external
+    reference without same-model, same-precision/representation, same-workload,
+    same-device, fingerprint-compatible evidence and comparable metric semantics.
+    Exact greedy trajectory equality is semantic evidence, not numerical or
+    performance equivalence.
 
 invariants:
   - correctness_and_declared_semantics_dominate_performance
@@ -89,6 +94,54 @@ verified_history:
       - CUDA_device_uuid_driver_NVRTC_kernel_recorded
       - comparator_rejects_run_context_mismatch
       - comparator_rejects_clock_state_mismatch
+  R1_TensorRT_Edge_LLM_reference:
+    status: qualified_reference_precision_alignment_pending
+    reference_release: v0.10.0
+    reference_commit: 71dd1bae032e70771265917ec74d3ff4cad07a10
+    hardware: NVIDIA_Jetson_AGX_Thor
+    software:
+      jetpack: 7.1-b112
+      cuda: "13.0"
+      tensorrt: 10.13.3.9
+    same_model:
+      repo: HuggingFaceTB/SmolLM2-135M
+      revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+      source_model_sha256: 80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
+      source_weight_dtype: bfloat16
+      tokenizer_sha256: 9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c
+      tokenizer_byte_identical_to_NNIS_fixture: true
+      prompt_ids: [22007, 6463, 314]
+      prompt_text: Gravity_is
+      decode_steps: 32
+      exact_greedy_trajectory_equal_to_qualified_NNIS_R2_artifacts: true
+    edge_engine:
+      dense_mode: fp16
+      runtime_binding_dtype: F16
+      engine_bytes: 5066980
+      runtime_checkpoint_bindings: 273
+    repeated_reference_campaign:
+      run_directory: /tmp/edgellm-r1-campaign-20260901T073624Z
+      processes: 5
+      warmups_per_process: 2
+      all_semantic_outputs_equal: true
+      thor_power_mode: MAXN
+      competing_cuda_processes: 0
+      median_prefill_ms: 7.090816020965576
+      median_generation_tokens_per_second_nvidia_definition: 350.21246337890625
+      median_generation_stage_total_gpu_ms: 91.37310791015625
+      median_generation_stage_median_step_ms: 2.9200639724731445
+      median_peak_unified_memory_bytes: 657317888
+      note: >-
+        NVIDIA generation throughput divides all 32 generated tokens by the
+        cumulative GPU time of 31 llm_generation stage executions because the
+        first generated token is produced by prefill. Preserve that definition.
+    cross_runtime_speed_comparison_allowed: false
+    cross_runtime_memory_comparison_allowed: false
+    blocker: >-
+      Edge-LLM runtime weight bindings are F16 while the qualified NNIS baseline
+      reports f32 logical execution weights, and memory metric semantics also
+      differ. The Edge metrics are a qualified autonomous reference only until
+      precision/representation and metric semantics are aligned.
   E1_hybrid_GEMV:
     status: rejected
     end_to_end_result: "generation throughput -5.57%"
@@ -293,14 +346,27 @@ roadmap:
       - retain exact-head SHA and clean-worktree provenance
 
   - id: R1
-    name: TensorRT-LLM reference line on Thor
-    status: pending
-    goals:
-      - same pinned SmolLM2 checkpoint and tokenizer
-      - same prompt, batch, decode length and precision semantics
-      - same Thor power/clock regime and compatible fingerprint context
-      - record TensorRT-LLM version, CUDA/container digest and resolved features
-      - publish no equivalence claim unless semantic conditions match
+    name: TensorRT Edge-LLM reference line on Thor
+    status: qualified_reference_precision_alignment_pending
+    completed:
+      - clean_v0_10_0_cpp_runtime_build_on_Thor
+      - isolated_python_builder_environment_using_JetPack_TensorRT_10_13_3_9
+      - exact_pinned_SmolLM2_source_weight_SHA256_match
+      - tokenizer_byte_identity_with_NNIS_fixture
+      - direct_fp16_engine_build
+      - real_32_token_greedy_decode
+      - exact_32_of_32_greedy_trajectory_match_with_qualified_NNIS_R2_artifacts
+      - five_process_reference_campaign_under_fixed_MAXN_clocks
+      - machine_readable_native_Edge_LLM_latency_throughput_and_unified_memory_profiles
+    next:
+      - publish_reproducible_NNML5_reference_evidence_to_main_via_exact_head_green_PR
+      - define_precision_alignment_strategy_before_any_cross_runtime_speed_claim
+      - define_comparable_memory_metric_before_any_cross_runtime_memory_claim
+      - preserve_TensorRT_LLM_as_secondary_server_reference
+    forbid:
+      - NNIS_vs_Edge_LLM_speedup_or_slowdown_from_current_F32_vs_F16_regime
+      - cross_runtime_memory_ratio_from_non_equivalent_memory_metrics
+      - calling_exact_greedy_trajectory_bitwise_logit_equivalence
 
   - id: R2
     name: Kernel-only Elastic optimization
@@ -361,7 +427,7 @@ roadmap:
       - rollback_on_failed_end_to_end_verification
 
   - id: R5
-    name: Runtime capability gap toward TensorRT-LLM
+    name: Runtime capability gap toward specialized NVIDIA runtimes
     status: pending
     candidate_areas:
       - paged_or_segmented_KV_cache
