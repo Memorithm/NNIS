@@ -1,0 +1,76 @@
+schema_version: 1
+kind: nnis_r1_f16_alignment_qualification
+status: active
+last_updated: "2026-09-01"
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+reference:
+  runtime: TensorRT_Edge_LLM
+  release: v0.10.0
+  commit: 71dd1bae032e70771265917ec74d3ff4cad07a10
+  edge_dense_mode: fp16
+  edge_runtime_binding_dtype: F16
+
+model_identity:
+  repo: HuggingFaceTB/SmolLM2-135M
+  revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+  source_model_sha256: 80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
+  nnis_model_v1_manifest_sha256: 6913b89fb75671b7189c70a728634d4cb6bdb1f9698c83a369ff9c3b8a29a702
+  prompt_ids: [22007, 6463, 314]
+  decode_steps: 32
+
+infrastructure:
+  f16_kernel_pr: 68
+  f16_kernel_exact_head: 59e13c8010ae5a7e5c673fe7899156f4ad671bca
+  f16_kernel_merge_sha: ad6c2ab9bca4ba0b807cd688b2fda78796de5be9
+  thor_primitive_gate: passed
+  f16_runtime_pr: 69
+  f16_runtime_exact_head: eb0f3cdba2671cbb3e1d67b39fbb73340b468ec6
+  f16_runtime_merge_sha: 4c96384f99ad8e885568c2e4182f29370cdb7c4f
+  pr_ci_run: 174
+  pr_harness_run: 50
+  post_merge_ci_run: 178
+  exact_head_required_ci_green: true
+  post_merge_ci_green: true
+
+nnis_f16_plan_v1:
+  schema_version: 1
+  persisted_model_format: nnis-model-v1-f32-base-graph
+  weight_storage: f16
+  activation_storage: f16
+  kv_storage: f16
+  projection_accumulator: f32
+  attention_accumulator: f32
+  logits_storage: f32
+  default_runtime_changed: false
+  historical_f32_runtime_preserved: true
+
+physical_correctness_gate:
+  hardware: NVIDIA_Jetson_AGX_Thor
+  compute_capability: "11.0"
+  exact_head: eb0f3cdba2671cbb3e1d67b39fbb73340b468ec6
+  competing_cuda_processes: 0
+  generated_ids: [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+  expected_r1_edge_llm_ids: [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+  exact_greedy_32_of_32: true
+  qualification_marker: NNIS_F16_SMOLLM2_EXACT_GREEDY_32_OF_32_OK
+
+qualification:
+  representation_alignment_status: qualified_for_this_workload
+  semantic_trajectory_status: exact_32_of_32
+  numerical_equivalence_claim: false
+  cross_runtime_speed_comparison_allowed: false
+  cross_runtime_memory_comparison_allowed: false
+  blocker: >-
+    NNIS F16 representation and semantic trajectory are now aligned for the pinned
+    workload, but NNIS has not yet published a CUDA-event metric with the same
+    generation-stage semantics as the Edge-LLM reference. Memory metric semantics
+    also remain different. Do not compute speed or memory ratios yet.
+
+next_steps:
+  - add_NNIS_F16_CUDA_event_generation_stage_profiler
+  - measure_exactly_31_decode_forwards_after_prefill_for_32_generated_tokens
+  - exclude_sampling_from_generation_stage_GPU_time
+  - preserve_normal_generate_session_semantics_without_benchmark_only_behavior_changes
+  - reassert_Thor_MAXN_fixed_clocks_and_idle_GPU_before_performance_measurement
+  - publish_machine_readable_F16_reference_measurements_before_any_ratio
