@@ -1098,6 +1098,9 @@ mod tests {
         let silu = silu_f32.to_vec(&stream).unwrap();
         // These are the exact F32 widenings of the expected IEEE binary16
         // values after the explicit SiLU->F16 and product->F16 boundaries.
-        assert_eq!(silu, vec![0.1556396484375, 8.5703125]);
+        assert_eq!(
+            silu,
+            vec![f32::from_bits(0x3e1f_6000), f32::from_bits(0x4109_2000)]
+        );
     }
 }
