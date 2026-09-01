@@ -296,6 +296,29 @@ pub struct F16ReferenceSession<'model> {
     position: usize,
 }
 
+/// CUDA-event profile matching the TensorRT Edge-LLM generation-stage metric.
+///
+/// For `N` generated tokens this path samples token 0 from prefill logits and
+/// measures exactly `N - 1` decoder forwards. Top-1 sampling and token recording
+/// are deliberately outside every generation-forward CUDA-event interval. The
+/// final generated token is not consumed by the model because Edge-LLM likewise
+/// reports 32 generated tokens from 31 `llm_generation` stage executions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct F16ReferenceGenerationProfile {
+    pub schema_version: u32,
+    pub metric_definition: String,
+    pub generated_tokens: usize,
+    pub generation_forward_runs: usize,
+    pub prefill_gpu_ms: f64,
+    pub generation_forward_gpu_ms: Vec<f64>,
+    pub generation_stage_total_gpu_ms: f64,
+    pub generation_tokens_per_second_edge_definition: f64,
+    pub generated_ids: Vec<u32>,
+    pub session_position_after_profile: usize,
+    pub sampling_included_in_generation_stage_gpu_time: bool,
+    pub final_generated_token_consumed_by_model: bool,
+}
+
 impl<'model> F16ReferenceSession<'model> {
     fn new(model: &'model F16ReferenceModel) -> Result<Self> {
         let stream = Stream::new(&model.context)?;
@@ -380,6 +403,121 @@ impl<'model> F16ReferenceSession<'model> {
             }
             None => self.generate_fixed(input_ids, generation.max_new_tokens),
         }
+    }
+
+    /// Profile a fixed greedy request with the same generation-stage accounting
+    /// used by the qualified TensorRT Edge-LLM v0.10.0 R1 reference.
+    ///
+    /// This is a qualification-only metric. It intentionally leaves the session
+    /// one token behind normal `generate()` state advancement because the final
+    /// generated token is sampled but not consumed by a decoder forward.
+    pub fn profile_greedy_edge_generation_semantics(
+        &mut self,
+        input_ids: &[u32],
+        max_new_tokens: usize,
+    ) -> Result<F16ReferenceGenerationProfile> {
+        if max_new_tokens < 2 {
+            return Err(NnisError::invalid_input(
+                "Edge-compatible F16 generation profiling requires at least two generated tokens",
+            ));
+        }
+        self.validate_prompt(input_ids, max_new_tokens - 1)?;
+        self.reset()?;
+
+        let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
+        let generated = DeviceBuffer::<u32>::new(&self.model.context, max_new_tokens)?;
+        let prefill_start = nnis_rt::Event::new(&self.model.context)?;
+        let prefill_end = nnis_rt::Event::new(&self.model.context)?;
+        let mut generation_events = Vec::with_capacity(max_new_tokens - 1);
+
+        let enqueue_result = (|| {
+            prefill_start.record(&self.stream)?;
+            self.enqueue_prefill(&device_ids)?;
+            prefill_end.record(&self.stream)?;
+
+            // Token 0 is sampled from prefill logits and is outside the
+            // generation-stage CUDA timing, matching the NVIDIA definition.
+            // SAFETY: buffers remain live through the final stream sync below.
+            unsafe {
+                self.model.top_k.enqueue_top_k(
+                    &self.stream,
+                    &self.workspace.logits,
+                    &self.workspace.top_value,
+                    &self.workspace.current_token,
+                    1,
+                    &self.workspace.top_k_workspace,
+                )?;
+                self.model.token_runtime.enqueue_record_token(
+                    &self.stream,
+                    &self.workspace.current_token,
+                    &generated,
+                    0,
+                )?;
+            }
+
+            for step in 1..max_new_tokens {
+                let start = nnis_rt::Event::new(&self.model.context)?;
+                let end = nnis_rt::Event::new(&self.model.context)?;
+                start.record(&self.stream)?;
+                self.enqueue_current_token()?;
+                end.record(&self.stream)?;
+
+                // SAFETY: top-1 and record are ordered after `end`, so their GPU
+                // work is excluded from the decoder-forward timing interval.
+                unsafe {
+                    self.model.top_k.enqueue_top_k(
+                        &self.stream,
+                        &self.workspace.logits,
+                        &self.workspace.top_value,
+                        &self.workspace.current_token,
+                        1,
+                        &self.workspace.top_k_workspace,
+                    )?;
+                    self.model.token_runtime.enqueue_record_token(
+                        &self.stream,
+                        &self.workspace.current_token,
+                        &generated,
+                        step,
+                    )?;
+                }
+                generation_events.push((start, end));
+            }
+            Ok(())
+        })();
+        self.finish(enqueue_result)?;
+
+        prefill_end.synchronize()?;
+        let prefill_gpu_ms = prefill_end.elapsed_ms(&prefill_start)?;
+        let mut generation_forward_gpu_ms = Vec::with_capacity(generation_events.len());
+        for (start, end) in &generation_events {
+            end.synchronize()?;
+            generation_forward_gpu_ms.push(end.elapsed_ms(start)?);
+        }
+        let generation_stage_total_gpu_ms: f64 = generation_forward_gpu_ms.iter().sum();
+        if !generation_stage_total_gpu_ms.is_finite() || generation_stage_total_gpu_ms <= 0.0 {
+            return Err(NnisError::unsupported(
+                "F16 generation-stage CUDA events returned non-positive total GPU time",
+            ));
+        }
+        let generated_ids = generated.to_vec(&self.stream)?;
+        let generation_tokens_per_second_edge_definition =
+            max_new_tokens as f64 / (generation_stage_total_gpu_ms / 1_000.0);
+
+        Ok(F16ReferenceGenerationProfile {
+            schema_version: 1,
+            metric_definition: "generated_tokens / cumulative GPU time of N-1 decoder forwards after prefill; CUDA events bracket decoder forward only; top-1 sampling excluded; final generated token not consumed"
+                .to_string(),
+            generated_tokens: max_new_tokens,
+            generation_forward_runs: generation_forward_gpu_ms.len(),
+            prefill_gpu_ms,
+            generation_forward_gpu_ms,
+            generation_stage_total_gpu_ms,
+            generation_tokens_per_second_edge_definition,
+            generated_ids,
+            session_position_after_profile: self.position,
+            sampling_included_in_generation_stage_gpu_time: false,
+            final_generated_token_consumed_by_model: false,
+        })
     }
 
     fn generate_fixed(&mut self, input_ids: &[u32], max_new_tokens: usize) -> Result<Vec<u32>> {
@@ -766,7 +904,7 @@ mod tests {
 
     fn tiny_weights(context: &Arc<Context>, stream: &Stream) -> ModelWeights {
         let embedding = vec![
-            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0,
         ];
         let zeros = vec![0.0_f32; 16];
         let kv_zeros = vec![0.0_f32; 8];
@@ -831,5 +969,35 @@ mod tests {
             .unwrap();
         assert_eq!(generated, vec![0]);
         assert_eq!(session.position(), 3);
+    }
+
+    #[test]
+    fn edge_generation_profile_counts_n_minus_one_forwards() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let construction_stream = Stream::new(&context).unwrap();
+        let model = F16ReferenceModel::new(
+            tiny_config(),
+            tiny_weights(&context, &construction_stream),
+            &construction_stream,
+            F16ReferencePlan::edge_llm_v0_10_0_alignment(),
+        )
+        .unwrap();
+        let mut session = model.new_session().unwrap();
+        let profile = session
+            .profile_greedy_edge_generation_semantics(&[1, 2], 2)
+            .unwrap();
+        assert_eq!(profile.generated_ids, vec![0, 0]);
+        assert_eq!(profile.generated_tokens, 2);
+        assert_eq!(profile.generation_forward_runs, 1);
+        assert_eq!(profile.generation_forward_gpu_ms.len(), 1);
+        assert!(profile.prefill_gpu_ms > 0.0);
+        assert!(profile.generation_stage_total_gpu_ms > 0.0);
+        assert!(profile.generation_tokens_per_second_edge_definition > 0.0);
+        assert_eq!(profile.session_position_after_profile, 3);
+        assert!(!profile.sampling_included_in_generation_stage_gpu_time);
+        assert!(!profile.final_generated_token_consumed_by_model);
     }
 }
