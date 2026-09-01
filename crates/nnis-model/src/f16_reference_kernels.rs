@@ -1096,9 +1096,8 @@ mod tests {
         approx_eq(normed[1], 3.0 / rms, 1.0e-3);
 
         let silu = silu_f32.to_vec(&stream).unwrap();
-        let silu0 = 0.5_f32 / (1.0 + (-0.5_f32).exp());
-        let silu1 = 3.0_f32 / (1.0 + (-3.0_f32).exp());
-        approx_eq(silu[0], silu0 * 0.5, 2.0e-3);
-        approx_eq(silu[1], silu1 * 3.0, 2.0e-3);
+        // These are the exact F32 widenings of the expected IEEE binary16
+        // values after the explicit SiLU->F16 and product->F16 boundaries.
+        assert_eq!(silu, vec![0.1556396484375, 8.5703125]);
     }
 }
