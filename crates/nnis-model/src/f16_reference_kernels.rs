@@ -860,14 +860,7 @@ impl F16ReferenceKernels {
         k: usize,
         n: usize,
     ) -> Result<()> {
-        self.validate_project_shapes(
-            "F16 LM head",
-            input.len(),
-            weight.len(),
-            output.len(),
-            k,
-            n,
-        )?;
+        self.validate_project_shapes("F16 LM head", input.len(), weight.len(), output.len(), k, n)?;
         self.validate_contexts(stream, &[input.ctx(), weight.ctx(), output.ctx()])?;
         if n == 0 {
             return Ok(());
@@ -1063,8 +1056,7 @@ mod tests {
                 .unwrap();
         }
 
-        let norm_weight_f32 =
-            DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 1.0]).unwrap();
+        let norm_weight_f32 = DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 1.0]).unwrap();
         let norm_weight = DeviceBuffer::<u16>::new(&context, 2).unwrap();
         let normed = DeviceBuffer::<u16>::new(&context, 2).unwrap();
         let normed_f32 = DeviceBuffer::<f32>::new(&context, 2).unwrap();
