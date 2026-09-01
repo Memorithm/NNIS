@@ -202,7 +202,28 @@ reference_performance_campaign:
     speedup, slowdown, parity, or memory ratio from them until representation and
     metric semantics are aligned.
 
-current_status: thor_reference_qualified_semantic_parity_and_reference_metrics_passed_precision_alignment_pending
+main_evidence:
+  status: merged_and_post_merge_CI_green
+  pr: 67
+  pr_exact_head: "a03f0b6aab35f92a1531383454376c975ac35986"
+  merge_sha: "f19fb2f64bb4a69f7b73ff6815edc708dfd0b76b"
+  pr_ci_run: 162
+  post_merge_ci_run: 163
+  evidence_path: "evidence/r1_tensorrt_edge_llm_v0_10_0_smollm2_thor.json"
+  validator_path: "tools/validate_external_reference_evidence.py"
+  documentation_path: "docs/R1_TENSORRT_EDGE_LLM_REFERENCE.md"
+  guarantees:
+    - versioned_machine_readable_external_reference_evidence
+    - exact_model_tokenizer_and_workload_identity_recorded
+    - exact_32_of_32_greedy_trajectory_recorded
+    - five_raw_reference_runs_and_aggregate_metrics_recorded
+    - native_NVIDIA_metric_semantics_preserved
+    - precision_mismatch_blocks_cross_runtime_speed_claim
+    - non_equivalent_memory_metrics_block_cross_runtime_memory_claim
+    - negative_self_tests_cover_schema_token_comparability_aggregate_and_metric_drift
+    - exact_head_required_CI_green
+
+current_status: thor_reference_qualified_evidence_merged_precision_alignment_pending
 requirement: >-
   Do not claim an NNIS vs TensorRT Edge-LLM speedup or performance parity unless
   the exact pinned SmolLM2 checkpoint is executed with matched tokenizer, prompt,
@@ -210,9 +231,8 @@ requirement: >-
   regime, and comparable timing/memory metric definitions.
 
 next_steps:
-  - update_central_roadmap_primary_Thor_reference_to_TensorRT_Edge_LLM_v0_10_0
-  - add_reproducible_machine_readable_NNML5_reference_evidence_to_main_via_exact_head_green_PR
   - preserve_exact_32_token_match_as_semantic_trajectory_evidence_not_numerical_equivalence
+  - audit_Edge_LLM_v0_10_0_dense_precision_paths_before_choosing_alignment_strategy
   - define_precision_alignment_strategy_before_any_cross_runtime_performance_claim
   - define_comparable_memory_metric_before_any_cross_runtime_memory_claim
   - retain_TensorRT_LLM_as_secondary_server_reference_until_clean_Jetson_qualification_exists
