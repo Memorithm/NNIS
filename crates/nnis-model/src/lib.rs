@@ -7,6 +7,7 @@
 mod attention_plan;
 mod cached_attention_candidate;
 mod config;
+mod f16_reference_kernels;
 mod format;
 mod fused_swiglu;
 mod fusion_plan;
@@ -20,6 +21,7 @@ mod weights;
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
 pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
+pub use f16_reference_kernels::F16ReferenceKernels;
 pub use format::{
     load_model_directory, ModelManifest, TensorManifest, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
     NNIS_MODEL_VERSION,
