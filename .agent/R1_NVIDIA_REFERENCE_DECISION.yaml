@@ -11,16 +11,18 @@ software_regime:
   system_tensorrt: "10.13.3.9"
 
 decision:
-  primary_thor_nvidia_reference_candidate: TensorRT_Edge_LLM
+  primary_thor_nvidia_reference: TensorRT_Edge_LLM
+  qualification_status: qualified_reference_only_precision_mismatch_blocks_cross_runtime_speed_claim
   pinned_release: "v0.10.0"
   pinned_commit: "71dd1bae032e70771265917ec74d3ff4cad07a10"
   secondary_server_reference: TensorRT_LLM
   rule: >-
-    TensorRT Edge-LLM becomes the primary NVIDIA runtime to qualify on Jetson Thor
-    because NVIDIA explicitly lists Jetson Thor + JetPack 7.0/7.1 + CUDA 13.0 +
-    JetPack TensorRT as an officially supported platform. TensorRT-LLM remains a
-    server-class/secondary reference and is not accepted as the Thor baseline
-    unless a clean, reproducible Jetson-qualified environment is demonstrated.
+    TensorRT Edge-LLM is the primary qualified NVIDIA runtime reference on Jetson
+    Thor because NVIDIA explicitly lists Jetson Thor + JetPack 7.0/7.1 + CUDA
+    13.0 + JetPack TensorRT as an officially supported platform. TensorRT-LLM
+    remains a server-class/secondary reference and is not accepted as the Thor
+    baseline unless a clean, reproducible Jetson-qualified environment is
+    demonstrated.
 
 local_tensorrt_llm_diagnosis:
   package_metadata_version: "1.3.0rc16"
@@ -143,23 +145,74 @@ same_model_gate:
       qualified R2 run context contain the same 32 generated IDs as Edge-LLM.
       This establishes exact greedy trajectory equality for this workload; it is
       not a claim of bitwise-logit or general numerical equivalence.
-  current_status: real_decode_and_exact_32_token_greedy_parity_passed_precision_alignment_pending
+
+reference_performance_campaign:
+  status: qualified_reference_only
+  run_directory: "/tmp/edgellm-r1-campaign-20260901T073624Z"
+  processes: 5
+  warmups_per_process: 2
+  batch_size: 1
+  prompt_ids: [22007, 6463, 314]
+  prompt_text: "Gravity is"
+  decode_steps: 32
+  sampling: greedy_temperature_0_top_k_1
+  context_cache_lookup_policy: bypass
+  num_logprobs: 0
+  thor_regime:
+    power_mode: MAXN
+    cpu_hz: 2601000000
+    gpu_gpc_hz: 1575000000
+    gpu_nvd_hz: 1692000000
+    emc_hz: 4266000000
+    competing_cuda_processes: 0
+  all_semantic_outputs_equal: true
+  metric_semantics:
+    generation_tokens_per_second: >-
+      Edge-LLM native definition: 32 generated tokens divided by cumulative GPU
+      time of the llm_generation stage. The stage has 31 GPU runs because the
+      first generated token comes from prefill. Preserve this definition when
+      reporting the reference value.
+    peak_unified_memory: process peak unified memory/RSS reported by Edge-LLM on iGPU
+  raw:
+    prefill_ms: [10.778719902038574, 6.952064037322998, 7.442880153656006, 7.090816020965576, 6.538080215454102]
+    generation_tokens_per_second_nvidia_definition: [344.46380615234375, 350.59033203125, 350.21246337890625, 349.7152404785156, 357.62115478515625]
+    generation_average_time_per_token_ms_nvidia_definition: [2.903062582015991, 2.8523318767547607, 2.855409622192383, 2.859469175338745, 2.796255111694336]
+    generation_stage_total_gpu_ms: [92.89800262451172, 91.27462005615234, 91.37310791015625, 91.50301361083984, 89.48016357421875]
+    generation_stage_median_step_ms: [2.858207941055298, 2.93558406829834, 2.9200639724731445, 2.9310719966888428, 2.868959903717041]
+    peak_unified_memory_bytes: [657317888, 657059840, 658460672, 654647296, 658358272]
+  median:
+    prefill_ms: 7.090816020965576
+    generation_tokens_per_second_nvidia_definition: 350.21246337890625
+    generation_average_time_per_token_ms_nvidia_definition: 2.855409622192383
+    generation_stage_total_gpu_ms: 91.37310791015625
+    generation_stage_median_step_ms: 2.9200639724731445
+    peak_unified_memory_bytes: 657317888
+  range:
+    prefill_ms: [6.538080215454102, 10.778719902038574]
+    generation_tokens_per_second_nvidia_definition: [344.46380615234375, 357.62115478515625]
+    generation_stage_total_gpu_ms: [89.48016357421875, 92.89800262451172]
+    peak_unified_memory_bytes: [654647296, 658460672]
+  cross_runtime_speed_comparison_allowed: false
+  cross_runtime_memory_comparison_allowed: false
   precision_caveat: >-
-    The direct Edge-LLM engine binds the BF16 source checkpoint into F16 runtime
-    weights, while the currently qualified NNIS baseline reports f32 logical
-    execution weights. Real same-model execution and exact greedy trajectory are
-    established, but no NNIS-versus-Edge-LLM latency or throughput speedup/parity
-    claim is allowed until precision semantics are explicitly aligned or the
-    mismatch is carried as a non-comparable reference dimension.
-  requirement: >-
-    Do not claim an NNIS vs TensorRT Edge-LLM speedup or parity unless the exact
-    pinned SmolLM2 checkpoint is accepted and executed by Edge-LLM with explicitly
-    matched tokenizer, prompt, batch, decode length, precision semantics, and Thor
-    power/clock regime.
+    Edge-LLM binds the BF16 source checkpoint into F16 runtime weights, while the
+    currently qualified NNIS reference reports f32 logical execution weights.
+    These autonomous Edge-LLM latency, throughput, and unified-memory numbers are
+    qualified reference evidence only. Do not compute or publish an NNIS/Edge-LLM
+    speedup, slowdown, parity, or memory ratio from them until representation and
+    metric semantics are aligned.
+
+current_status: thor_reference_qualified_semantic_parity_and_reference_metrics_passed_precision_alignment_pending
+requirement: >-
+  Do not claim an NNIS vs TensorRT Edge-LLM speedup or performance parity unless
+  the exact pinned SmolLM2 checkpoint is executed with matched tokenizer, prompt,
+  batch, decode length, precision/representation semantics, Thor power/clock
+  regime, and comparable timing/memory metric definitions.
 
 next_steps:
-  - treat_exact_32_token_match_as_semantic_trajectory_evidence_not_numerical_equivalence
-  - decide_and_document_precision_alignment_strategy_before_any_cross_runtime_performance_claim
-  - capture_machine_readable_Edge_LLM_latency_throughput_memory_evidence_as_reference_only_until_precision_alignment
-  - update_central_roadmap_reference_label_now_that_Thor_reference_qualification_has_succeeded
-  - add_reproducible_NNML5_reference_evidence_to_main_only_via_exact_head_green_PR
+  - update_central_roadmap_primary_Thor_reference_to_TensorRT_Edge_LLM_v0_10_0
+  - add_reproducible_machine_readable_NNML5_reference_evidence_to_main_via_exact_head_green_PR
+  - preserve_exact_32_token_match_as_semantic_trajectory_evidence_not_numerical_equivalence
+  - define_precision_alignment_strategy_before_any_cross_runtime_performance_claim
+  - define_comparable_memory_metric_before_any_cross_runtime_memory_claim
+  - retain_TensorRT_LLM_as_secondary_server_reference_until_clean_Jetson_qualification_exists
