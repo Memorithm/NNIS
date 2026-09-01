@@ -27,6 +27,11 @@ jobs:
           python3 tools/validate_nnis_f16_campaign_evidence.py --self-test
           evidence/r1_nnis_f16_smollm2_thor.json
 
+      - name: Validate direct Edge vs NNIS F16 evidence
+        run: >-
+          python3 tools/validate_r1_direct_edge_vs_nnis_f16.py --self-test
+          evidence/r1_direct_edge_vs_nnis_f16_smollm2_thor.json
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
