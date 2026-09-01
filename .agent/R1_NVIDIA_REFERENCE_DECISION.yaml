@@ -133,15 +133,24 @@ same_model_gate:
       - 30
     qualified_NNIS_prefix: [260, 3075]
     qualified_NNIS_prefix_equal: true
-    complete_NNIS_trajectory_comparison: pending_existing_artifact_retrieval
-  current_status: real_decode_passed_full_trajectory_and_precision_alignment_pending
+    qualified_NNIS_ABBA_run_context: "r2-attention-e2e-20260831T204137Z"
+    qualified_NNIS_artifact_directory: "artifacts/r2-attention-e2e-abba-20260831T204138Z"
+    complete_NNIS_trajectory_comparison: exact_32_of_32
+    exact_greedy_trajectory_equal: true
+    nnis_matching_reports_checked: 9
+    note: >-
+      The summary and all eight physical NNIS ABBA reports found under the
+      qualified R2 run context contain the same 32 generated IDs as Edge-LLM.
+      This establishes exact greedy trajectory equality for this workload; it is
+      not a claim of bitwise-logit or general numerical equivalence.
+  current_status: real_decode_and_exact_32_token_greedy_parity_passed_precision_alignment_pending
   precision_caveat: >-
     The direct Edge-LLM engine binds the BF16 source checkpoint into F16 runtime
     weights, while the currently qualified NNIS baseline reports f32 logical
-    execution weights. Real same-model execution is therefore established, but
-    no NNIS-versus-Edge-LLM latency or throughput speedup/parity claim is allowed
-    until precision semantics are explicitly aligned or the mismatch is carried
-    as a non-comparable reference dimension.
+    execution weights. Real same-model execution and exact greedy trajectory are
+    established, but no NNIS-versus-Edge-LLM latency or throughput speedup/parity
+    claim is allowed until precision semantics are explicitly aligned or the
+    mismatch is carried as a non-comparable reference dimension.
   requirement: >-
     Do not claim an NNIS vs TensorRT Edge-LLM speedup or parity unless the exact
     pinned SmolLM2 checkpoint is accepted and executed by Edge-LLM with explicitly
@@ -149,9 +158,8 @@ same_model_gate:
     power/clock regime.
 
 next_steps:
-  - retrieve_existing_NNIS_32_token_greedy_trajectory_from_physical_ABBA_artifact
-  - compare_all_32_generated_token_ids_without_rerunning_a_performance_campaign
-  - classify_exact_greedy_trajectory_match_separately_from_numerical_equivalence
+  - treat_exact_32_token_match_as_semantic_trajectory_evidence_not_numerical_equivalence
   - decide_and_document_precision_alignment_strategy_before_any_cross_runtime_performance_claim
-  - capture_machine_readable_Edge_LLM_latency_throughput_memory_evidence_only_after_semantic_gate
-  - update_central_roadmap_reference_label_after_R1_reference_qualification_is_complete
+  - capture_machine_readable_Edge_LLM_latency_throughput_memory_evidence_as_reference_only_until_precision_alignment
+  - update_central_roadmap_reference_label_now_that_Thor_reference_qualification_has_succeeded
+  - add_reproducible_NNML5_reference_evidence_to_main_only_via_exact_head_green_PR
