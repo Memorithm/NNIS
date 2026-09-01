@@ -72,11 +72,7 @@ impl F32WeightedRmsNormCandidate {
     ///
     /// The caller must opt in to the block size. This API has no implicit
     /// hardware policy and does not alter [`crate::F32DecoderKernels::load`].
-    pub fn load(
-        context: &Arc<Context>,
-        compiler: &JitCompiler,
-        block_size: u32,
-    ) -> Result<Self> {
+    pub fn load(context: &Arc<Context>, compiler: &JitCompiler, block_size: u32) -> Result<Self> {
         validate_block_size(block_size)?;
         let code = compiler.compile_cubin(
             WEIGHTED_RMSNORM_SOURCE,
@@ -187,11 +183,9 @@ impl F32WeightedRmsNormCandidate {
             .ok_or_else(|| {
                 NnisError::invalid_input("weighted RMSNorm candidate shared-memory size overflows")
             })?;
-        let launch_config = LaunchConfig::new(
-            Dim3::new(grid_rows, 1, 1),
-            Dim3::new(self.block_size, 1, 1),
-        )
-        .with_dynamic_shared_memory(shared_memory_bytes);
+        let launch_config =
+            LaunchConfig::new(Dim3::new(grid_rows, 1, 1), Dim3::new(self.block_size, 1, 1))
+                .with_dynamic_shared_memory(shared_memory_bytes);
         let cols_u64 = u64::try_from(cols)
             .map_err(|_| NnisError::invalid_input("weighted RMSNorm candidate cols exceed u64"))?;
         let mut args = KernelArgs::with_capacity(6, 3);
@@ -250,26 +244,10 @@ mod tests {
         let candidate_256 = F32WeightedRmsNormCandidate::load(&context, &compiler, 256).unwrap();
         let candidate_512 = F32WeightedRmsNormCandidate::load(&context, &compiler, 512).unwrap();
         candidate_256
-            .weighted_rms_norm(
-                &stream,
-                &input,
-                &weight,
-                &output_256,
-                rows,
-                cols,
-                epsilon,
-            )
+            .weighted_rms_norm(&stream, &input, &weight, &output_256, rows, cols, epsilon)
             .unwrap();
         candidate_512
-            .weighted_rms_norm(
-                &stream,
-                &input,
-                &weight,
-                &output_512,
-                rows,
-                cols,
-                epsilon,
-            )
+            .weighted_rms_norm(&stream, &input, &weight, &output_512, rows, cols, epsilon)
             .unwrap();
 
         let mut expected = Vec::with_capacity(rows * cols);
