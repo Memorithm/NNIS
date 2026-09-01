@@ -4,7 +4,9 @@ use nnis_rt::context::Context;
 use nnis_rt::error::{NnisError, Result};
 use nnis_sys::nvrtc;
 use sha2::{Digest, Sha256};
+use std::env;
 use std::ffi::{CStr, CString};
+use std::path::{Path, PathBuf};
 
 /// Output representation requested from NVRTC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -26,9 +28,13 @@ impl CompileOptions {
     /// Create options for an explicit NVRTC architecture such as `sm_110` or
     /// `compute_90`.
     pub fn new(architecture: impl Into<String>) -> Self {
+        let mut extra_options = vec!["--std=c++17".to_string()];
+        if let Some(include) = detect_cuda_include_path() {
+            extra_options.push(format!("--include-path={}", include.display()));
+        }
         Self {
             architecture: architecture.into(),
-            extra_options: vec!["--std=c++17".to_string()],
+            extra_options,
         }
     }
 
@@ -58,6 +64,29 @@ impl CompileOptions {
         args.extend(self.extra_options.iter().cloned());
         args
     }
+}
+
+fn detect_cuda_include_path() -> Option<PathBuf> {
+    for variable in ["CUDA_PATH", "CUDA_HOME"] {
+        if let Some(root) = env::var_os(variable) {
+            let include = PathBuf::from(root).join("include");
+            if include.join("cuda_fp16.h").is_file() {
+                return Some(include);
+            }
+        }
+    }
+
+    for candidate in [
+        "/usr/local/cuda/include",
+        "/usr/local/cuda-13.0/include",
+        "/usr/include",
+    ] {
+        let include = Path::new(candidate);
+        if include.join("cuda_fp16.h").is_file() {
+            return Some(include.to_path_buf());
+        }
+    }
+    None
 }
 
 /// Stable content key for one source/options/output tuple.
