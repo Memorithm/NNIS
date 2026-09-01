@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "kind": "nnis_direct_cross_runtime_evidence",
+  "qualification": "direct_same_device_same_workload_operational_ratio_qualified_numeric_equivalence_not_claimed",
+  "campaign": {
+    "run_context_id": "r1-edge-vs-nnis-f16-20260901T192810Z",
+    "physical_run_directory": "/tmp/r1-edge-vs-nnis-f16-20260901T192810Z",
+    "rounds": 3,
+    "order_per_round": ["Edge", "NNIS", "NNIS", "Edge"],
+    "processes_total": 12,
+    "processes_per_runtime": 6,
+    "warmups_per_process": 2,
+    "measured_requests_per_process": 1
+  },
+  "hardware": {
+    "platform": "NVIDIA Jetson AGX Thor Developer Kit",
+    "gpu_name": "NVIDIA Thor",
+    "compute_capability": "11.0",
+    "power_mode": "MAXN",
+    "cpu_hz": 2601000000,
+    "gpu_gpc_hz": 1575000000,
+    "gpu_nvd_hz": 1692000000,
+    "emc_hz": 4266000000,
+    "competing_cuda_processes": 0,
+    "regime_preserved_before_between_and_after_processes": true
+  },
+  "model_identity": {
+    "source_repo": "HuggingFaceTB/SmolLM2-135M",
+    "source_revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+    "source_model_sha256": "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1",
+    "source_weight_dtype": "bfloat16",
+    "tokenizer_sha256": "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c"
+  },
+  "workload": {
+    "prompt_text": "Gravity is",
+    "prompt_ids": [22007, 6463, 314],
+    "batch_size": 1,
+    "generated_tokens": 32,
+    "generation_forward_runs": 31,
+    "sampling": "greedy_temperature_0_top_k_1",
+    "sampling_in_generation_stage": false,
+    "context_reuse": false,
+    "expected_generated_ids": [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+  },
+  "runtime_identity": {
+    "edge": {
+      "name": "TensorRT Edge-LLM",
+      "release": "v0.10.0",
+      "source_commit": "71dd1bae032e70771265917ec74d3ff4cad07a10",
+      "input_file_sha256": "85a23086fa28020b517e030c290b05f22def421f864e42182fcf1c7a59f3ac94",
+      "dense_runtime_weight_dtype": "f16"
+    },
+    "nnis": {
+      "source_commit": "f00f3945be454dd6fcd0296a50de3d483c618884",
+      "resident_weight_dtype": "f16",
+      "activation_dtype": "f16",
+      "kv_dtype": "f16",
+      "projection_accumulator_dtype": "f32",
+      "attention_accumulator_dtype": "f32",
+      "logits_dtype": "f32",
+      "projection_layout": "nk_transposed_candidate"
+    }
+  },
+  "metric_contract": {
+    "name": "generation_stage_gpu",
+    "definition": "32 generated tokens divided by cumulative GPU time of 31 decoder forwards after prefill; sampling excluded",
+    "common_between_runtimes": true
+  },
+  "semantic_gate": {
+    "same_pinned_source_checkpoint": true,
+    "same_tokenizer_identity_prequalified": true,
+    "same_prompt": true,
+    "same_batch_size": true,
+    "same_decode_length": true,
+    "declared_runtime_weight_storage_f16_both": true,
+    "all_process_outputs_match_qualified_semantic_output": true,
+    "exact_32_token_trajectory_prequalified": true,
+    "numerical_or_bitwise_logit_equivalence_claimed": false
+  },
+  "raw": {
+    "edge_generation_stage_gpu_ms": [92.2171859741211, 90.95194244384766, 86.806884765625, 89.508544921875, 89.34756469726562, 91.60435485839844],
+    "nnis_generation_stage_gpu_ms": [249.61017370224, 249.63139295578003, 248.46755266189575, 253.13020753860474, 250.18393754959106, 247.13241624832153],
+    "edge_generation_tps_common_definition": [347.00689697265625, 351.83416748046875, 368.63433837890625, 357.50775146484375, 358.15191650390625, 349.328369140625],
+    "nnis_generation_tps_common_definition": [128.19990277388615, 128.18900548164837, 128.78945221287813, 126.41715230735431, 127.90589321369606, 129.4852390705638],
+    "edge_prefill_gpu_ms": [6.851136207580566, 7.4028801918029785, 7.656576156616211, 6.949183940887451, 6.770143985748291, 8.09875202178955],
+    "nnis_prefill_gpu_ms": [19.072736740112305, 19.048288345336914, 18.980960845947266, 19.403392791748047, 19.227968215942383, 18.990432739257812]
+  },
+  "aggregate": {
+    "edge_generation_stage_gpu_median_ms": 90.23024368286133,
+    "nnis_generation_stage_gpu_median_ms": 249.62078332901,
+    "nnis_over_edge_generation_latency_ratio": 2.7664868578474637,
+    "generation_separation_min_nnis_minus_max_edge_ms": 154.91523027420044,
+    "all_edge_generation_samples_below_all_nnis_generation_samples": true,
+    "edge_generation_tps_median": 354.67095947265625,
+    "nnis_generation_tps_median": 128.19445412776724,
+    "edge_over_nnis_generation_throughput_ratio": 2.7666638302400135,
+    "edge_prefill_gpu_median_ms": 7.176032066345215,
+    "nnis_prefill_gpu_median_ms": 19.06051254272461,
+    "nnis_over_edge_prefill_latency_ratio": 2.656130060103485
+  },
+  "comparability": {
+    "operational_speed_ratio_allowed_for_this_specific_workload_and_metric": true,
+    "scope": "direct same-device same-clock-regime dense-F16-storage comparison for pinned SmolLM2 prompt/decode workload using common generation-stage GPU timing definition",
+    "precision_semantic_equivalence_claimed": false,
+    "precision_semantic_equivalence_reason": "NNIS explicitly guarantees F32 projection and attention accumulation; TensorRT Edge-LLM v0.10.0 public runtime contracts expose F16 storage/bindings but do not establish an identical internal accumulation contract for all selected Thor kernels",
+    "general_performance_equivalence_claimed": false,
+    "cross_runtime_memory_ratio_allowed": false,
+    "memory_reason": "Edge unified-memory/RSS and NNIS CUDA allocator/free-memory diagnostics are not equivalent metrics"
+  }
+}
