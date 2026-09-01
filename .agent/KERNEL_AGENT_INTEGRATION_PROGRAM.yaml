@@ -109,6 +109,46 @@ phase_evidence:
       path is qualified on real NVIDIA hardware. This does not establish a
       speedup because no compatible baseline-vs-candidate comparison was part
       of the run.
+  NK2_canonical_rmsnorm_discovery:
+    result: microbenchmark_inter_run_qualified_but_not_decoder_transferable
+    forge_environment_consensus_merge: 11d707e55749ab7bbd7bcd544e157c199bbfd303
+    runs:
+      - ka5-rmsnorm-matrix-thor-20260901T105650Z
+      - ka6-rmsnorm-matrix-repeat-thor-20260901T123709Z
+    validated_metadata_records: 256
+    environment_compatible: true
+    policy_consensus:
+      candidate_block_size: 512
+      baseline_block_size: 256
+      candidate_preferred_shapes: 12
+      baseline_preferred_shapes: 0
+      inconclusive_shapes: 4
+    transfer_blocker: >-
+      The Forge campaign measured nnis-kernels F32RmsNorm with scalar gamma,
+      while the real decoder uses nnis-model F32DecoderKernels weighted RMSNorm
+      with a per-channel weight vector. The generic campaign therefore cannot
+      authorize a decoder launch-policy change.
+  NK2_weighted_rmsnorm_candidate_surface:
+    result: merged_infrastructure_only
+    pull_request: 70
+    exact_head_ci: 408f62e9cdbd1b71458496c3339af607ec633f8a
+    merge_commit: 08b6065e1faa2a5942bb0d6b449cde5dbbad4e5f
+    default_runtime_change: false
+    model_format_change: false
+    semantics: decoder_weighted_f32_rmsnorm_with_per_channel_weights
+    runtime_shape_audit:
+      current_prefill_execution: token_serial
+      current_decode_execution: token_serial
+      rows: 1
+      cols: config_hidden_size
+      qualified_SmolLM2_hidden_size: 576
+      weighted_rmsnorm_launches_per_token_for_30_layers: 61
+    next_gate: >-
+      Forge must compare block 256 versus block 512 on the actual weighted
+      1x576 decoder operation using an independent weighted host oracle,
+      CUDA-event measurements, fail-closed environment identity and paired
+      ordering. No end-to-end plan may be created from the generic RMSNorm
+      result.
 
 phases:
   - id: NK0
@@ -127,7 +167,7 @@ phases:
       - qualify_the_path_on_real_NVIDIA_hardware
   - id: NK2
     name: Native transformer kernel search
-    status: planned
+    status: in_progress
     goals:
       - RMSNorm_softmax_GEMV_GEMM_RoPE_attention
       - retain_existing_NNIS_reference_paths_as_oracles
