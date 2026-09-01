@@ -1,6 +1,6 @@
 schema_version: 1
 kind: nnis_r1_f16_alignment_sanity
-status: merged_single_run_qualified
+status: repeated_campaign_qualified_external_ratio_blocked_by_accumulator_contract
 last_updated: "2026-09-01"
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -23,7 +23,6 @@ nnis:
   exact_head_CI_green: true
   exact_head_harness_green: true
   post_merge_CI_green: true
-  run_context_id: r1-f16-edge-sanity-20260901T151721Z
   model: HuggingFaceTB/SmolLM2-135M
   revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
   source_model_sha256: 80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
@@ -52,7 +51,8 @@ nnis:
     gpu_nvd_hz: 1692000000
     emc_hz: 4266000000
     competing_cuda_processes: 0
-  single_run:
+  sanity_run:
+    run_context_id: r1-f16-edge-sanity-20260901T151721Z
     prefill_gpu_ms: 29.360736846923828
     generation_stage_total_gpu_ms: 356.33897495269775
     generation_tokens_per_second_edge_definition: 89.80213293886206
@@ -60,25 +60,79 @@ nnis:
     decode_forward_median_ms: 11.486144065856934
     decode_forward_max_ms: 12.98739242553711
     request_wall_ms: 387.239934
-    cuda_free_delta_after_model_bytes: null
-    cuda_free_delta_after_session_bytes: null
+  repeated_campaign:
+    run_context_id: r1-f16-merged-campaign-20260901T152629Z
+    run_directory: /tmp/r1-f16-merged-campaign-20260901T152629Z
+    summary_path: /tmp/r1-f16-merged-campaign-20260901T152629Z/summary.json
+    exact_head: fadfb8824fa35976f517834130b1ebf6b800fb05
+    processes: 5
+    warmups_per_process: 2
+    all_exact_greedy_32_of_32: true
+    all_environment_fingerprints_identical: true
+    raw:
+      prefill_gpu_ms: [32.09721755981445, 29.5916805267334, 30.67990493774414, 30.913408279418945, 29.817279815673828]
+      generation_stage_total_gpu_ms: [378.0202569961548, 361.92614555358887, 381.6076488494873, 366.8401584625244, 362.56329917907715]
+      generation_tokens_per_second_edge_definition: [84.65154818495746, 88.41582845874255, 83.85576153013997, 87.23145288704548, 88.2604501681638]
+      generation_forward_median_ms: [12.072959899902344, 11.61190414428711, 12.312352180480957, 11.828927993774414, 11.74841594696045]
+      request_wall_ms: [415.04600800000003, 393.183585, 418.411984, 399.215227, 393.98636700000003]
+    median:
+      prefill_gpu_ms: 30.67990493774414
+      generation_stage_total_gpu_ms: 366.8401584625244
+      generation_tokens_per_second_edge_definition: 87.23145288704548
+      generation_forward_median_ms: 11.828927993774414
+      request_wall_ms: 399.215227
+    range:
+      prefill_gpu_ms: [29.5916805267334, 32.09721755981445]
+      generation_stage_total_gpu_ms: [361.92614555358887, 381.6076488494873]
+      generation_tokens_per_second_edge_definition: [83.85576153013997, 88.41582845874255]
+      generation_forward_median_ms: [11.61190414428711, 12.312352180480957]
+      request_wall_ms: [393.183585, 418.411984]
+
+external_numeric_semantics_audit:
+  edge_llama_io:
+    input_activation_dtype: f16
+    kv_dtype: f16
+    logits_dtype: f32
+  edge_dense_weights: f16
+  edge_dense_projection_lowering: TensorRT_native_add_matrix_multiply
+  edge_projection_accumulator_contract: not_explicitly_fixed_to_f32_by_Edge_LLM_v0_10_0_source
+  edge_attention_io:
+    qkv_dtype: f16
+    output_dtype: f16
+    kv_dtype: f16
+  edge_attention_backend: dynamically_selected_FMHA_XQA_or_CuTe_DSL
+  edge_attention_accumulator_contract: not_exposed_as_identical_to_NNIS_f32_accumulator_contract
+  conclusion: >-
+    Storage dtypes, workload identity, semantic trajectory and generation-stage
+    timing accounting are aligned, but Edge-LLM v0.10.0 does not expose a stable
+    accumulator contract identical to NNIS's explicitly declared F32 projection
+    and attention accumulators. Under the NNIS roadmap rule, this blocks a formal
+    external speedup/slowdown/parity ratio.
 
 qualification:
-  precision_representation_alignment_for_this_NNIS_path: passed_for_declared_F16_storage_contract
+  precision_representation_alignment_for_declared_storage: passed
   generation_metric_accounting_alignment: passed
   semantic_trajectory_alignment: passed_exact_32_of_32
-  repeated_campaign_complete: false
+  repeated_campaign_complete: true
   cross_runtime_speed_comparison_allowed: false
   cross_runtime_memory_comparison_allowed: false
   blocker: >-
-    This is one NNIS physical process only. A repeated merged-head Thor campaign is
-    required before any NNIS/Edge-LLM speed ratio, slowdown, speedup, or parity
-    statement. CUDA free-memory deltas are not equivalent to Edge-LLM peak unified
-    memory/RSS and remain non-comparable.
+    External generation timing is operationally comparable, but internal numeric
+    accumulation semantics are not guaranteed identical by the pinned Edge-LLM
+    contract. CUDA free-memory deltas are also not equivalent to Edge-LLM peak
+    unified-memory/RSS. Preserve the two absolute distributions as diagnostic
+    engineering targets without publishing an NNIS/Edge speed ratio.
+
+engineering_target_only:
+  edge_reference_generation_tps_median: 350.21246337890625
+  nnis_f16_generation_tps_median: 87.23145288704548
+  note: >-
+    These absolute medians may guide NNIS optimization. Do not label their quotient
+    as a speedup, slowdown, parity ratio, or qualified external performance claim.
 
 next_gate:
-  - run_five_independent_NNIS_processes_on_merge_fadfb8824fa35976f517834130b1ebf6b800fb05_with_two_warmups_each
-  - require_all_five_exact_32_of_32_outputs_and_identical_fixed_Thor_fingerprint
-  - aggregate_prefill_generation_stage_total_step_and_throughput_distributions
-  - only_then_evaluate_cross_runtime_generation_speed_comparison
+  - publish_versioned_NNIS_F16_campaign_evidence_on_main_without_external_ratio_claim
+  - preserve_external_speed_comparison_block_until_accumulator_semantics_are_equivalent_or_policy_is_explicitly_revised
   - keep_memory_comparison_blocked_until_metric_semantics_are_equivalent
+  - profile_NNIS_F16_generation_to_identify_internal_kernel_and_launch_bottlenecks
+  - optimize_only_with_same_NNIS_F16_plan_and_exact_32_of_32_semantic_gate
