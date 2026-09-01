@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 
 const PROMPT_IDS: [u32; 3] = [22_007, 6_463, 314];
 const EXPECTED_GREEDY_IDS: [u32; 32] = [
-    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504,
-    8_872, 314, 253, 8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338,
-    21_837, 260, 2_591, 30,
+    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872, 314, 253,
+    8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260, 2_591, 30,
 ];
 
 #[derive(Debug)]
@@ -74,17 +73,13 @@ fn run(model_dir: &Path) -> Result<()> {
     let context = Context::new(&device)?;
     let construction_stream = Stream::new(&context)?;
     let plan = F16ReferencePlan::edge_llm_v0_10_0_alignment();
-    let model = F16ReferenceModel::load_directory(
-        &context,
-        &construction_stream,
-        model_dir,
-        plan,
-    )?;
+    let model = F16ReferenceModel::load_directory(&context, &construction_stream, model_dir, plan)?;
     validate_model_shape(&model)?;
 
-    let generated = model
-        .new_session()?
-        .generate(&PROMPT_IDS, GenerationConfig::greedy(EXPECTED_GREEDY_IDS.len()))?;
+    let generated = model.new_session()?.generate(
+        &PROMPT_IDS,
+        GenerationConfig::greedy(EXPECTED_GREEDY_IDS.len()),
+    )?;
     let exact = generated.as_slice() == EXPECTED_GREEDY_IDS;
 
     let report = QualificationReport {
