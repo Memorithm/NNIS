@@ -26,8 +26,7 @@ pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTI
 pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use f16_reference_execution_plan::{
-    F16ReferenceExecutionPlan, F16ReferenceProjectionLayout,
-    F16_REFERENCE_EXECUTION_PLAN_VERSION,
+    F16ReferenceExecutionPlan, F16ReferenceProjectionLayout, F16_REFERENCE_EXECUTION_PLAN_VERSION,
 };
 pub use f16_reference_kernels::F16ReferenceKernels;
 pub use f16_reference_runtime::{
