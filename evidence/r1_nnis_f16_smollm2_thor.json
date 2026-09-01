@@ -1,0 +1,167 @@
+{
+  "schema_version": 1,
+  "kind": "nnis_f16_reference_campaign_evidence",
+  "status": "qualified_internal_campaign_external_ratio_blocked",
+  "nnis": {
+    "repository": "Memorithm/NNIS",
+    "merge_commit": "fadfb8824fa35976f517834130b1ebf6b800fb05",
+    "profile_pr": 72,
+    "profile_pr_head": "d1df08c5e165d0051e17efd0e7901ad1522fb39f",
+    "profile_pr_ci_run": 181,
+    "profile_pr_harness_run": 55,
+    "post_merge_ci_run": 182
+  },
+  "model_identity": {
+    "source_repo": "HuggingFaceTB/SmolLM2-135M",
+    "source_revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+    "source_model_sha256": "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1",
+    "converted_model_manifest_sha256": "6913b89fb75671b7189c70a728634d4cb6bdb1f9698c83a369ff9c3b8a29a702",
+    "source_weight_dtype": "bfloat16",
+    "persisted_execution_weight_dtype": "f32"
+  },
+  "workload": {
+    "batch_size": 1,
+    "prompt_text": "Gravity is",
+    "prompt_ids": [22007, 6463, 314],
+    "decode_steps": 32,
+    "sampling": "greedy",
+    "expected_generated_ids": [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+  },
+  "numeric_plan": {
+    "schema_version": 1,
+    "resident_weight_dtype": "f16",
+    "activation_dtype": "f16",
+    "kv_dtype": "f16",
+    "projection_accumulator_dtype": "f32",
+    "attention_accumulator_dtype": "f32",
+    "logits_dtype": "f32",
+    "explicit_opt_in": true,
+    "model_format_v1_unchanged": true
+  },
+  "metric_contract": {
+    "generated_tokens": 32,
+    "generation_forward_runs": 31,
+    "first_generated_token_from_prefill": true,
+    "sampling_in_generation_stage_gpu_time": false,
+    "final_generated_token_consumed_by_model": false,
+    "generation_tokens_per_second_definition": "32 generated tokens divided by cumulative CUDA-event GPU time of exactly 31 post-prefill decoder forwards",
+    "metric_semantics_aligned_to_edge_reference": true
+  },
+  "thor_regime": {
+    "platform": "NVIDIA Jetson AGX Thor Developer Kit",
+    "gpu": "NVIDIA Thor",
+    "compute_capability": "11.0",
+    "power_mode": "MAXN",
+    "cpu_hz": 2601000000,
+    "gpu_gpc_hz": 1575000000,
+    "gpu_nvd_hz": 1692000000,
+    "emc_hz": 4266000000,
+    "competing_cuda_processes_before_each_run": 0
+  },
+  "campaign": {
+    "run_context_id": "r1-f16-merged-campaign-20260901T152629Z",
+    "processes": 5,
+    "warmups_per_process": 2,
+    "all_environment_fingerprints_identical": true,
+    "all_exact_greedy_32_of_32": true,
+    "raw_runs": [
+      {
+        "run": 1,
+        "prefill_gpu_ms": 32.09721755981445,
+        "generation_stage_total_gpu_ms": 378.0202569961548,
+        "generation_tokens_per_second_edge_definition": 84.65154818495746,
+        "generation_forward_median_ms": 12.072959899902344,
+        "request_wall_ms": 415.04600800000003
+      },
+      {
+        "run": 2,
+        "prefill_gpu_ms": 29.5916805267334,
+        "generation_stage_total_gpu_ms": 361.92614555358887,
+        "generation_tokens_per_second_edge_definition": 88.41582845874255,
+        "generation_forward_median_ms": 11.61190414428711,
+        "request_wall_ms": 393.183585
+      },
+      {
+        "run": 3,
+        "prefill_gpu_ms": 30.67990493774414,
+        "generation_stage_total_gpu_ms": 381.6076488494873,
+        "generation_tokens_per_second_edge_definition": 83.85576153013997,
+        "generation_forward_median_ms": 12.312352180480957,
+        "request_wall_ms": 418.411984
+      },
+      {
+        "run": 4,
+        "prefill_gpu_ms": 30.913408279418945,
+        "generation_stage_total_gpu_ms": 366.8401584625244,
+        "generation_tokens_per_second_edge_definition": 87.23145288704548,
+        "generation_forward_median_ms": 11.828927993774414,
+        "request_wall_ms": 399.215227
+      },
+      {
+        "run": 5,
+        "prefill_gpu_ms": 29.817279815673828,
+        "generation_stage_total_gpu_ms": 362.56329917907715,
+        "generation_tokens_per_second_edge_definition": 88.2604501681638,
+        "generation_forward_median_ms": 11.74841594696045,
+        "request_wall_ms": 393.98636700000003
+      }
+    ],
+    "median": {
+      "prefill_gpu_ms": 30.67990493774414,
+      "generation_stage_total_gpu_ms": 366.8401584625244,
+      "generation_tokens_per_second_edge_definition": 87.23145288704548,
+      "generation_forward_median_ms": 11.828927993774414,
+      "request_wall_ms": 399.215227
+    },
+    "range": {
+      "prefill_gpu_ms": [29.5916805267334, 32.09721755981445],
+      "generation_stage_total_gpu_ms": [361.92614555358887, 381.6076488494873],
+      "generation_tokens_per_second_edge_definition": [83.85576153013997, 88.41582845874255],
+      "generation_forward_median_ms": [11.61190414428711, 12.312352180480957],
+      "request_wall_ms": [393.183585, 418.411984]
+    }
+  },
+  "trusted_external_reference": {
+    "runtime": "TensorRT Edge-LLM",
+    "release": "v0.10.0",
+    "source_commit": "71dd1bae032e70771265917ec74d3ff4cad07a10",
+    "same_model_source_sha256": true,
+    "same_tokenizer_bytes": true,
+    "same_prompt_ids": true,
+    "same_decode_steps": true,
+    "exact_greedy_trajectory_equal": true,
+    "resident_weight_dtype": "f16",
+    "activation_io_dtype": "f16",
+    "kv_dtype": "f16",
+    "logits_dtype": "f32",
+    "generation_forward_runs": 31,
+    "generated_tokens": 32,
+    "generation_tokens_per_second_median": 350.21246337890625,
+    "generation_stage_total_gpu_ms_median": 91.37310791015625
+  },
+  "external_numeric_semantics_audit": {
+    "edge_dense_projection_lowering": "TensorRT native add_matrix_multiply",
+    "edge_projection_accumulator_contract": "not explicitly fixed to f32 by TensorRT Edge-LLM v0.10.0 source",
+    "edge_attention_io": "FP16 QKV, FP16 output, FP16 KV for this engine",
+    "edge_attention_backend": "runtime-selected FMHA/XQA/CuTe DSL backend",
+    "edge_attention_accumulator_contract": "not exposed as identical to the NNIS explicit f32 attention accumulator contract",
+    "source_paths": [
+      "experimental/builder/models/llama/modeling_llama.py",
+      "experimental/builder/ops/linear.py",
+      "experimental/builder/ops/backend.py",
+      "cpp/plugins/attentionPlugin/attentionPlugin.cpp"
+    ]
+  },
+  "comparability": {
+    "storage_precision_alignment": true,
+    "semantic_trajectory_alignment": true,
+    "generation_metric_accounting_alignment": true,
+    "repeated_physical_campaign_complete": true,
+    "cross_runtime_speed_comparison_allowed": false,
+    "cross_runtime_memory_comparison_allowed": false,
+    "speed_blocker": "The pinned Edge-LLM source does not expose stable projection and attention accumulator semantics identical to NNIS's explicit f32 accumulator contract; NNIS policy therefore forbids a speedup, slowdown, parity, or quotient claim.",
+    "memory_blocker": "NNIS CUDA free-memory deltas are not equivalent to Edge-LLM peak unified-memory/RSS.",
+    "absolute_values_may_be_used_as_engineering_targets": true,
+    "quotient_claim_forbidden": true
+  }
+}
