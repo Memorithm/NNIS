@@ -290,9 +290,9 @@ impl F16ReferenceModel {
         let kernels = F16ReferenceKernels::load(&context, &compiler)?;
         let projection_candidate = match execution_plan.projection_layout {
             F16ReferenceProjectionLayout::KnReference => None,
-            F16ReferenceProjectionLayout::NkTransposedCandidate => Some(
-                F16TransposedProjectionCandidate::load(&context, &compiler)?,
-            ),
+            F16ReferenceProjectionLayout::NkTransposedCandidate => {
+                Some(F16TransposedProjectionCandidate::load(&context, &compiler)?)
+            }
         };
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;

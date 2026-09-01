@@ -1,7 +1,7 @@
 use nnis_bench::{summarize_samples_ms, BenchmarkMetadata, TimingStatistics};
 use nnis_model::{
-    F16ReferenceExecutionPlan, F16ReferenceGenerationProfile, F16ReferenceModel,
-    F16ReferencePlan, F16ReferenceProjectionLayout,
+    F16ReferenceExecutionPlan, F16ReferenceGenerationProfile, F16ReferenceModel, F16ReferencePlan,
+    F16ReferenceProjectionLayout,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
@@ -17,9 +17,8 @@ const SOURCE_MODEL_SHA256: &str =
 const INPUT_IDS: [u32; 3] = [22_007, 6_463, 314];
 const DECODE_STEPS: usize = 32;
 const EXPECTED_GREEDY_IDS: [u32; DECODE_STEPS] = [
-    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872,
-    314, 253, 8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260,
-    2_591, 30,
+    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872, 314, 253,
+    8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260, 2_591, 30,
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -48,9 +47,9 @@ impl PlanName {
 
     const fn execution_plan(self) -> F16ReferenceExecutionPlan {
         match self {
-            Self::Reference => F16ReferenceExecutionPlan::reference(
-                F16ReferencePlan::edge_llm_v0_10_0_alignment(),
-            ),
+            Self::Reference => {
+                F16ReferenceExecutionPlan::reference(F16ReferencePlan::edge_llm_v0_10_0_alignment())
+            }
             Self::Transposed => {
                 F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate()
             }
@@ -161,7 +160,9 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
             }
             "--plan" => {
                 plan_name = Some(PlanName::parse(
-                    &args.next().ok_or("--plan requires reference or transposed")?,
+                    &args
+                        .next()
+                        .ok_or("--plan requires reference or transposed")?,
                 )?);
             }
             "--warmups" => {
