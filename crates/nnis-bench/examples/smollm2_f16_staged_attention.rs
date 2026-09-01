@@ -1,7 +1,9 @@
 use nnis_bench::{benchmark_gpu, BenchConfig, BenchmarkCase, BenchmarkReport};
 use nnis_jit::JitCompiler;
 use nnis_model::{F16CachedAttentionStagedWeightsCandidate, F16ReferenceKernels};
-use nnis_rt::{gpu_context, Context, DeviceBuffer, KvCache, KvCacheConfig, NnisError, Result, Stream};
+use nnis_rt::{
+    gpu_context, Context, DeviceBuffer, KvCache, KvCacheConfig, NnisError, Result, Stream,
+};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -76,12 +78,7 @@ fn require_run_context() -> Result<()> {
     }
 }
 
-fn deterministic_f32(
-    elements: usize,
-    multiplier: usize,
-    modulus: usize,
-    scale: f32,
-) -> Vec<f32> {
+fn deterministic_f32(elements: usize, multiplier: usize, modulus: usize, scale: f32) -> Vec<f32> {
     (0..elements)
         .map(|index| {
             let centered = ((index * multiplier + 11) % modulus) as i32 - (modulus as i32 / 2);
@@ -146,10 +143,8 @@ fn run() -> Result<()> {
         &deterministic_f32(kv_elements, 31, 127, 0.015625),
     )?);
 
-    let mut cache = KvCache::<u16>::new(
-        &stream,
-        KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?,
-    )?;
+    let mut cache =
+        KvCache::<u16>::new(&stream, KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?)?;
     cache.append_layer(0, source_keys, source_values, kv_rows)?;
 
     let reference_output = DeviceBuffer::<u16>::new(&context, query_elements)?;
@@ -201,13 +196,16 @@ fn run() -> Result<()> {
     let reference_report = benchmark_gpu(
         &context,
         &stream,
-        BenchmarkCase::new("smollm2_f16_attention_reference_per_position_barriers", "f16")
-            .with_dimension("query_heads", QUERY_HEADS as u64)
-            .with_dimension("kv_heads", KV_HEADS as u64)
-            .with_dimension("head_dim", HEAD_DIM as u64)
-            .with_dimension("kv_rows", kv_rows as u64)
-            .with_dimension("block_barriers", (2 * kv_rows + 1) as u64)
-            .with_work_items(work_items as u64),
+        BenchmarkCase::new(
+            "smollm2_f16_attention_reference_per_position_barriers",
+            "f16",
+        )
+        .with_dimension("query_heads", QUERY_HEADS as u64)
+        .with_dimension("kv_heads", KV_HEADS as u64)
+        .with_dimension("head_dim", HEAD_DIM as u64)
+        .with_dimension("kv_rows", kv_rows as u64)
+        .with_dimension("block_barriers", (2 * kv_rows + 1) as u64)
+        .with_work_items(work_items as u64),
         bench_config,
         || unsafe {
             reference.enqueue_cached_attention_decode(

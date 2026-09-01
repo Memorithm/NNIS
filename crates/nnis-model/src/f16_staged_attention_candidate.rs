@@ -212,7 +212,9 @@ impl F16CachedAttentionStagedWeightsCandidate {
         let shared_bytes = kv_rows
             .checked_mul(2)
             .and_then(|value| value.checked_mul(std::mem::size_of::<f32>()))
-            .ok_or_else(|| NnisError::invalid_input("staged F16 attention shared-memory size overflow"))?;
+            .ok_or_else(|| {
+                NnisError::invalid_input("staged F16 attention shared-memory size overflow")
+            })?;
         let shared_bytes = u32::try_from(shared_bytes).map_err(|_| {
             NnisError::invalid_input("staged F16 attention shared-memory size exceeds u32")
         })?;
@@ -232,11 +234,8 @@ impl F16CachedAttentionStagedWeightsCandidate {
         let launch = KernelLaunch::new(
             &self.kernel,
             stream,
-            LaunchConfig::new(
-                Dim3::new(query_heads_u32, 1, 1),
-                Dim3::new(threads, 1, 1),
-            )
-            .with_dynamic_shared_memory(shared_bytes),
+            LaunchConfig::new(Dim3::new(query_heads_u32, 1, 1), Dim3::new(threads, 1, 1))
+                .with_dynamic_shared_memory(shared_bytes),
         );
         // SAFETY: argument order and widths match the CUDA signature exactly;
         // asynchronous lifetime obligations are stated on this method.
