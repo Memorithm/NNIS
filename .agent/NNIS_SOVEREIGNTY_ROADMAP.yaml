@@ -138,10 +138,91 @@ verified_history:
     cross_runtime_speed_comparison_allowed: false
     cross_runtime_memory_comparison_allowed: false
     blocker: >-
-      Edge-LLM runtime weight bindings are F16 while the qualified NNIS baseline
-      reports f32 logical execution weights, and memory metric semantics also
-      differ. The Edge metrics are a qualified autonomous reference only until
-      precision/representation and metric semantics are aligned.
+      Edge-LLM runtime weight bindings are F16 while the previously qualified
+      NNIS base path reports f32 logical execution weights. NNIS now has an
+      explicit resident-F16 alignment path, but no cross-runtime ratio is allowed
+      until a same-regime direct campaign verifies comparable precision and timing
+      semantics. Memory metric semantics also remain non-equivalent.
+  R1_F16_transposed_projection:
+    status: promoted_explicit_plan
+    infrastructure_pr: 74
+    infrastructure_merge_sha: c404cf41d0a0339e1537d52d0b62238548561d33
+    explicit_plan_pr: 75
+    explicit_plan_exact_head: cdcc00827e26f9164c303de97f9923426b7e7486
+    explicit_plan_merge_sha: f00f3945be454dd6fcd0296a50de3d483c618884
+    model_format_change: false
+    default_runtime_change: false
+    numeric_contract_change: false
+    hypothesis: >-
+      Preserve the qualified F16 numeric contract and F32 accumulation order,
+      while materializing projection weights once as resident row-major [N,K]
+      tensors so decoder GEMV reads contiguous K values per output row.
+    isolated_physical:
+      exact_head: c4a7c946e4e5912ae3010bbb386887b26a889646
+      hardware: NVIDIA_Jetson_AGX_Thor
+      warmups: 20
+      iterations: 100
+      bitwise_equal_all_tested_shapes_and_lm_head: true
+      weighted_projection_reference_gpu_ms_per_token: 7.309519957751036
+      weighted_projection_candidate_gpu_ms_per_token: 3.2685280675068498
+      reference_over_candidate_ratio: 2.23633385021734
+      estimated_gpu_ms_saved_per_token: 4.040991890244186
+      note: isolated_projection_measurement_not_serving_performance
+    end_to_end_abba:
+      exact_head: cdcc00827e26f9164c303de97f9923426b7e7486
+      run_context_id: r1-f16-transposed-e2e-20260901T191532Z
+      rounds: 2
+      order_per_round: [A, B, B, A]
+      processes: 8
+      warmups_per_process: 2
+      iterations_per_process: 5
+      decode_steps: 32
+      parent: F16_reference_kn_layout
+      candidate: F16_nk_transposed_projection_layout
+      generation_stage_parent_median_ms: 365.0825276374817
+      generation_stage_candidate_median_ms: 252.13628768920898
+      generation_stage_latency_reduction_fraction: 0.3093718033540779
+      generation_stage_parent_over_candidate_ratio: 1.4479570988508157
+      generation_wall_parent_median_ms: 396.8669395
+      generation_wall_candidate_median_ms: 272.8032055
+      generation_wall_latency_reduction_fraction: 0.3126078835296887
+      request_parent_median_ms: 399.504477
+      request_candidate_median_ms: 274.8531515
+      request_latency_reduction_fraction: 0.31201484007399494
+      prefill_parent_median_ms: 30.15563201904297
+      prefill_candidate_median_ms: 19.18948745727539
+      prefill_latency_reduction_fraction: 0.363651624175629
+      parent_generation_tps_edge_definition: 87.6514904395149
+      candidate_generation_tps_edge_definition: 126.92074868656272
+      candidate_over_parent_generation_tps_ratio: 1.4480158643069065
+      all_candidate_generation_medians_below_all_parent_medians: true
+      generation_separation_min_parent_minus_max_candidate_ms: 108.21385383605957
+      generation_wall_separation_ms: 118.31810300000001
+      request_separation_ms: 117.88311200000004
+      exact_greedy_trajectory_32_of_32_all_processes: true
+      fingerprint_compatible: true
+      git_dirty: false
+    memory:
+      MinMemory: not_claimed
+      reason: >-
+        CUDA free-memory deltas varied materially and are allocator diagnostics,
+        not an exact resident-storage or cross-runtime memory equivalence metric.
+    promotion:
+      explicit_plan: true
+      default_runtime: false
+      MinLatency: promoted
+      MinMemory: not_claimed
+      DeterministicOnly: eligible_exact_greedy_trajectory
+    gates:
+      - real_pinned_SmolLM2_end_to_end_execution
+      - physical_Thor_CC11_MAXN_fixed_clock_fingerprint
+      - bitwise_equal_isolated_projection_outputs
+      - exact_32_of_32_greedy_trajectory_in_all_eight_processes
+      - fingerprint_compatible_end_to_end_ABBA
+      - all_candidate_generation_medians_below_all_parent_medians
+      - positive_108_213854_ms_generation_distribution_separation
+      - exact_head_CI_and_benchmark_harness_green_before_physical_gate
+      - model_format_v1_and_F16_numeric_contract_preserved
   E1_hybrid_GEMV:
     status: rejected
     end_to_end_result: "generation throughput -5.57%"
@@ -341,9 +422,9 @@ roadmap:
     name: Trustworthy evidence substrate
     status: substantially_complete
     next:
-      - require fingerprint linkage in every new optimization campaign
-      - prevent cross-regime comparisons from being reported as speedups
-      - retain exact-head SHA and clean-worktree provenance
+      - require fingerprint linkage in every new optimization_campaign
+      - prevent_cross_regime_comparisons_from_being_reported_as_speedups
+      - retain_exact_head_SHA_and_clean_worktree_provenance
 
   - id: R1
     name: TensorRT Edge-LLM reference line on Thor
@@ -358,13 +439,14 @@ roadmap:
       - exact_32_of_32_greedy_trajectory_match_with_qualified_NNIS_R2_artifacts
       - five_process_reference_campaign_under_fixed_MAXN_clocks
       - machine_readable_native_Edge_LLM_latency_throughput_and_unified_memory_profiles
+      - NNIS_explicit_resident_F16_projection_plan_promoted_for_MinLatency
     next:
       - publish_reproducible_NNML5_reference_evidence_to_main_via_exact_head_green_PR
-      - define_precision_alignment_strategy_before_any_cross_runtime_speed_claim
+      - run_same_regime_direct_NNIS_F16_vs_Edge_LLM_campaign_before_any_cross_runtime_ratio
       - define_comparable_memory_metric_before_any_cross_runtime_memory_claim
       - preserve_TensorRT_LLM_as_secondary_server_reference
     forbid:
-      - NNIS_vs_Edge_LLM_speedup_or_slowdown_from_current_F32_vs_F16_regime
+      - NNIS_vs_Edge_LLM_speedup_or_slowdown_without_direct_same_regime_cross_runtime_evidence
       - cross_runtime_memory_ratio_from_non_equivalent_memory_metrics
       - calling_exact_greedy_trajectory_bitwise_logit_equivalence
 
@@ -443,7 +525,7 @@ roadmap:
     name: Backend sovereignty
     status: long_term
     goals:
-      - separate NNIS execution IR from CUDA-specific launch details
+      - separate_NNIS_execution_IR_from_CUDA_specific_launch_details
       - define_backend_capability_contracts
       - keep_CUDA_as_first_production_backend
       - add_CPU_reference_backend_where_it_improves_verification
