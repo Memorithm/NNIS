@@ -10,6 +10,7 @@ mod config;
 mod f16_reference_execution_plan;
 mod f16_reference_kernels;
 mod f16_reference_runtime;
+mod f16_staged_attention_candidate;
 mod f16_transposed_projection_candidate;
 mod format;
 mod fused_swiglu;
@@ -33,6 +34,7 @@ pub use f16_reference_runtime::{
     F16ReferenceAccumulator, F16ReferenceGenerationProfile, F16ReferenceLogits, F16ReferenceModel,
     F16ReferencePlan, F16ReferenceSession, F16ReferenceStorage, F16_REFERENCE_PLAN_VERSION,
 };
+pub use f16_staged_attention_candidate::F16CachedAttentionStagedWeightsCandidate;
 pub use f16_transposed_projection_candidate::F16TransposedProjectionCandidate;
 pub use format::{
     load_model_directory, ModelManifest, TensorManifest, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
