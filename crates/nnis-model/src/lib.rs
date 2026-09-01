@@ -25,8 +25,9 @@ pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use f16_reference_kernels::F16ReferenceKernels;
 pub use f16_reference_runtime::{
-    F16ReferenceAccumulator, F16ReferenceLogits, F16ReferenceModel, F16ReferencePlan,
-    F16ReferenceSession, F16ReferenceStorage, F16_REFERENCE_PLAN_VERSION,
+    F16ReferenceAccumulator, F16ReferenceGenerationProfile, F16ReferenceLogits,
+    F16ReferenceModel, F16ReferencePlan, F16ReferenceSession, F16ReferenceStorage,
+    F16_REFERENCE_PLAN_VERSION,
 };
 pub use format::{
     load_model_directory, ModelManifest, TensorManifest, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
