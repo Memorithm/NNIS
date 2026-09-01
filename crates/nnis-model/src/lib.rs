@@ -17,6 +17,7 @@ mod projection_plan;
 mod representation_plan;
 mod runtime;
 mod runtime_kernels;
+mod weighted_rmsnorm_candidate;
 mod weights;
 
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
@@ -41,4 +42,5 @@ pub use representation_plan::{
 };
 pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
+pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
