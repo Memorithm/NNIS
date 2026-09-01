@@ -206,11 +206,11 @@ impl F16TransposedProjectionCandidate {
         }
         let grid = u32::try_from(n)
             .map_err(|_| NnisError::invalid_input("F16 transposed projection N exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(5, 3);
         args.push_buffer(input)
             .push_buffer(weight_nk)
@@ -242,11 +242,11 @@ impl F16TransposedProjectionCandidate {
         }
         let grid = u32::try_from(n)
             .map_err(|_| NnisError::invalid_input("F16 transposed LM-head N exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(5, 3);
         args.push_buffer(input)
             .push_buffer(weight_nk)
@@ -279,6 +279,7 @@ impl F16TransposedProjectionCandidate {
         Ok(elements)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn validate_projection(
         &self,
         stream: &Stream,
@@ -289,9 +290,9 @@ impl F16TransposedProjectionCandidate {
         k: usize,
         n: usize,
     ) -> Result<()> {
-        let elements = k
-            .checked_mul(n)
-            .ok_or_else(|| NnisError::invalid_input("F16 transposed projection K*N overflows usize"))?;
+        let elements = k.checked_mul(n).ok_or_else(|| {
+            NnisError::invalid_input("F16 transposed projection K*N overflows usize")
+        })?;
         if input.len() != k || weight.len() != elements || output_len != n {
             return Err(NnisError::invalid_input(format!(
                 "F16 transposed projection expects input={k}, weight={elements}, output={n}; got {}/{}/{}",
@@ -336,9 +337,7 @@ mod tests {
 
         let k = 7usize;
         let n = 5usize;
-        let input_host: Vec<f32> = (0..k)
-            .map(|index| ((index as f32) - 3.0) * 0.125)
-            .collect();
+        let input_host: Vec<f32> = (0..k).map(|index| ((index as f32) - 3.0) * 0.125).collect();
         let weight_host: Vec<f32> = (0..k * n)
             .map(|index| ((index as i32 % 11) - 5) as f32 * 0.0625)
             .collect();
