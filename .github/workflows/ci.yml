@@ -17,6 +17,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate external reference evidence
+        run: >-
+          python3 tools/validate_external_reference_evidence.py --self-test
+          evidence/r1_tensorrt_edge_llm_v0_10_0_smollm2_thor.json
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
