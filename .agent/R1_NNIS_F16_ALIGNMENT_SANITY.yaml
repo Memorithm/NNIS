@@ -1,0 +1,78 @@
+schema_version: 1
+kind: nnis_r1_f16_alignment_sanity
+status: qualified_single_run
+last_updated: "2026-09-01"
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+reference:
+  runtime: TensorRT_Edge_LLM
+  release: v0.10.0
+  commit: 71dd1bae032e70771265917ec74d3ff4cad07a10
+  reference_generation_tokens_per_second_median: 350.21246337890625
+  reference_generation_stage_total_gpu_ms_median: 91.37310791015625
+  reference_generation_forward_runs: 31
+  reference_generated_tokens: 32
+
+nnis:
+  pr: 72
+  exact_head: d1df08c5e165d0051e17efd0e7901ad1522fb39f
+  run_context_id: r1-f16-edge-sanity-20260901T151721Z
+  model: HuggingFaceTB/SmolLM2-135M
+  revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+  source_model_sha256: 80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
+  prompt_ids: [22007, 6463, 314]
+  decode_steps: 32
+  numeric_plan:
+    resident_weight_dtype: f16
+    activation_dtype: f16
+    kv_dtype: f16
+    projection_accumulator_dtype: f32
+    attention_accumulator_dtype: f32
+    logits_dtype: f32
+  metric_contract:
+    generated_tokens: 32
+    generation_forward_runs: 31
+    sampling_in_timed_stage: false
+    final_generated_token_consumed_by_model: false
+    throughput_definition: generated_tokens_divided_by_cumulative_31_decoder_forward_GPU_time
+  correctness:
+    exact_greedy_32_of_32: true
+    generated_ids: [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+  thor_regime:
+    power_mode: MAXN
+    cpu_hz: 2601000000
+    gpu_gpc_hz: 1575000000
+    gpu_nvd_hz: 1692000000
+    emc_hz: 4266000000
+    competing_cuda_processes: 0
+  single_run:
+    prefill_gpu_ms: 29.360736846923828
+    generation_stage_total_gpu_ms: 356.33897495269775
+    generation_tokens_per_second_edge_definition: 89.80213293886206
+    decode_forward_min_ms: 9.945023536682129
+    decode_forward_median_ms: 11.486144065856934
+    decode_forward_max_ms: 12.98739242553711
+    request_wall_ms: 387.239934
+    cuda_free_delta_after_model_bytes: null
+    cuda_free_delta_after_session_bytes: null
+
+qualification:
+  precision_representation_alignment_for_this_NNIS_path: passed_for_declared_F16_storage_contract
+  generation_metric_accounting_alignment: passed
+  semantic_trajectory_alignment: passed_exact_32_of_32
+  repeated_campaign_complete: false
+  cross_runtime_speed_comparison_allowed: false
+  cross_runtime_memory_comparison_allowed: false
+  blocker: >-
+    This is one NNIS physical process only. A repeated exact-head Thor campaign is
+    required before any NNIS/Edge-LLM speed ratio, slowdown, speedup, or parity
+    statement. CUDA free-memory deltas are not equivalent to Edge-LLM peak unified
+    memory/RSS and remain non-comparable.
+
+next_gate:
+  - merge_PR72_only_if_exact_head_CI_and_harness_remain_green
+  - run_five_independent_NNIS_processes_on_merged_head_with_two_warmups_each
+  - require_all_five_exact_32_of_32_outputs_and_identical_fixed_Thor_fingerprint
+  - aggregate_prefill_generation_stage_total_step_and_throughput_distributions
+  - only_then_evaluate_cross_runtime_generation_speed_comparison
+  - keep_memory_comparison_blocked_until_metric_semantics_are_equivalent
