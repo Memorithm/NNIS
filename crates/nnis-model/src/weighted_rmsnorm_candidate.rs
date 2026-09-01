@@ -8,7 +8,9 @@
 //!
 //! No block size chosen through this API is a runtime-default promotion.
 
-use nnis_jit::{CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module};
+use nnis_jit::{
+    CompileOptions, Dim3, JitCompiler, Kernel, KernelArgs, KernelLaunch, LaunchConfig, Module,
+};
 use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
 use std::sync::Arc;
 
@@ -148,9 +150,9 @@ impl F32WeightedRmsNormCandidate {
         cols: usize,
         epsilon: f32,
     ) -> Result<()> {
-        let count = rows
-            .checked_mul(cols)
-            .ok_or_else(|| NnisError::invalid_input("weighted RMSNorm candidate shape overflows usize"))?;
+        let count = rows.checked_mul(cols).ok_or_else(|| {
+            NnisError::invalid_input("weighted RMSNorm candidate shape overflows usize")
+        })?;
         if input.len() != count || output.len() != count || weight.len() != cols {
             return Err(NnisError::invalid_input(format!(
                 "weighted RMSNorm candidate expects input/output {count} and weight {cols}; got {}/{}/{}",
@@ -272,11 +274,7 @@ mod tests {
 
         let mut expected = Vec::with_capacity(rows * cols);
         for row in input_host.chunks_exact(cols) {
-            let mean_square = row
-                .iter()
-                .map(|value| value * value)
-                .sum::<f32>()
-                / cols as f32;
+            let mean_square = row.iter().map(|value| value * value).sum::<f32>() / cols as f32;
             let inverse = 1.0 / (mean_square + epsilon).sqrt();
             expected.extend(
                 row.iter()
@@ -284,7 +282,10 @@ mod tests {
                     .map(|(&value, &weight)| value * inverse * weight),
             );
         }
-        for actual in [output_256.to_vec(&stream).unwrap(), output_512.to_vec(&stream).unwrap()] {
+        for actual in [
+            output_256.to_vec(&stream).unwrap(),
+            output_512.to_vec(&stream).unwrap(),
+        ] {
             for (index, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
                 assert!(
                     (actual - expected).abs() <= 5.0e-5,
