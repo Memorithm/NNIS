@@ -1,0 +1,111 @@
+use crate::{F16ReferencePlan, ModelConfig};
+use nnis_rt::{NnisError, Result};
+use serde::{Deserialize, Serialize};
+
+pub const F16_REFERENCE_EXECUTION_PLAN_VERSION: u32 = 1;
+
+/// Physical resident layout used by F16 decoder projection weights.
+///
+/// This is deliberately separate from [`F16ReferencePlan`], which remains the
+/// stable numeric contract. Changing this enum changes only the explicit
+/// physical execution representation selected by the caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum F16ReferenceProjectionLayout {
+    /// Qualified reference layout: model-format orientation `[K, N]`.
+    KnReference,
+    /// Candidate layout: resident one-time transpose `[N, K]`.
+    NkTransposedCandidate,
+}
+
+/// Versioned physical execution plan for the NNML5 F16 runtime.
+///
+/// Existing `F16ReferenceModel::{new,load_directory}` APIs continue to use
+/// [`Self::reference`] and therefore preserve the qualified `[K, N]` path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct F16ReferenceExecutionPlan {
+    pub schema_version: u32,
+    pub numeric: F16ReferencePlan,
+    pub projection_layout: F16ReferenceProjectionLayout,
+}
+
+impl F16ReferenceExecutionPlan {
+    /// Preserve the qualified physical projection layout for an existing numeric plan.
+    pub const fn reference(numeric: F16ReferencePlan) -> Self {
+        Self {
+            schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
+            numeric,
+            projection_layout: F16ReferenceProjectionLayout::KnReference,
+        }
+    }
+
+    /// Explicit Thor candidate measured in PR #74.
+    pub const fn edge_llm_v0_10_0_transposed_projection_candidate() -> Self {
+        Self {
+            schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
+            numeric: F16ReferencePlan::edge_llm_v0_10_0_alignment(),
+            projection_layout: F16ReferenceProjectionLayout::NkTransposedCandidate,
+        }
+    }
+
+    pub fn validate(&self, config: &ModelConfig) -> Result<()> {
+        if self.schema_version != F16_REFERENCE_EXECUTION_PLAN_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "unsupported F16 reference execution-plan schema {}; expected {}",
+                self.schema_version, F16_REFERENCE_EXECUTION_PLAN_VERSION
+            )));
+        }
+        self.numeric.validate(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Activation, WeightDType};
+
+    fn tiny_config() -> ModelConfig {
+        ModelConfig {
+            vocab_size: 4,
+            eos_token_id: Some(0),
+            hidden_size: 4,
+            intermediate_size: 4,
+            num_hidden_layers: 1,
+            num_attention_heads: 2,
+            num_key_value_heads: 1,
+            max_position_embeddings: 8,
+            rms_norm_eps: 1.0e-5,
+            rope_theta: 10_000.0,
+            activation: Activation::Silu,
+            weight_dtype: WeightDType::F32,
+        }
+    }
+
+    #[test]
+    fn reference_execution_plan_is_versioned_explicit_and_fail_closed() {
+        let config = tiny_config();
+        let numeric = F16ReferencePlan::edge_llm_v0_10_0_alignment();
+        let reference = F16ReferenceExecutionPlan::reference(numeric);
+        reference.validate(&config).unwrap();
+        assert_eq!(
+            reference.projection_layout,
+            F16ReferenceProjectionLayout::KnReference
+        );
+
+        let candidate =
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
+        candidate.validate(&config).unwrap();
+        assert_eq!(
+            candidate.projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedCandidate
+        );
+        let encoded = serde_json::to_string(&candidate).unwrap();
+        assert!(encoded.contains("\"schema_version\":1"));
+        assert!(encoded.contains("\"projection_layout\":\"nk_transposed_candidate\""));
+        assert!(encoded.contains("\"numeric\""));
+
+        let mut future = candidate;
+        future.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
+        assert!(future.validate(&config).is_err());
+    }
+}

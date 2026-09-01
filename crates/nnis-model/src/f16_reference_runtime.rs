@@ -13,8 +13,9 @@
 
 use crate::runtime::build_rope_cache;
 use crate::{
-    load_model_directory, F16ReferenceKernels, F32RuntimeKernels, GenerationConfig, ModelConfig,
-    ModelWeights, WeightDType,
+    load_model_directory, F16ReferenceExecutionPlan, F16ReferenceKernels,
+    F16ReferenceProjectionLayout, F16TransposedProjectionCandidate, F32RuntimeKernels,
+    GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -112,6 +113,8 @@ impl F16ModelWeights {
         source: &ModelWeights,
         stream: &Stream,
         kernels: &F16ReferenceKernels,
+        execution_plan: F16ReferenceExecutionPlan,
+        projection_candidate: Option<&F16TransposedProjectionCandidate>,
     ) -> Result<Self> {
         fn narrow(
             stream: &Stream,
@@ -126,27 +129,109 @@ impl F16ModelWeights {
             Ok(output)
         }
 
+        fn narrow_projection(
+            stream: &Stream,
+            kernels: &F16ReferenceKernels,
+            source: &MatrixWeight,
+            layout: F16ReferenceProjectionLayout,
+            projection_candidate: Option<&F16TransposedProjectionCandidate>,
+        ) -> Result<Arc<DeviceBuffer<u16>>> {
+            let kn = narrow(stream, kernels, source.tensor().as_f32()?)?;
+            match layout {
+                F16ReferenceProjectionLayout::KnReference => Ok(kn),
+                F16ReferenceProjectionLayout::NkTransposedCandidate => {
+                    let candidate = projection_candidate.ok_or_else(|| {
+                        NnisError::unsupported(
+                            "F16 transposed projection plan selected without candidate kernels",
+                        )
+                    })?;
+                    let nk = Arc::new(DeviceBuffer::<u16>::new(stream.ctx(), kn.len())?);
+                    // SAFETY: both buffers remain alive through synchronization.
+                    unsafe {
+                        candidate.enqueue_transpose_kn_to_nk(
+                            stream,
+                            &kn,
+                            &nk,
+                            source.rows(),
+                            source.cols(),
+                        )?;
+                    }
+                    stream.synchronize()?;
+                    Ok(nk)
+                }
+            }
+        }
+
+        let layout = execution_plan.projection_layout;
         let token_embedding = narrow(stream, kernels, source.token_embedding.tensor().as_f32()?)?;
         let mut layers = Vec::with_capacity(source.layers.len());
         for layer in &source.layers {
             layers.push(F16DecoderLayerWeights {
                 input_norm: narrow(stream, kernels, layer.input_norm.tensor().as_f32()?)?,
-                q_proj: narrow(stream, kernels, layer.q_proj.tensor().as_f32()?)?,
-                k_proj: narrow(stream, kernels, layer.k_proj.tensor().as_f32()?)?,
-                v_proj: narrow(stream, kernels, layer.v_proj.tensor().as_f32()?)?,
-                o_proj: narrow(stream, kernels, layer.o_proj.tensor().as_f32()?)?,
+                q_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.q_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                k_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.k_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                v_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.v_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                o_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.o_proj,
+                    layout,
+                    projection_candidate,
+                )?,
                 post_attention_norm: narrow(
                     stream,
                     kernels,
                     layer.post_attention_norm.tensor().as_f32()?,
                 )?,
-                gate_proj: narrow(stream, kernels, layer.gate_proj.tensor().as_f32()?)?,
-                up_proj: narrow(stream, kernels, layer.up_proj.tensor().as_f32()?)?,
-                down_proj: narrow(stream, kernels, layer.down_proj.tensor().as_f32()?)?,
+                gate_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.gate_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                up_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.up_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                down_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.down_proj,
+                    layout,
+                    projection_candidate,
+                )?,
             });
         }
         let final_norm = narrow(stream, kernels, source.final_norm.tensor().as_f32()?)?;
-        let lm_head = narrow(stream, kernels, source.lm_head.tensor().as_f32()?)?;
+        let lm_head = narrow_projection(
+            stream,
+            kernels,
+            &source.lm_head,
+            layout,
+            projection_candidate,
+        )?;
         Ok(Self {
             token_embedding,
             layers,
@@ -160,10 +245,11 @@ impl F16ModelWeights {
 #[derive(Debug)]
 pub struct F16ReferenceModel {
     config: ModelConfig,
-    plan: F16ReferencePlan,
+    execution_plan: F16ReferenceExecutionPlan,
     weights: F16ModelWeights,
     context: Arc<Context>,
     kernels: F16ReferenceKernels,
+    projection_candidate: Option<F16TransposedProjectionCandidate>,
     top_k: F32TopK,
     token_runtime: F32RuntimeKernels,
     rope_cos: DeviceBuffer<f32>,
@@ -177,7 +263,21 @@ impl F16ReferenceModel {
         stream: &Stream,
         plan: F16ReferencePlan,
     ) -> Result<Self> {
-        plan.validate(&config)?;
+        Self::new_with_execution_plan(
+            config,
+            weights,
+            stream,
+            F16ReferenceExecutionPlan::reference(plan),
+        )
+    }
+
+    pub fn new_with_execution_plan(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        execution_plan: F16ReferenceExecutionPlan,
+    ) -> Result<Self> {
+        execution_plan.validate(&config)?;
         weights.validate(&config)?;
         if !Arc::ptr_eq(weights.context(), stream.ctx()) {
             return Err(NnisError::invalid_input(
@@ -188,9 +288,21 @@ impl F16ReferenceModel {
         let context = Arc::clone(stream.ctx());
         let compiler = JitCompiler::new();
         let kernels = F16ReferenceKernels::load(&context, &compiler)?;
+        let projection_candidate = match execution_plan.projection_layout {
+            F16ReferenceProjectionLayout::KnReference => None,
+            F16ReferenceProjectionLayout::NkTransposedCandidate => {
+                Some(F16TransposedProjectionCandidate::load(&context, &compiler)?)
+            }
+        };
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;
-        let resident_weights = F16ModelWeights::from_f32(&weights, stream, &kernels)?;
+        let resident_weights = F16ModelWeights::from_f32(
+            &weights,
+            stream,
+            &kernels,
+            execution_plan,
+            projection_candidate.as_ref(),
+        )?;
         let (cos_host, sin_host) = build_rope_cache(&config)?;
         let rope_cos = DeviceBuffer::from_host(&context, stream, &cos_host)?;
         let rope_sin = DeviceBuffer::from_host(&context, stream, &sin_host)?;
@@ -198,10 +310,11 @@ impl F16ReferenceModel {
 
         Ok(Self {
             config,
-            plan,
+            execution_plan,
             weights: resident_weights,
             context,
             kernels,
+            projection_candidate,
             top_k,
             token_runtime,
             rope_cos,
@@ -219,17 +332,86 @@ impl F16ReferenceModel {
         Self::new(config, weights, stream, plan)
     }
 
+    pub fn load_directory_with_execution_plan(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        execution_plan: F16ReferenceExecutionPlan,
+    ) -> Result<Self> {
+        let (config, weights) = load_model_directory(context, stream, directory)?;
+        Self::new_with_execution_plan(config, weights, stream, execution_plan)
+    }
+
     pub fn config(&self) -> &ModelConfig {
         &self.config
     }
 
     #[must_use]
     pub const fn plan(&self) -> F16ReferencePlan {
-        self.plan
+        self.execution_plan.numeric
+    }
+
+    #[must_use]
+    pub const fn execution_plan(&self) -> F16ReferenceExecutionPlan {
+        self.execution_plan
     }
 
     pub fn new_session(&self) -> Result<F16ReferenceSession<'_>> {
         F16ReferenceSession::new(self)
+    }
+
+    unsafe fn enqueue_projection(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<u16>,
+        weight: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<u16>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        match self.execution_plan.projection_layout {
+            F16ReferenceProjectionLayout::KnReference => unsafe {
+                self.kernels
+                    .enqueue_project_kn(stream, input, weight, output, k, n)
+            },
+            F16ReferenceProjectionLayout::NkTransposedCandidate => unsafe {
+                self.projection_candidate
+                    .as_ref()
+                    .ok_or_else(|| {
+                        NnisError::unsupported(
+                            "F16 transposed projection plan selected without candidate kernels",
+                        )
+                    })?
+                    .enqueue_project_nk(stream, input, weight, output, k, n)
+            },
+        }
+    }
+
+    unsafe fn enqueue_lm_head(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<u16>,
+        weight: &DeviceBuffer<u16>,
+        output: &DeviceBuffer<f32>,
+        k: usize,
+        n: usize,
+    ) -> Result<()> {
+        match self.execution_plan.projection_layout {
+            F16ReferenceProjectionLayout::KnReference => unsafe {
+                self.kernels
+                    .enqueue_lm_head_f32_logits(stream, input, weight, output, k, n)
+            },
+            F16ReferenceProjectionLayout::NkTransposedCandidate => unsafe {
+                self.projection_candidate
+                    .as_ref()
+                    .ok_or_else(|| {
+                        NnisError::unsupported(
+                            "F16 transposed projection plan selected without candidate kernels",
+                        )
+                    })?
+                    .enqueue_lm_head_nk_f32_logits(stream, input, weight, output, k, n)
+            },
+        }
     }
 }
 
@@ -654,7 +836,7 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.q_proj,
@@ -662,7 +844,7 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.hidden_size,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.k_proj,
@@ -670,7 +852,7 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     kv_width,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.v_proj,
@@ -720,7 +902,7 @@ impl<'model> F16ReferenceSession<'model> {
                     &self.workspace.attention,
                     attention_scale,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.attention,
                     &layer.o_proj,
@@ -743,7 +925,7 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.gate_proj,
@@ -751,7 +933,7 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.intermediate_size,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.up_proj,
@@ -765,7 +947,7 @@ impl<'model> F16ReferenceSession<'model> {
                     &self.workspace.up,
                     &self.workspace.gated,
                 )?;
-                self.model.kernels.enqueue_project_kn(
+                self.model.enqueue_projection(
                     &self.stream,
                     &self.workspace.gated,
                     &layer.down_proj,
@@ -794,7 +976,7 @@ impl<'model> F16ReferenceSession<'model> {
                 config.hidden_size,
                 config.rms_norm_eps,
             )?;
-            self.model.kernels.enqueue_lm_head_f32_logits(
+            self.model.enqueue_lm_head(
                 &self.stream,
                 &self.workspace.normed,
                 &self.model.weights.lm_head,
@@ -957,6 +1139,10 @@ mod tests {
             F16ReferencePlan::edge_llm_v0_10_0_alignment(),
         )
         .unwrap();
+        assert_eq!(
+            model.execution_plan().projection_layout,
+            F16ReferenceProjectionLayout::KnReference
+        );
         let mut session = model.new_session().unwrap();
         let generated = session
             .generate(&[1, 2], GenerationConfig::greedy(2))
@@ -969,6 +1155,66 @@ mod tests {
             .unwrap();
         assert_eq!(generated, vec![0]);
         assert_eq!(session.position(), 3);
+    }
+
+    #[test]
+    fn transposed_projection_execution_plan_runs_same_tiny_generation_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let construction_stream = Stream::new(&context).unwrap();
+        let reference_model = F16ReferenceModel::new(
+            tiny_config(),
+            tiny_weights(&context, &construction_stream),
+            &construction_stream,
+            F16ReferencePlan::edge_llm_v0_10_0_alignment(),
+        )
+        .unwrap();
+        let candidate_model = F16ReferenceModel::new_with_execution_plan(
+            tiny_config(),
+            tiny_weights(&context, &construction_stream),
+            &construction_stream,
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate(),
+        )
+        .unwrap();
+        assert_eq!(
+            candidate_model.execution_plan().projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedCandidate
+        );
+
+        let reference_logits = reference_model
+            .new_session()
+            .unwrap()
+            .prefill(&[1, 2])
+            .unwrap();
+        let candidate_logits = candidate_model
+            .new_session()
+            .unwrap()
+            .prefill(&[1, 2])
+            .unwrap();
+        assert_eq!(
+            reference_logits
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            candidate_logits
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        );
+
+        let reference_ids = reference_model
+            .new_session()
+            .unwrap()
+            .generate(&[1, 2], GenerationConfig::greedy(2))
+            .unwrap();
+        let candidate_ids = candidate_model
+            .new_session()
+            .unwrap()
+            .generate(&[1, 2], GenerationConfig::greedy(2))
+            .unwrap();
+        assert_eq!(reference_ids, candidate_ids);
     }
 
     #[test]
