@@ -12,7 +12,7 @@ software_regime:
 
 decision:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM
-  qualification_status: qualified_reference_only_precision_mismatch_blocks_cross_runtime_speed_claim
+  qualification_status: qualified_reference_NNIS_F16_alignment_path_available_direct_cross_runtime_campaign_pending
   pinned_release: "v0.10.0"
   pinned_commit: "71dd1bae032e70771265917ec74d3ff4cad07a10"
   secondary_server_reference: TensorRT_LLM
@@ -195,12 +195,66 @@ reference_performance_campaign:
   cross_runtime_speed_comparison_allowed: false
   cross_runtime_memory_comparison_allowed: false
   precision_caveat: >-
-    Edge-LLM binds the BF16 source checkpoint into F16 runtime weights, while the
-    currently qualified NNIS reference reports f32 logical execution weights.
-    These autonomous Edge-LLM latency, throughput, and unified-memory numbers are
-    qualified reference evidence only. Do not compute or publish an NNIS/Edge-LLM
-    speedup, slowdown, parity, or memory ratio from them until representation and
-    metric semantics are aligned.
+    Edge-LLM binds the BF16 source checkpoint into F16 runtime weights. NNIS now
+    owns an explicit resident-F16 execution path with matched 32-token/31-forward
+    metric accounting, but the historical Edge campaign and the NNIS campaign
+    were not executed as one direct same-regime cross-runtime comparison. Do not
+    publish a speedup, slowdown or parity ratio until that direct campaign passes.
+
+nnis_f16_alignment:
+  status: explicit_transposed_projection_plan_promoted_direct_cross_runtime_campaign_pending
+  numeric_contract:
+    resident_weight_dtype: f16
+    activation_dtype: f16
+    kv_dtype: f16
+    projection_accumulator_dtype: f32
+    attention_accumulator_dtype: f32
+    logits_dtype: f32
+    generation_metric_semantics: 32_generated_tokens_divided_by_31_decoder_forward_GPU_intervals_sampling_excluded
+  infrastructure_pr: 74
+  infrastructure_merge_sha: "c404cf41d0a0339e1537d52d0b62238548561d33"
+  explicit_plan_pr: 75
+  explicit_plan_exact_head: "cdcc00827e26f9164c303de97f9923426b7e7486"
+  explicit_plan_merge_sha: "f00f3945be454dd6fcd0296a50de3d483c618884"
+  post_merge_ci_run: 192
+  post_merge_ci_green: true
+  isolated_gate:
+    bitwise_equal_all_tested_projection_shapes_and_lm_head: true
+    reference_over_transposed_weighted_projection_ratio: 2.23633385021734
+    note: isolated_result_not_serving_performance
+  end_to_end_abba:
+    run_context_id: "r1-f16-transposed-e2e-20260901T191532Z"
+    hardware: NVIDIA_Jetson_AGX_Thor
+    power_mode: MAXN
+    rounds: 2
+    order_per_round: [A, B, B, A]
+    processes: 8
+    warmups_per_process: 2
+    iterations_per_process: 5
+    exact_greedy_32_of_32_all_processes: true
+    fingerprint_compatible: true
+    generation_stage_parent_median_ms: 365.0825276374817
+    generation_stage_candidate_median_ms: 252.13628768920898
+    generation_stage_latency_reduction_fraction: 0.3093718033540779
+    generation_stage_separation_ms: 108.21385383605957
+    generation_wall_parent_median_ms: 396.8669395
+    generation_wall_candidate_median_ms: 272.8032055
+    request_parent_median_ms: 399.504477
+    request_candidate_median_ms: 274.8531515
+    parent_generation_tps_edge_definition: 87.6514904395149
+    candidate_generation_tps_edge_definition: 126.92074868656272
+    candidate_over_parent_tps_ratio: 1.4480158643069065
+  promotion:
+    MinLatency: promoted_explicit_plan
+    MinMemory: not_claimed
+    default_runtime_changed: false
+  cross_runtime_speed_comparison_allowed: false
+  cross_runtime_memory_comparison_allowed: false
+  blocker: >-
+    A direct same-regime campaign must alternate TensorRT Edge-LLM v0.10.0 and
+    the promoted NNIS F16 plan under the same physical clock/power regime and
+    preserve the common 32-token/31-forward metric definition before any ratio
+    is reported. Memory metrics remain non-equivalent.
 
 main_evidence:
   status: merged_and_post_merge_CI_green
@@ -223,7 +277,7 @@ main_evidence:
     - negative_self_tests_cover_schema_token_comparability_aggregate_and_metric_drift
     - exact_head_required_CI_green
 
-current_status: thor_reference_qualified_evidence_merged_precision_alignment_pending
+current_status: thor_reference_qualified_NNIS_F16_alignment_promoted_direct_cross_runtime_campaign_pending
 requirement: >-
   Do not claim an NNIS vs TensorRT Edge-LLM speedup or performance parity unless
   the exact pinned SmolLM2 checkpoint is executed with matched tokenizer, prompt,
@@ -232,7 +286,7 @@ requirement: >-
 
 next_steps:
   - preserve_exact_32_token_match_as_semantic_trajectory_evidence_not_numerical_equivalence
-  - audit_Edge_LLM_v0_10_0_dense_precision_paths_before_choosing_alignment_strategy
-  - define_precision_alignment_strategy_before_any_cross_runtime_performance_claim
+  - run_direct_same_regime_Edge_LLM_vs_promoted_NNIS_F16_campaign_with_common_generation_metric_semantics
+  - keep_cross_runtime_speed_ratio_fail_closed_until_that_campaign_passes
   - define_comparable_memory_metric_before_any_cross_runtime_memory_claim
   - retain_TensorRT_LLM_as_secondary_server_reference_until_clean_Jetson_qualification_exists
