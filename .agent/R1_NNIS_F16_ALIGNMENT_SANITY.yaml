@@ -1,6 +1,6 @@
 schema_version: 1
 kind: nnis_r1_f16_alignment_sanity
-status: qualified_single_run
+status: merged_single_run_qualified
 last_updated: "2026-09-01"
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -15,7 +15,14 @@ reference:
 
 nnis:
   pr: 72
-  exact_head: d1df08c5e165d0051e17efd0e7901ad1522fb39f
+  pr_exact_head: d1df08c5e165d0051e17efd0e7901ad1522fb39f
+  merge_sha: fadfb8824fa35976f517834130b1ebf6b800fb05
+  pr_ci_run: 181
+  pr_harness_run: 55
+  post_merge_ci_run: 182
+  exact_head_CI_green: true
+  exact_head_harness_green: true
+  post_merge_CI_green: true
   run_context_id: r1-f16-edge-sanity-20260901T151721Z
   model: HuggingFaceTB/SmolLM2-135M
   revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
@@ -64,14 +71,13 @@ qualification:
   cross_runtime_speed_comparison_allowed: false
   cross_runtime_memory_comparison_allowed: false
   blocker: >-
-    This is one NNIS physical process only. A repeated exact-head Thor campaign is
+    This is one NNIS physical process only. A repeated merged-head Thor campaign is
     required before any NNIS/Edge-LLM speed ratio, slowdown, speedup, or parity
     statement. CUDA free-memory deltas are not equivalent to Edge-LLM peak unified
     memory/RSS and remain non-comparable.
 
 next_gate:
-  - merge_PR72_only_if_exact_head_CI_and_harness_remain_green
-  - run_five_independent_NNIS_processes_on_merged_head_with_two_warmups_each
+  - run_five_independent_NNIS_processes_on_merge_fadfb8824fa35976f517834130b1ebf6b800fb05_with_two_warmups_each
   - require_all_five_exact_32_of_32_outputs_and_identical_fixed_Thor_fingerprint
   - aggregate_prefill_generation_stage_total_step_and_throughput_distributions
   - only_then_evaluate_cross_runtime_generation_speed_comparison
