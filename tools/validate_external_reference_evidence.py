@@ -36,7 +36,10 @@ def finite_positive(value: Any, name: str) -> float:
 
 
 def close(left: float, right: float) -> bool:
-    return math.isclose(left, right, rel_tol=1.0e-12, abs_tol=1.0e-12)
+    # Edge-LLM serializes some derived metrics from native float values, while
+    # the committed evidence retains the exported decimal values. Permit only
+    # the small rounding delta implied by that representation boundary.
+    return math.isclose(left, right, rel_tol=1.0e-6, abs_tol=1.0e-6)
 
 
 def validate(data: dict[str, Any]) -> None:
@@ -308,7 +311,10 @@ def main() -> int:
         self_test = True
         args.remove("--self-test")
     if len(args) > 1:
-        print("usage: validate_external_reference_evidence.py [--self-test] [path]", file=sys.stderr)
+        print(
+            "usage: validate_external_reference_evidence.py [--self-test] [path]",
+            file=sys.stderr,
+        )
         return 2
 
     path = Path(args[0]) if args else DEFAULT_EVIDENCE
