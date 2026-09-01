@@ -22,6 +22,11 @@ jobs:
           python3 tools/validate_external_reference_evidence.py --self-test
           evidence/r1_tensorrt_edge_llm_v0_10_0_smollm2_thor.json
 
+      - name: Validate NNIS F16 campaign evidence
+        run: >-
+          python3 tools/validate_nnis_f16_campaign_evidence.py --self-test
+          evidence/r1_nnis_f16_smollm2_thor.json
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
