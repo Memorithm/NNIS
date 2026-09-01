@@ -344,10 +344,8 @@ pub struct F16ReferenceKernels {
 
 impl F16ReferenceKernels {
     pub fn load(context: &Arc<Context>, compiler: &JitCompiler) -> Result<Self> {
-        let code = compiler.compile_cubin(
-            F16_REFERENCE_SOURCE,
-            &CompileOptions::for_device(context),
-        )?;
+        let code =
+            compiler.compile_cubin(F16_REFERENCE_SOURCE, &CompileOptions::for_device(context))?;
         let module = Module::load(context, &code)?;
         let narrow = module.get_function("nnis_f16_narrow_from_f32")?;
         let widen = module.get_function("nnis_f16_widen_to_f32")?;
@@ -365,7 +363,11 @@ impl F16ReferenceKernels {
             ("narrow", &narrow, ELEMENTWISE_BLOCK_SIZE),
             ("widen", &widen, ELEMENTWISE_BLOCK_SIZE),
             ("gather", &gather, ELEMENTWISE_BLOCK_SIZE),
-            ("weighted_rms_norm", &weighted_rms_norm, REDUCTION_BLOCK_SIZE),
+            (
+                "weighted_rms_norm",
+                &weighted_rms_norm,
+                REDUCTION_BLOCK_SIZE,
+            ),
             ("project_kn", &project_kn, REDUCTION_BLOCK_SIZE),
             ("rope_position", &rope_position, ELEMENTWISE_BLOCK_SIZE),
             ("vector_add", &vector_add, ELEMENTWISE_BLOCK_SIZE),
@@ -409,6 +411,12 @@ impl F16ReferenceKernels {
         })
     }
 
+    /// Narrow an F32 device tensor to IEEE binary16 without synchronizing.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, and output buffers must remain alive and
+    /// otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_narrow_from_f32(
         &self,
         stream: &Stream,
@@ -421,7 +429,9 @@ impl F16ReferenceKernels {
             return Ok(());
         }
         let mut args = KernelArgs::with_capacity(3, 2);
-        args.push_buffer(input).push_buffer(output).push(input.len() as u64);
+        args.push_buffer(input)
+            .push_buffer(output)
+            .push(input.len() as u64);
         let launch = KernelLaunch::new(
             &self.narrow,
             stream,
@@ -430,6 +440,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Widen an IEEE binary16 device tensor to F32 without synchronizing.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, and output buffers must remain alive and
+    /// otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_widen_to_f32(
         &self,
         stream: &Stream,
@@ -442,7 +458,9 @@ impl F16ReferenceKernels {
             return Ok(());
         }
         let mut args = KernelArgs::with_capacity(3, 2);
-        args.push_buffer(input).push_buffer(output).push(input.len() as u64);
+        args.push_buffer(input)
+            .push_buffer(output)
+            .push(input.len() as u64);
         let launch = KernelLaunch::new(
             &self.widen,
             stream,
@@ -451,6 +469,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Gather F16 rows selected by device-resident token IDs.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, table, indices, and output buffers must remain
+    /// alive and otherwise untouched until the stream reaches this launch.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn enqueue_gather(
         &self,
@@ -471,7 +495,8 @@ impl F16ReferenceKernels {
         if table.len() != table_len || output.len() != output_len {
             return Err(NnisError::invalid_input(format!(
                 "F16 gather expects table {table_len} and output {output_len}; got {}/{}",
-                table.len(), output.len()
+                table.len(),
+                output.len()
             )));
         }
         self.validate_contexts(stream, &[table.ctx(), indices.ctx(), output.ctx()])?;
@@ -493,6 +518,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Apply weighted RMSNorm over F16 storage with F32 reduction state.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, weight, and output buffers must remain
+    /// alive and otherwise untouched until the stream reaches this launch.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn enqueue_weighted_rms_norm(
         &self,
@@ -510,7 +541,9 @@ impl F16ReferenceKernels {
         if input.len() != count || output.len() != count || weight.len() != cols {
             return Err(NnisError::invalid_input(format!(
                 "F16 RMSNorm expects input/output {count} and weight {cols}; got {}/{}/{}",
-                input.len(), output.len(), weight.len()
+                input.len(),
+                output.len(),
+                weight.len()
             )));
         }
         if !epsilon.is_finite() || epsilon <= 0.0 {
@@ -540,6 +573,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Project one F16 row against an internal `[K, N]` F16 weight matrix.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, weight, and output buffers must remain
+    /// alive and otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_project_kn(
         &self,
         stream: &Stream,
@@ -549,18 +588,25 @@ impl F16ReferenceKernels {
         k: usize,
         n: usize,
     ) -> Result<()> {
-        self.validate_project_shapes("F16 projection", input.len(), weight.len(), output.len(), k, n)?;
+        self.validate_project_shapes(
+            "F16 projection",
+            input.len(),
+            weight.len(),
+            output.len(),
+            k,
+            n,
+        )?;
         self.validate_contexts(stream, &[input.ctx(), weight.ctx(), output.ctx()])?;
         if n == 0 {
             return Ok(());
         }
         let grid = u32::try_from(n)
             .map_err(|_| NnisError::invalid_input("F16 projection N exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(5, 3);
         args.push_buffer(input)
             .push_buffer(weight)
@@ -571,6 +617,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Apply one position of Llama rotate-half RoPE to F16 Q/K storage.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, RoPE caches, and output must remain alive
+    /// and otherwise untouched until the stream reaches this launch.
     #[allow(clippy::too_many_arguments)]
     pub unsafe fn enqueue_rope_position(
         &self,
@@ -633,6 +685,13 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Decode one F16 query token against an owned F16 KV cache.
+    ///
+    /// # Safety
+    ///
+    /// The query/output buffers, cache allocations, stream, and kernel set must
+    /// remain alive until completion. The cache must not be reset, appended on
+    /// another stream, or otherwise mutated concurrently with this launch.
     pub unsafe fn enqueue_cached_attention_decode(
         &self,
         stream: &Stream,
@@ -710,6 +769,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Add two F16 vectors and round the result back to F16.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, both inputs, and output must remain alive and
+    /// otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_vector_add(
         &self,
         stream: &Stream,
@@ -720,7 +785,9 @@ impl F16ReferenceKernels {
         if left.len() != right.len() || left.len() != output.len() {
             return Err(NnisError::invalid_input(format!(
                 "F16 vector-add length mismatch: {}/{}/{}",
-                left.len(), right.len(), output.len()
+                left.len(),
+                right.len(),
+                output.len()
             )));
         }
         self.validate_contexts(stream, &[left.ctx(), right.ctx(), output.ctx()])?;
@@ -740,6 +807,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Apply SiLU to an F16 gate, round it to F16, then multiply by F16 up.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, gate, up, and output buffers must remain alive
+    /// and otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_silu_multiply(
         &self,
         stream: &Stream,
@@ -750,7 +823,9 @@ impl F16ReferenceKernels {
         if gate.len() != up.len() || gate.len() != output.len() {
             return Err(NnisError::invalid_input(format!(
                 "F16 SiLU-multiply length mismatch: {}/{}/{}",
-                gate.len(), up.len(), output.len()
+                gate.len(),
+                up.len(),
+                output.len()
             )));
         }
         self.validate_contexts(stream, &[gate.ctx(), up.ctx(), output.ctx()])?;
@@ -770,6 +845,12 @@ impl F16ReferenceKernels {
         unsafe { launch.launch(&mut args) }
     }
 
+    /// Project the F16 hidden state through the F16 LM head into F32 logits.
+    ///
+    /// # Safety
+    ///
+    /// The stream, kernel set, input, weight, and output buffers must remain
+    /// alive and otherwise untouched until the stream reaches this launch.
     pub unsafe fn enqueue_lm_head_f32_logits(
         &self,
         stream: &Stream,
@@ -779,18 +860,25 @@ impl F16ReferenceKernels {
         k: usize,
         n: usize,
     ) -> Result<()> {
-        self.validate_project_shapes("F16 LM head", input.len(), weight.len(), output.len(), k, n)?;
+        self.validate_project_shapes(
+            "F16 LM head",
+            input.len(),
+            weight.len(),
+            output.len(),
+            k,
+            n,
+        )?;
         self.validate_contexts(stream, &[input.ctx(), weight.ctx(), output.ctx()])?;
         if n == 0 {
             return Ok(());
         }
-        let grid = u32::try_from(n)
-            .map_err(|_| NnisError::invalid_input("F16 LM-head N exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let grid =
+            u32::try_from(n).map_err(|_| NnisError::invalid_input("F16 LM-head N exceeds u32"))?;
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(5, 3);
         args.push_buffer(input)
             .push_buffer(weight)
@@ -880,12 +968,8 @@ mod tests {
         stream.synchronize().unwrap();
         assert_eq!(widened.to_vec(&stream).unwrap(), host);
 
-        let table_f32 = DeviceBuffer::from_host(
-            &context,
-            &stream,
-            &[1.0_f32, 2.0, 0.5, 3.0],
-        )
-        .unwrap();
+        let table_f32 =
+            DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 2.0, 0.5, 3.0]).unwrap();
         let table_f16 = DeviceBuffer::<u16>::new(&context, 4).unwrap();
         let indices = DeviceBuffer::from_host(&context, &stream, &[1_u32]).unwrap();
         let gathered = DeviceBuffer::<u16>::new(&context, 2).unwrap();
@@ -898,12 +982,8 @@ mod tests {
                 .unwrap();
         }
 
-        let weight_f32 = DeviceBuffer::from_host(
-            &context,
-            &stream,
-            &[1.0_f32, 2.0, 3.0, 4.0],
-        )
-        .unwrap();
+        let weight_f32 =
+            DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 2.0, 3.0, 4.0]).unwrap();
         let weight_f16 = DeviceBuffer::<u16>::new(&context, 4).unwrap();
         let projected = DeviceBuffer::<u16>::new(&context, 2).unwrap();
         let projected_f32 = DeviceBuffer::<f32>::new(&context, 2).unwrap();
@@ -943,11 +1023,8 @@ mod tests {
                 .unwrap();
         }
 
-        let mut cache = KvCache::<u16>::new(
-            &stream,
-            KvCacheConfig::new(1, 1, 2, 4).unwrap(),
-        )
-        .unwrap();
+        let mut cache =
+            KvCache::<u16>::new(&stream, KvCacheConfig::new(1, 1, 2, 4).unwrap()).unwrap();
         let key = Arc::new(DeviceBuffer::<u16>::new(&context, 2).unwrap());
         let value = Arc::new(DeviceBuffer::<u16>::new(&context, 2).unwrap());
         let key_f32 = DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 0.0]).unwrap();
@@ -986,7 +1063,8 @@ mod tests {
                 .unwrap();
         }
 
-        let norm_weight_f32 = DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 1.0]).unwrap();
+        let norm_weight_f32 =
+            DeviceBuffer::from_host(&context, &stream, &[1.0_f32, 1.0]).unwrap();
         let norm_weight = DeviceBuffer::<u16>::new(&context, 2).unwrap();
         let normed = DeviceBuffer::<u16>::new(&context, 2).unwrap();
         let normed_f32 = DeviceBuffer::<f32>::new(&context, 2).unwrap();
@@ -995,15 +1073,7 @@ mod tests {
                 .enqueue_narrow_from_f32(&stream, &norm_weight_f32, &norm_weight)
                 .unwrap();
             kernels
-                .enqueue_weighted_rms_norm(
-                    &stream,
-                    &gathered,
-                    &norm_weight,
-                    &normed,
-                    1,
-                    2,
-                    1.0e-5,
-                )
+                .enqueue_weighted_rms_norm(&stream, &gathered, &norm_weight, &normed, 1, 2, 1.0e-5)
                 .unwrap();
             kernels
                 .enqueue_widen_to_f32(&stream, &normed, &normed_f32)
