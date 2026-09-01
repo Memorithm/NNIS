@@ -162,29 +162,25 @@ fn compare_projection_case(
         .with_dimension("n", shape.n as u64)
         .with_work_items((shape.k * shape.n) as u64);
 
-    let reference_report = benchmark_gpu(context, stream, reference_case, config, || {
-        unsafe {
-            reference.enqueue_project_kn(
-                stream,
-                &input,
-                &weight_kn,
-                &reference_output,
-                shape.k,
-                shape.n,
-            )
-        }
+    let reference_report = benchmark_gpu(context, stream, reference_case, config, || unsafe {
+        reference.enqueue_project_kn(
+            stream,
+            &input,
+            &weight_kn,
+            &reference_output,
+            shape.k,
+            shape.n,
+        )
     })?;
-    let transposed_report = benchmark_gpu(context, stream, transposed_case, config, || {
-        unsafe {
-            candidate.enqueue_project_nk(
-                stream,
-                &input,
-                &weight_nk,
-                &transposed_output,
-                shape.k,
-                shape.n,
-            )
-        }
+    let transposed_report = benchmark_gpu(context, stream, transposed_case, config, || unsafe {
+        candidate.enqueue_project_nk(
+            stream,
+            &input,
+            &weight_nk,
+            &transposed_output,
+            shape.k,
+            shape.n,
+        )
     })?;
 
     let expected_after = reference_output.to_vec(stream)?;
@@ -275,29 +271,25 @@ fn compare_lm_head(
         .with_dimension("n", VOCAB as u64)
         .with_work_items((HIDDEN * VOCAB) as u64);
 
-    let reference_report = benchmark_gpu(context, stream, reference_case, config, || {
-        unsafe {
-            reference.enqueue_lm_head_f32_logits(
-                stream,
-                &input,
-                &weight_kn,
-                &reference_output,
-                HIDDEN,
-                VOCAB,
-            )
-        }
+    let reference_report = benchmark_gpu(context, stream, reference_case, config, || unsafe {
+        reference.enqueue_lm_head_f32_logits(
+            stream,
+            &input,
+            &weight_kn,
+            &reference_output,
+            HIDDEN,
+            VOCAB,
+        )
     })?;
-    let transposed_report = benchmark_gpu(context, stream, transposed_case, config, || {
-        unsafe {
-            candidate.enqueue_lm_head_nk_f32_logits(
-                stream,
-                &input,
-                &weight_nk,
-                &transposed_output,
-                HIDDEN,
-                VOCAB,
-            )
-        }
+    let transposed_report = benchmark_gpu(context, stream, transposed_case, config, || unsafe {
+        candidate.enqueue_lm_head_nk_f32_logits(
+            stream,
+            &input,
+            &weight_nk,
+            &transposed_output,
+            HIDDEN,
+            VOCAB,
+        )
     })?;
 
     let expected_after = reference_output.to_vec(stream)?;
@@ -363,21 +355,16 @@ fn run() -> Result<()> {
     let mut reference_layer_ms = 0.0_f64;
     let mut transposed_layer_ms = 0.0_f64;
     for shape in shapes {
-        let result = compare_projection_case(
-            &context,
-            &stream,
-            &reference,
-            &candidate,
-            config,
-            shape,
-        )?;
+        let result =
+            compare_projection_case(&context, &stream, &reference, &candidate, config, shape)?;
         reference_layer_ms += result.reference.statistics.median_ms * shape.uses_per_layer as f64;
         transposed_layer_ms += result.transposed.statistics.median_ms * shape.uses_per_layer as f64;
         layer_cases.push(result);
     }
 
     let lm_head = compare_lm_head(&context, &stream, &reference, &candidate, config)?;
-    let reference_per_token = reference_layer_ms * LAYERS as f64 + lm_head.reference.statistics.median_ms;
+    let reference_per_token =
+        reference_layer_ms * LAYERS as f64 + lm_head.reference.statistics.median_ms;
     let transposed_per_token =
         transposed_layer_ms * LAYERS as f64 + lm_head.transposed.statistics.median_ms;
 
@@ -408,7 +395,9 @@ fn run() -> Result<()> {
     println!(
         "{}",
         serde_json::to_string_pretty(&report).map_err(|error| {
-            NnisError::unsupported(format!("failed to serialize F16 projection report: {error}"))
+            NnisError::unsupported(format!(
+                "failed to serialize F16 projection report: {error}"
+            ))
         })?
     );
     Ok(())
