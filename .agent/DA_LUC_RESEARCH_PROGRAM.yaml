@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_da_luc_research_program
 status: research_only
-last_updated: "2026-09-03T01:31+0200"
+last_updated: "2026-09-03T01:42+0200"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -138,37 +138,45 @@ research_phases:
       - define_versioned_candidate_plan_without_changing_default_runtime
   - id: DAL1
     name: Exact representation evidence adapter
-    status: active
-    issue: 95
-    audited_heads:
-      NNIS_main_at_issue_creation: 62750422004d03a874a7a3911a358815b36e47f2
-      FLAT_ATTENTION_main: c35b044c5324963a300ff50da0f7ec10dcc6db71
+    status: complete
+    completion_evidence:
+      issue: 95
+      pull_request: 96
+      final_exact_head: d9348c59985dddcb8c982afa00ed1adcd64121e0
+      merge_commit: e563261c4c1cd9239b6dd3249172e248088b2ad3
+      audited_NNIS_base: 62750422004d03a874a7a3911a358815b36e47f2
+      audited_FLAT_head: c35b044c5324963a300ff50da0f7ec10dcc6db71
+      required_CI:
+        - CI_success_on_final_exact_head
+        - SmolLM2_benchmark_harness_success_on_final_exact_head
+      guarantees:
+        - versioned_NNIS_to_FLAT_oracle_evidence_interchange
+        - exact_FLAT_source_view_schema_and_oracle_payload_version_binding
+        - exact_NNIS_plan_and_semantic_fingerprint_binding
+        - exact_storage_breakdown_and_dense_baseline_consistency_checks
+        - finite_separate_K_and_V_reconstruction_error_validation
+        - semantic_view_and_storage_tamper_rejection
+        - no_duplicate_NNIS_encode_decode_codec
+        - no_CUDA_kernel_runtime_KV_mutation_or_default_change
+        - Rust_1_77_MSRV_preserved
     architecture_decision: >-
-      FLAT-ATTENTION already owns the canonical DA-LUC representation encode,
-      decode, exact-storage accounting, and K/V reconstruction-error semantics.
-      DAL1 must bind and verify that evidence against an NNIS plan rather than
-      implement a duplicate private codec.
-    deliverables:
-      - explicit_FLAT_view_schema_and_oracle_payload_version_handshake
-      - deterministic_NNIS_plan_to_FLAT_contract_identity_mapping
-      - versioned_replayable_FLAT_oracle_evidence_fixture_or_interchange
-      - exact_storage_accounting_verification_without_private_nominal_recomputation
-      - K_and_V_reconstruction_error_evidence_validation
-      - one_field_semantic_and_accounting_drift_rejection
-      - preserve_NVIDIA_physical_layout_identity_as_separate_from_FLAT_semantic_identity
-    non_goals:
-      - no_private_NNIS_encode_decode_duplicate_of_FLAT_FDAL1
-      - no_CUDA_compressed_attention_kernel
-      - no_runtime_KV_mutation_or_default_change
-      - no_performance_quality_compression_or_novelty_claim
+      FLAT-ATTENTION owns the canonical DA-LUC representation encode, decode,
+      exact-storage accounting, and K/V reconstruction-error semantics. NNIS
+      consumes versioned evidence bound to its DAL0 plan rather than reimplementing
+      those semantics.
   - id: DAL2
     name: LUT-coded key scoring
-    status: blocked_on_DAL1
+    status: ready_for_current_main_audit
     deliverables:
       - q_len_1_query_codebook_LUT_construction
       - index_stream_scoring
       - sparse_key_residual_correction
       - no_dense_key_materialization_in_candidate_kernel
+    entry_rule: >-
+      Re-read current NNIS main, FLAT FDAL2 direct scalar oracle, and mandatory
+      overlays before coding. Reuse FLAT semantic/oracle behavior and implement
+      only the NVIDIA-owned physical/JIT execution layer needed for a narrow
+      candidate. No performance promotion before real-device correctness.
   - id: DAL3
     name: Asymmetric value path
     status: blocked_on_DAL2
@@ -220,8 +228,8 @@ fail_closed_conditions:
   - claiming_eight_to_sixteen_x_without_measured_effective_bits_per_value
 
 next_action: >-
-  Implement issue 95 as a narrow deterministic NNIS-to-FLAT evidence and identity
-  adapter over the already-qualified FLAT FDAL1 oracle. Do not create a second
-  codec. Preserve the dense runtime default and defer DAL2 CUDA scoring until the
-  cross-repository semantic, exact-storage, and reconstruction-evidence binding
-  passes exact-head CI.
+  Audit DAL2 on current NNIS main against the already-complete FLAT FDAL2 direct
+  q_len=1 compressed scalar oracle. Implement only a narrow NVIDIA-owned physical
+  LUT-scoring candidate after the semantic and evidence boundaries are verified.
+  Preserve the dense runtime default and require real-device correctness before
+  any performance claim or promotion.
