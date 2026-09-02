@@ -7,6 +7,7 @@
 mod attention_plan;
 mod cached_attention_candidate;
 mod config;
+mod da_luc_evidence;
 mod da_luc_plan;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
@@ -31,6 +32,12 @@ mod weights;
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
 pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
+pub use da_luc_evidence::{
+    NnisDalucFlatOracleEvidence, NnisDalucFlatViewSnapshot, NnisDalucOracleErrorStats,
+    NnisDalucOracleReconstructionEvidence, NnisDalucOracleStorageEvidence,
+    FLAT_DA_LUC_ORACLE_REPOSITORY, NNIS_DA_LUC_ORACLE_EVIDENCE_VERSION,
+    SUPPORTED_FLAT_DA_LUC_ORACLE_PAYLOAD_VERSION,
+};
 pub use da_luc_plan::{
     NnisDalucBackendCapabilities, NnisDalucBitOrder, NnisDalucCandidatePlan,
     NnisDalucCodebookScope, NnisDalucConsumptionMode, NnisDalucCudaPhysicalLayout,
