@@ -13,9 +13,9 @@
 
 use crate::runtime::build_rope_cache;
 use crate::{
-    load_model_directory, F16ReferenceExecutionPlan, F16ReferenceKernels,
-    F16ReferenceProjectionLayout, F16TransposedProjectionCandidate, F32RuntimeKernels,
-    GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
+    load_model_directory, F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan,
+    F16ReferenceKernels, F16ReferenceProjectionLayout, F16TransposedProjectionCandidate,
+    F32RuntimeKernels, GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -139,7 +139,8 @@ impl F16ModelWeights {
             let kn = narrow(stream, kernels, source.tensor().as_f32()?)?;
             match layout {
                 F16ReferenceProjectionLayout::KnReference => Ok(kn),
-                F16ReferenceProjectionLayout::NkTransposedCandidate => {
+                F16ReferenceProjectionLayout::NkTransposedCandidate
+                | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => {
                     let candidate = projection_candidate.ok_or_else(|| {
                         NnisError::unsupported(
                             "F16 transposed projection plan selected without candidate kernels",
@@ -250,6 +251,7 @@ pub struct F16ReferenceModel {
     context: Arc<Context>,
     kernels: F16ReferenceKernels,
     projection_candidate: Option<F16TransposedProjectionCandidate>,
+    fused_projection_candidate: Option<F16FusedProjectionGroupsCandidate>,
     top_k: F32TopK,
     token_runtime: F32RuntimeKernels,
     rope_cos: DeviceBuffer<f32>,
@@ -290,9 +292,17 @@ impl F16ReferenceModel {
         let kernels = F16ReferenceKernels::load(&context, &compiler)?;
         let projection_candidate = match execution_plan.projection_layout {
             F16ReferenceProjectionLayout::KnReference => None,
-            F16ReferenceProjectionLayout::NkTransposedCandidate => {
+            F16ReferenceProjectionLayout::NkTransposedCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => {
                 Some(F16TransposedProjectionCandidate::load(&context, &compiler)?)
             }
+        };
+        let fused_projection_candidate = match execution_plan.projection_layout {
+            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => Some(
+                F16FusedProjectionGroupsCandidate::load(&context, &compiler)?,
+            ),
+            F16ReferenceProjectionLayout::KnReference
+            | F16ReferenceProjectionLayout::NkTransposedCandidate => None,
         };
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;
@@ -315,6 +325,7 @@ impl F16ReferenceModel {
             context,
             kernels,
             projection_candidate,
+            fused_projection_candidate,
             top_k,
             token_runtime,
             rope_cos,
@@ -374,7 +385,8 @@ impl F16ReferenceModel {
                 self.kernels
                     .enqueue_project_kn(stream, input, weight, output, k, n)
             },
-            F16ReferenceProjectionLayout::NkTransposedCandidate => unsafe {
+            F16ReferenceProjectionLayout::NkTransposedCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => unsafe {
                 self.projection_candidate
                     .as_ref()
                     .ok_or_else(|| {
@@ -384,6 +396,74 @@ impl F16ReferenceModel {
                     })?
                     .enqueue_project_nk(stream, input, weight, output, k, n)
             },
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn enqueue_qkv_group(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<u16>,
+        q_weight: &DeviceBuffer<u16>,
+        k_weight: &DeviceBuffer<u16>,
+        v_weight: &DeviceBuffer<u16>,
+        q_output: &DeviceBuffer<u16>,
+        k_output: &DeviceBuffer<u16>,
+        v_output: &DeviceBuffer<u16>,
+        hidden: usize,
+        kv_width: usize,
+    ) -> Result<()> {
+        if let Some(candidate) = &self.fused_projection_candidate {
+            return unsafe {
+                candidate.enqueue_qkv_nk(
+                    stream, input, q_weight, k_weight, v_weight, q_output, k_output, v_output,
+                    hidden, hidden, kv_width,
+                )
+            };
+        }
+        unsafe {
+            self.enqueue_projection(stream, input, q_weight, q_output, hidden, hidden)?;
+            self.enqueue_projection(stream, input, k_weight, k_output, hidden, kv_width)?;
+            self.enqueue_projection(stream, input, v_weight, v_output, hidden, kv_width)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn enqueue_gate_up_group(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<u16>,
+        gate_weight: &DeviceBuffer<u16>,
+        up_weight: &DeviceBuffer<u16>,
+        gate_output: &DeviceBuffer<u16>,
+        up_output: &DeviceBuffer<u16>,
+        hidden: usize,
+        intermediate: usize,
+    ) -> Result<()> {
+        if let Some(candidate) = &self.fused_projection_candidate {
+            return unsafe {
+                candidate.enqueue_gate_up_nk(
+                    stream,
+                    input,
+                    gate_weight,
+                    up_weight,
+                    gate_output,
+                    up_output,
+                    hidden,
+                    intermediate,
+                )
+            };
+        }
+        unsafe {
+            self.enqueue_projection(
+                stream,
+                input,
+                gate_weight,
+                gate_output,
+                hidden,
+                intermediate,
+            )?;
+            self.enqueue_projection(stream, input, up_weight, up_output, hidden, intermediate)
         }
     }
 
@@ -401,7 +481,8 @@ impl F16ReferenceModel {
                 self.kernels
                     .enqueue_lm_head_f32_logits(stream, input, weight, output, k, n)
             },
-            F16ReferenceProjectionLayout::NkTransposedCandidate => unsafe {
+            F16ReferenceProjectionLayout::NkTransposedCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => unsafe {
                 self.projection_candidate
                     .as_ref()
                     .ok_or_else(|| {
@@ -836,26 +917,14 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.enqueue_projection(
+                self.model.enqueue_qkv_group(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.q_proj,
-                    &self.workspace.q,
-                    config.hidden_size,
-                    config.hidden_size,
-                )?;
-                self.model.enqueue_projection(
-                    &self.stream,
-                    &self.workspace.normed,
                     &layer.k_proj,
-                    &self.workspace.k,
-                    config.hidden_size,
-                    kv_width,
-                )?;
-                self.model.enqueue_projection(
-                    &self.stream,
-                    &self.workspace.normed,
                     &layer.v_proj,
+                    &self.workspace.q,
+                    &self.workspace.k,
                     &self.workspace.v,
                     config.hidden_size,
                     kv_width,
@@ -925,18 +994,12 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.enqueue_projection(
+                self.model.enqueue_gate_up_group(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.gate_proj,
-                    &self.workspace.gate,
-                    config.hidden_size,
-                    config.intermediate_size,
-                )?;
-                self.model.enqueue_projection(
-                    &self.stream,
-                    &self.workspace.normed,
                     &layer.up_proj,
+                    &self.workspace.gate,
                     &self.workspace.up,
                     config.hidden_size,
                     config.intermediate_size,
@@ -1178,9 +1241,20 @@ mod tests {
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate(),
         )
         .unwrap();
+        let fused_model = F16ReferenceModel::new_with_execution_plan(
+            tiny_config(),
+            tiny_weights(&context, &construction_stream),
+            &construction_stream,
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate(),
+        )
+        .unwrap();
         assert_eq!(
             candidate_model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::NkTransposedCandidate
+        );
+        assert_eq!(
+            fused_model.execution_plan().projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
         );
 
         let reference_logits = reference_model
@@ -1193,12 +1267,21 @@ mod tests {
             .unwrap()
             .prefill(&[1, 2])
             .unwrap();
+        let fused_logits = fused_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
+        let expected_bits = reference_logits
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>();
         assert_eq!(
-            reference_logits
+            expected_bits,
+            candidate_logits
                 .iter()
                 .map(|value| value.to_bits())
-                .collect::<Vec<_>>(),
-            candidate_logits
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            expected_bits,
+            fused_logits
                 .iter()
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
@@ -1214,7 +1297,13 @@ mod tests {
             .unwrap()
             .generate(&[1, 2], GenerationConfig::greedy(2))
             .unwrap();
+        let fused_ids = fused_model
+            .new_session()
+            .unwrap()
+            .generate(&[1, 2], GenerationConfig::greedy(2))
+            .unwrap();
         assert_eq!(reference_ids, candidate_ids);
+        assert_eq!(reference_ids, fused_ids);
     }
 
     #[test]
