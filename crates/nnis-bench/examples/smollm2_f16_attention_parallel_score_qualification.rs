@@ -16,6 +16,9 @@ const MAX_KV_ROWS: usize = 35;
 const GENERATION_MIN_KV_ROWS: usize = 4;
 const GENERATION_MAX_KV_ROWS: usize = 34;
 const BLOCKS: [u32; 4] = [64, 128, 256, 512];
+const SMALL_SCALE: f32 = 1.0 / 4096.0;
+const SMALL_VALUE_SCALE: f32 = 1.0 / 2048.0;
+const NEAR_TIE_STEP: f32 = 1.0 / 65536.0;
 const FIXTURES: [FixtureKind; 6] = [
     FixtureKind::Baseline,
     FixtureKind::SmallMagnitude,
@@ -176,9 +179,9 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
             baseline_sequence(kv_elements, 31, 127, 0.015625),
         ),
         FixtureKind::SmallMagnitude => (
-            baseline_sequence(query_elements, 19, 101, 0.000244140625),
-            baseline_sequence(kv_elements, 23, 103, 0.000244140625),
-            baseline_sequence(kv_elements, 37, 109, 0.00048828125),
+            baseline_sequence(query_elements, 19, 101, SMALL_SCALE),
+            baseline_sequence(kv_elements, 23, 103, SMALL_SCALE),
+            baseline_sequence(kv_elements, 37, 109, SMALL_VALUE_SCALE),
         ),
         FixtureKind::WideMagnitude => (
             baseline_sequence(query_elements, 13, 61, 0.125),
@@ -210,7 +213,7 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
                     let dim = index % HEAD_DIM;
                     let pos = (index / HEAD_DIM) % kv_rows;
                     let base = ((dim * 5 + 3) % 31) as f32 - 15.0;
-                    base * 0.015625 + pos as f32 * 0.0000152587890625
+                    base * 0.015625 + pos as f32 * NEAR_TIE_STEP
                 })
                 .collect();
             let values = baseline_sequence(kv_elements, 53, 83, 0.015625);
