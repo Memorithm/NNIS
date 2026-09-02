@@ -183,7 +183,10 @@ fn compare_outputs(
     })
 }
 
-fn comparison(reference: &BenchmarkReport, candidate: &BenchmarkReport) -> Result<ComparisonReport> {
+fn comparison(
+    reference: &BenchmarkReport,
+    candidate: &BenchmarkReport,
+) -> Result<ComparisonReport> {
     let reference_median = reference.statistics.median_ms;
     let candidate_median = candidate.statistics.median_ms;
     if reference_median <= 0.0 || candidate_median <= 0.0 {
@@ -231,10 +234,7 @@ fn run_shape(
     }
     stream.synchronize()?;
 
-    let mut cache = KvCache::new(
-        stream,
-        KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?,
-    )?;
+    let mut cache = KvCache::new(stream, KvCacheConfig::new(1, KV_HEADS, HEAD_DIM, kv_rows)?)?;
     cache.append_layer(0, Arc::clone(&keys), Arc::clone(&values), kv_rows)?;
 
     let reference_output = DeviceBuffer::<u16>::new(context, query_elements)?;
@@ -322,8 +322,12 @@ fn run_shape(
             },
         )?;
         require_compatible(&reference, &benchmark)?;
-        let correctness =
-            compare_outputs(stream, reference_kernel, &reference_output, &parallel_output)?;
+        let correctness = compare_outputs(
+            stream,
+            reference_kernel,
+            &reference_output,
+            &parallel_output,
+        )?;
         let comparison = comparison(&reference, &benchmark)?;
         candidates.push(CandidateReport {
             threads_per_block,
@@ -343,7 +347,8 @@ fn run_shape(
                 .total_cmp(&right.benchmark.statistics.median_ms)
         });
     let best_block = best.map(|candidate| candidate.threads_per_block);
-    let best_speed = best.map(|candidate| candidate.comparison.reference_over_candidate_speed_ratio);
+    let best_speed =
+        best.map(|candidate| candidate.comparison.reference_over_candidate_speed_ratio);
     let best_improvement = best.map(|candidate| candidate.comparison.relative_improvement);
 
     Ok(ShapeReport {
@@ -377,7 +382,8 @@ fn main() -> Result<()> {
     let compiler = JitCompiler::new();
     let reference_kernel = F16ReferenceKernels::load(&context, &compiler)?;
     let staged_kernel = F16CachedAttentionStagedWeightsCandidate::load(&context, &compiler)?;
-    let parallel_score_kernel = F16CachedAttentionParallelScoreCandidate::load(&context, &compiler)?;
+    let parallel_score_kernel =
+        F16CachedAttentionParallelScoreCandidate::load(&context, &compiler)?;
     let bench_config = BenchConfig::new(warmups, iterations);
     bench_config.validate()?;
 
