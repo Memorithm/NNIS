@@ -1,9 +1,9 @@
 use nnis_bench::{summarize_samples_ms, BenchmarkMetadata, TimingStatistics};
 use nnis_jit::JitCompiler;
 use nnis_model::{
-    F16AttentionPlan, F16CachedAttentionKernel, F16CachedAttentionStagedWeightsCandidate,
-    F16ReferenceExecutionPlan, F16ReferenceGenerationProfile, F16ReferenceModel,
-    F16ReferenceProjectionLayout,
+    F16AttentionPlan, F16CachedAttentionKernel, F16CachedAttentionParallelScoreCandidate,
+    F16CachedAttentionStagedWeightsCandidate, F16ParallelScorePolicy, F16ReferenceExecutionPlan,
+    F16ReferenceGenerationProfile, F16ReferenceModel, F16ReferenceProjectionLayout,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,7 @@ const EXPECTED_GREEDY_IDS: [u32; DECODE_STEPS] = [
 enum AttentionPlanName {
     Reference,
     Staged,
+    ParallelScoreKa17,
 }
 
 impl AttentionPlanName {
@@ -35,8 +36,9 @@ impl AttentionPlanName {
         match value {
             "reference" => Ok(Self::Reference),
             "staged" => Ok(Self::Staged),
+            "parallel-score-ka17" => Ok(Self::ParallelScoreKa17),
             other => Err(format!(
-                "unknown --attention {other:?}; expected reference or staged"
+                "unknown --attention {other:?}; expected reference, staged, or parallel-score-ka17"
             )),
         }
     }
@@ -45,6 +47,7 @@ impl AttentionPlanName {
         match self {
             Self::Reference => "reference",
             Self::Staged => "staged",
+            Self::ParallelScoreKa17 => "parallel-score-ka17",
         }
     }
 
@@ -52,6 +55,7 @@ impl AttentionPlanName {
         match self {
             Self::Reference => F16AttentionPlan::reference(),
             Self::Staged => F16AttentionPlan::thor_staged_weights_candidate(),
+            Self::ParallelScoreKa17 => F16AttentionPlan::thor_ka17_parallel_score_candidate(),
         }
     }
 }
@@ -117,6 +121,7 @@ struct Report {
     execution_plan: F16ReferenceExecutionPlan,
     attention_plan: F16AttentionPlan,
     staged_candidate_max_supported_kv_rows: Option<usize>,
+    parallel_score_candidate_max_supported_kv_rows: Option<usize>,
     memory: MemoryReport,
     session_setup_wall: TimingReport,
     generation_wall: TimingReport,
@@ -162,9 +167,9 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
             }
             "--attention" => {
                 attention_name = Some(AttentionPlanName::parse(
-                    &args
-                        .next()
-                        .ok_or("--attention requires reference or staged")?,
+                    &args.next().ok_or(
+                        "--attention requires reference, staged, or parallel-score-ka17",
+                    )?,
                 )?);
             }
             "--warmups" => {
@@ -180,7 +185,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                 )?;
             }
             "--help" | "-h" => {
-                return Err("usage: smollm2_f16_attention_plan_e2e --model DIR --attention reference|staged [--device N] [--warmups N] [--iterations N]".to_string());
+                return Err("usage: smollm2_f16_attention_plan_e2e --model DIR --attention reference|staged|parallel-score-ka17 [--device N] [--warmups N] [--iterations N]".to_string());
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -196,7 +201,9 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     Ok(Arguments {
         model_dir: model_dir.ok_or("missing --model DIR")?,
         device,
-        attention_name: attention_name.ok_or("missing --attention reference|staged")?,
+        attention_name: attention_name.ok_or(
+            "missing --attention reference|staged|parallel-score-ka17",
+        )?,
         warmups,
         iterations,
     })
@@ -302,20 +309,32 @@ fn run(arguments: Arguments) -> Result<Report> {
     let attention_plan = arguments.attention_name.plan();
     let device = Device::get(arguments.device)?;
     let context = Context::new(&device)?;
-    let staged_candidate_max_supported_kv_rows = match arguments.attention_name {
-        AttentionPlanName::Reference => None,
-        AttentionPlanName::Staged => {
-            let candidate =
-                F16CachedAttentionStagedWeightsCandidate::load(&context, &JitCompiler::new())?;
-            let max_rows = candidate.max_supported_kv_rows();
-            if max_rows < MAX_PROFILE_KV_ROWS {
-                return Err(NnisError::unsupported(format!(
-                    "staged attention supports at most {max_rows} KV rows on this device/kernel; decode32 profile requires {MAX_PROFILE_KV_ROWS} so fallback would contaminate the A/B experiment"
-                )));
+    let (staged_candidate_max_supported_kv_rows, parallel_score_candidate_max_supported_kv_rows) =
+        match arguments.attention_name {
+            AttentionPlanName::Reference => (None, None),
+            AttentionPlanName::Staged => {
+                let candidate =
+                    F16CachedAttentionStagedWeightsCandidate::load(&context, &JitCompiler::new())?;
+                let max_rows = candidate.max_supported_kv_rows();
+                if max_rows < MAX_PROFILE_KV_ROWS {
+                    return Err(NnisError::unsupported(format!(
+                        "staged attention supports at most {max_rows} KV rows on this device/kernel; decode32 profile requires {MAX_PROFILE_KV_ROWS} so fallback would contaminate the A/B experiment"
+                    )));
+                }
+                (Some(max_rows), None)
             }
-            Some(max_rows)
-        }
-    };
+            AttentionPlanName::ParallelScoreKa17 => {
+                let candidate =
+                    F16CachedAttentionParallelScoreCandidate::load(&context, &JitCompiler::new())?;
+                let max_rows = candidate.max_supported_kv_rows();
+                if max_rows < MAX_PROFILE_KV_ROWS {
+                    return Err(NnisError::unsupported(format!(
+                        "parallel-score attention supports at most {max_rows} KV rows on this device/kernel; decode32 profile requires {MAX_PROFILE_KV_ROWS}"
+                    )));
+                }
+                (None, Some(max_rows))
+            }
+        };
     let construction_stream = Stream::new(&context)?;
     let before_model = memory_snapshot(&context)?;
     let model = F16ReferenceModel::load_directory_with_execution_and_attention_plan(
@@ -351,9 +370,28 @@ fn run(arguments: Arguments) -> Result<Report> {
         AttentionPlanName::Staged => {
             if attention_plan.kernel != F16CachedAttentionKernel::StagedWeightsCandidate
                 || attention_plan.staged_min_kv_rows != 16
+                || attention_plan.parallel_score_policy.is_some()
             {
                 return Err(NnisError::unsupported(
                     "staged attention experiment did not preserve the KV>=16 selection policy",
+                ));
+            }
+        }
+        AttentionPlanName::ParallelScoreKa17 => {
+            if attention_plan.kernel != F16CachedAttentionKernel::ParallelScoreCandidate
+                || attention_plan.staged_min_kv_rows != 0
+                || attention_plan.parallel_score_policy
+                    != Some(F16ParallelScorePolicy::Ka17SmolLm2ShortContextV1)
+                || attention_plan.parallel_score_threads_per_block(3).is_some()
+                || attention_plan.parallel_score_threads_per_block(4) != Some(128)
+                || attention_plan.parallel_score_threads_per_block(5) != Some(256)
+                || attention_plan.parallel_score_threads_per_block(16) != Some(256)
+                || attention_plan.parallel_score_threads_per_block(17) != Some(512)
+                || attention_plan.parallel_score_threads_per_block(35) != Some(512)
+                || attention_plan.parallel_score_threads_per_block(36).is_some()
+            {
+                return Err(NnisError::unsupported(
+                    "parallel-score attention experiment did not preserve the fixed KA17 launch policy",
                 ));
             }
         }
@@ -410,6 +448,28 @@ fn run(arguments: Arguments) -> Result<Report> {
         ));
     }
 
+    let mut limitations = vec![
+        "all variants retain the promoted resident [N,K] transposed projection plan",
+        "model construction is excluded from request timing",
+        "one process is not promotion evidence; use repeated fingerprint-compatible ABBA runs",
+        "generation GPU throughput preserves the Edge definition of 32 generated tokens divided by 31 decoder-forward GPU intervals",
+        "CUDA free-memory deltas are diagnostic and are not a cross-runtime memory equivalence metric",
+    ];
+    match arguments.attention_name {
+        AttentionPlanName::Reference => {
+            limitations.push("reference mode keeps the qualified per-position-barrier attention kernel for every KV row");
+        }
+        AttentionPlanName::Staged => {
+            limitations.push("the staged candidate is selected only from KV row 16 onward and falls back to the qualified reference kernel when below threshold or resource-incompatible");
+            limitations.push("the staged process fails before timing unless the candidate supports the complete decode32 KV range, preventing resource fallback from contaminating this A/B experiment");
+        }
+        AttentionPlanName::ParallelScoreKa17 => {
+            limitations.push("the parallel-score candidate uses the predeclared KA17 policy only for KV rows 4..=35 and the qualified reference kernel outside that domain");
+            limitations.push("the KA17 policy is not retuned from the dense qualification results even though alternative launch widths may have lower isolated medians at individual rows");
+            limitations.push("the process fails closed if a selected parallel-score launch is resource-incompatible; no silent candidate-to-reference fallback occurs inside the qualified domain");
+        }
+    }
+
     Ok(Report {
         schema_version: 1,
         benchmark: "smollm2-135m-f16-attention-plan-e2e",
@@ -431,6 +491,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         execution_plan,
         attention_plan,
         staged_candidate_max_supported_kv_rows,
+        parallel_score_candidate_max_supported_kv_rows,
         memory: MemoryReport {
             cuda_free_delta_after_model_bytes: consumed_bytes(&before_model, &after_model),
             cuda_free_delta_after_session_bytes: consumed_bytes(&after_model, &after_session),
@@ -450,15 +511,7 @@ fn run(arguments: Arguments) -> Result<Report> {
         generation_forward_runs_per_request: DECODE_STEPS - 1,
         sampling_included_in_generation_stage_gpu_time: false,
         final_generated_token_consumed_by_model: false,
-        limitations: vec![
-            "both A and B retain the promoted resident [N,K] transposed projection plan",
-            "the staged candidate is selected only from KV row 16 onward and falls back to the qualified reference kernel when below threshold or resource-incompatible",
-            "the staged process fails before timing unless the candidate supports the complete decode32 KV range, preventing resource fallback from contaminating this A/B experiment",
-            "model construction is excluded from request timing",
-            "one process is not promotion evidence; use repeated fingerprint-compatible ABBA runs",
-            "generation GPU throughput preserves the Edge definition of 32 generated tokens divided by 31 decoder-forward GPU intervals",
-            "CUDA free-memory deltas are diagnostic and are not a cross-runtime memory equivalence metric",
-        ],
+        limitations,
     })
 }
 
