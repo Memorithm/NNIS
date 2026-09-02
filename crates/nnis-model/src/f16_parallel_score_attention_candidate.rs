@@ -250,8 +250,9 @@ impl F16CachedAttentionParallelScoreCandidate {
         let head_dim_u32 = u32::try_from(config.head_dim).map_err(|_| {
             NnisError::invalid_input("parallel-score F16 attention head_dim exceeds u32")
         })?;
+        let warp_aligned = threads_per_block & 31 == 0;
         if threads_per_block < head_dim_u32
-            || !threads_per_block.is_multiple_of(32)
+            || !warp_aligned
             || threads_per_block > self.max_threads_per_block
         {
             return Err(NnisError::invalid_input(format!(
