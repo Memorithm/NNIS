@@ -8,6 +8,7 @@ mod attention_plan;
 mod cached_attention_candidate;
 mod config;
 mod f16_attention_plan;
+mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
 mod f16_reference_execution_plan;
 mod f16_reference_kernels;
@@ -31,6 +32,7 @@ pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16_ATTENTION_PLAN_VERSION,
 };
+pub use f16_fused_mlp_candidate::F16FusedMlpCandidate;
 pub use f16_fused_projection_candidate::F16FusedProjectionGroupsCandidate;
 pub use f16_reference_execution_plan::{
     F16ReferenceExecutionPlan, F16ReferenceProjectionLayout, F16_REFERENCE_EXECUTION_PLAN_VERSION,
