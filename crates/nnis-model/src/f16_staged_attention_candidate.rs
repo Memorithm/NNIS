@@ -99,6 +99,7 @@ pub struct F16CachedAttentionStagedWeightsCandidate {
     context: Arc<Context>,
     kernel: Kernel,
     max_threads_per_block: u32,
+    max_dynamic_shared_memory_bytes: u32,
 }
 
 impl F16CachedAttentionStagedWeightsCandidate {
@@ -109,12 +110,28 @@ impl F16CachedAttentionStagedWeightsCandidate {
         )?;
         let module = Module::load(context, &code)?;
         let kernel = module.get_function("nnis_cached_attention_decode_f16_staged_weights")?;
-        let max_threads_per_block = kernel.attributes()?.max_threads_per_block;
+        let attributes = kernel.attributes()?;
         Ok(Self {
             context: Arc::clone(context),
             kernel,
-            max_threads_per_block,
+            max_threads_per_block: attributes.max_threads_per_block,
+            max_dynamic_shared_memory_bytes: attributes.max_dynamic_shared_memory_bytes,
         })
+    }
+
+    #[must_use]
+    pub fn max_supported_kv_rows(&self) -> usize {
+        let limit = self
+            .context
+            .props()
+            .shared_memory_per_block
+            .min(self.max_dynamic_shared_memory_bytes);
+        limit as usize / (2 * std::mem::size_of::<f32>())
+    }
+
+    #[must_use]
+    pub fn supports_kv_rows(&self, kv_rows: usize) -> bool {
+        kv_rows > 0 && kv_rows <= self.max_supported_kv_rows()
     }
 
     pub fn cached_attention_decode(
@@ -205,6 +222,12 @@ impl F16CachedAttentionStagedWeightsCandidate {
             return Err(NnisError::invalid_input(format!(
                 "staged F16 attention head_dim {threads} exceeds function thread limit {}",
                 self.max_threads_per_block
+            )));
+        }
+        if !self.supports_kv_rows(kv_rows) {
+            return Err(NnisError::unsupported(format!(
+                "staged F16 attention requires {kv_rows} KV rows but this device/kernel supports at most {} rows within validated dynamic shared memory",
+                self.max_supported_kv_rows()
             )));
         }
         let query_heads_u32 = u32::try_from(query_heads)

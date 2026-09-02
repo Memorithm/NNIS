@@ -13,9 +13,11 @@
 
 use crate::runtime::build_rope_cache;
 use crate::{
-    load_model_directory, F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan,
-    F16ReferenceKernels, F16ReferenceProjectionLayout, F16TransposedProjectionCandidate,
-    F32RuntimeKernels, GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
+    load_model_directory, F16AttentionPlan, F16CachedAttentionKernel,
+    F16CachedAttentionStagedWeightsCandidate, F16FusedProjectionGroupsCandidate,
+    F16ReferenceExecutionPlan, F16ReferenceKernels, F16ReferenceProjectionLayout,
+    F16TransposedProjectionCandidate, F32RuntimeKernels, GenerationConfig, MatrixWeight,
+    ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -247,11 +249,13 @@ impl F16ModelWeights {
 pub struct F16ReferenceModel {
     config: ModelConfig,
     execution_plan: F16ReferenceExecutionPlan,
+    attention_plan: F16AttentionPlan,
     weights: F16ModelWeights,
     context: Arc<Context>,
     kernels: F16ReferenceKernels,
     projection_candidate: Option<F16TransposedProjectionCandidate>,
     fused_projection_candidate: Option<F16FusedProjectionGroupsCandidate>,
+    attention_candidate: Option<F16CachedAttentionStagedWeightsCandidate>,
     top_k: F32TopK,
     token_runtime: F32RuntimeKernels,
     rope_cos: DeviceBuffer<f32>,
@@ -265,11 +269,12 @@ impl F16ReferenceModel {
         stream: &Stream,
         plan: F16ReferencePlan,
     ) -> Result<Self> {
-        Self::new_with_execution_plan(
+        Self::new_with_execution_and_attention_plan(
             config,
             weights,
             stream,
             F16ReferenceExecutionPlan::reference(plan),
+            F16AttentionPlan::reference(),
         )
     }
 
@@ -279,7 +284,24 @@ impl F16ReferenceModel {
         stream: &Stream,
         execution_plan: F16ReferenceExecutionPlan,
     ) -> Result<Self> {
+        Self::new_with_execution_and_attention_plan(
+            config,
+            weights,
+            stream,
+            execution_plan,
+            F16AttentionPlan::reference(),
+        )
+    }
+
+    pub fn new_with_execution_and_attention_plan(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        execution_plan: F16ReferenceExecutionPlan,
+        attention_plan: F16AttentionPlan,
+    ) -> Result<Self> {
         execution_plan.validate(&config)?;
+        attention_plan.validate(&config)?;
         weights.validate(&config)?;
         if !Arc::ptr_eq(weights.context(), stream.ctx()) {
             return Err(NnisError::invalid_input(
@@ -304,6 +326,12 @@ impl F16ReferenceModel {
             F16ReferenceProjectionLayout::KnReference
             | F16ReferenceProjectionLayout::NkTransposedCandidate => None,
         };
+        let attention_candidate = match attention_plan.kernel {
+            F16CachedAttentionKernel::ReferencePerPositionBarriers => None,
+            F16CachedAttentionKernel::StagedWeightsCandidate => Some(
+                F16CachedAttentionStagedWeightsCandidate::load(&context, &compiler)?,
+            ),
+        };
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;
         let resident_weights = F16ModelWeights::from_f32(
@@ -321,11 +349,13 @@ impl F16ReferenceModel {
         Ok(Self {
             config,
             execution_plan,
+            attention_plan,
             weights: resident_weights,
             context,
             kernels,
             projection_candidate,
             fused_projection_candidate,
+            attention_candidate,
             top_k,
             token_runtime,
             rope_cos,
@@ -353,6 +383,23 @@ impl F16ReferenceModel {
         Self::new_with_execution_plan(config, weights, stream, execution_plan)
     }
 
+    pub fn load_directory_with_execution_and_attention_plan(
+        context: &Arc<Context>,
+        stream: &Stream,
+        directory: impl AsRef<Path>,
+        execution_plan: F16ReferenceExecutionPlan,
+        attention_plan: F16AttentionPlan,
+    ) -> Result<Self> {
+        let (config, weights) = load_model_directory(context, stream, directory)?;
+        Self::new_with_execution_and_attention_plan(
+            config,
+            weights,
+            stream,
+            execution_plan,
+            attention_plan,
+        )
+    }
+
     pub fn config(&self) -> &ModelConfig {
         &self.config
     }
@@ -365,6 +412,11 @@ impl F16ReferenceModel {
     #[must_use]
     pub const fn execution_plan(&self) -> F16ReferenceExecutionPlan {
         self.execution_plan
+    }
+
+    #[must_use]
+    pub const fn attention_plan(&self) -> F16AttentionPlan {
+        self.attention_plan
     }
 
     pub fn new_session(&self) -> Result<F16ReferenceSession<'_>> {
@@ -464,6 +516,36 @@ impl F16ReferenceModel {
                 intermediate,
             )?;
             self.enqueue_projection(stream, input, up_weight, up_output, hidden, intermediate)
+        }
+    }
+
+    unsafe fn enqueue_attention(
+        &self,
+        stream: &Stream,
+        query: &DeviceBuffer<u16>,
+        cache: &KvCache<u16>,
+        layer: usize,
+        output: &DeviceBuffer<u16>,
+        scale: f32,
+    ) -> Result<()> {
+        let kv_rows = cache.len(layer)?;
+        let staged_candidate = match self.attention_plan.kernel {
+            F16CachedAttentionKernel::ReferencePerPositionBarriers => None,
+            F16CachedAttentionKernel::StagedWeightsCandidate => self.attention_candidate.as_ref(),
+        };
+        if let Some(candidate) = staged_candidate {
+            if kv_rows >= self.attention_plan.staged_min_kv_rows
+                && candidate.supports_kv_rows(kv_rows)
+            {
+                return unsafe {
+                    candidate
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
+                };
+            }
+        }
+        unsafe {
+            self.kernels
+                .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
         }
     }
 
@@ -963,7 +1045,7 @@ impl<'model> F16ReferenceSession<'model> {
 
             // SAFETY: cache append and all consumers share this session stream.
             unsafe {
-                self.model.kernels.enqueue_cached_attention_decode(
+                self.model.enqueue_attention(
                     &self.stream,
                     &self.workspace.q_rope,
                     &self.cache,
@@ -1206,6 +1288,7 @@ mod tests {
             model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::KnReference
         );
+        assert_eq!(model.attention_plan(), F16AttentionPlan::reference());
         let mut session = model.new_session().unwrap();
         let generated = session
             .generate(&[1, 2], GenerationConfig::greedy(2))
@@ -1256,6 +1339,11 @@ mod tests {
             fused_model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
         );
+        assert_eq!(
+            candidate_model.attention_plan(),
+            F16AttentionPlan::reference()
+        );
+        assert_eq!(fused_model.attention_plan(), F16AttentionPlan::reference());
 
         let reference_logits = reference_model
             .new_session()
