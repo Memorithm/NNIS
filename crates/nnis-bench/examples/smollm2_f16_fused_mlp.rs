@@ -95,13 +95,7 @@ fn prepare_nk_weight(
     )?;
     let nk = DeviceBuffer::<u16>::new(context, HIDDEN * INTERMEDIATE)?;
     unsafe {
-        transposed.enqueue_transpose_kn_to_nk(
-            stream,
-            &kn,
-            &nk,
-            HIDDEN,
-            INTERMEDIATE,
-        )?;
+        transposed.enqueue_transpose_kn_to_nk(stream, &kn, &nk, HIDDEN, INTERMEDIATE)?;
     }
     stream.synchronize()?;
     Ok(nk)
@@ -136,12 +130,7 @@ fn run() -> Result<()> {
     let config = BenchConfig::new(warmups, iterations);
     config.validate()?;
 
-    let input = narrow(
-        &context,
-        &stream,
-        &reference,
-        &deterministic_f32(HIDDEN, 1),
-    )?;
+    let input = narrow(&context, &stream, &reference, &deterministic_f32(HIDDEN, 1))?;
     let gate_weight = prepare_nk_weight(&context, &stream, &reference, &transposed, 2)?;
     let up_weight = prepare_nk_weight(&context, &stream, &reference, &transposed, 3)?;
 
