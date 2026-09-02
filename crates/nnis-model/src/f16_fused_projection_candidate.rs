@@ -268,6 +268,7 @@ impl F16FusedProjectionGroupsCandidate {
         unsafe { launch.launch(&mut args) }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn validate_projection(
         &self,
         stream: &Stream,
