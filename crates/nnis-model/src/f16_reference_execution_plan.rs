@@ -23,6 +23,12 @@ pub enum F16ReferenceProjectionLayout {
     /// transposed kernels. This variant is qualification-only until a separate
     /// end-to-end promotion gate succeeds.
     NkTransposedFusedGroupsCandidate,
+    /// Candidate layout: resident `[N, K]`, grouped QKV, and fused gate/up/SiLU.
+    ///
+    /// The MLP candidate preserves the existing F16 projection, SiLU and product
+    /// rounding boundaries while replacing grouped gate/up + SiLU with one launch.
+    /// O-projection, down-projection, LM-head and attention remain unchanged.
+    NkTransposedFusedMlpCandidate,
 }
 
 /// Versioned physical execution plan for the NNML5 F16 runtime.
@@ -61,6 +67,15 @@ impl F16ReferenceExecutionPlan {
             schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
             numeric: F16ReferencePlan::edge_llm_v0_10_0_alignment(),
             projection_layout: F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate,
+        }
+    }
+
+    /// Explicit fused-MLP candidate measured in PR #82 / KA12.
+    pub const fn edge_llm_v0_10_0_transposed_fused_mlp_candidate() -> Self {
+        Self {
+            schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
+            numeric: F16ReferencePlan::edge_llm_v0_10_0_alignment(),
+            projection_layout: F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate,
         }
     }
 
@@ -129,6 +144,17 @@ mod tests {
         let encoded_fused = serde_json::to_string(&fused).unwrap();
         assert!(encoded_fused
             .contains("\"projection_layout\":\"nk_transposed_fused_groups_candidate\""));
+
+        let fused_mlp =
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_mlp_candidate();
+        fused_mlp.validate(&config).unwrap();
+        assert_eq!(
+            fused_mlp.projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate
+        );
+        let encoded_fused_mlp = serde_json::to_string(&fused_mlp).unwrap();
+        assert!(encoded_fused_mlp
+            .contains("\"projection_layout\":\"nk_transposed_fused_mlp_candidate\""));
 
         let mut future = candidate;
         future.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
