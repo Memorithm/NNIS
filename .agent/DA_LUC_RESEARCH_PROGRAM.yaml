@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_da_luc_research_program
 status: research_only
-last_updated: "2026-09-02T18:04+0200"
+last_updated: "2026-09-03T01:31+0200"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -137,17 +137,30 @@ research_phases:
       - record_prior_art_comparison_matrix
       - define_versioned_candidate_plan_without_changing_default_runtime
   - id: DAL1
-    name: Exact representation oracle
-    status: ready_after_DAL0_reuse_FLAT_semantics_before_duplication
+    name: Exact representation evidence adapter
+    status: active
+    issue: 95
+    audited_heads:
+      NNIS_main_at_issue_creation: 62750422004d03a874a7a3911a358815b36e47f2
+      FLAT_ATTENTION_main: c35b044c5324963a300ff50da0f7ec10dcc6db71
+    architecture_decision: >-
+      FLAT-ATTENTION already owns the canonical DA-LUC representation encode,
+      decode, exact-storage accounting, and K/V reconstruction-error semantics.
+      DAL1 must bind and verify that evidence against an NNIS plan rather than
+      implement a duplicate private codec.
     deliverables:
-      - host_reference_encode_decode_or_explicit_adapter_to_FLAT_owned_reference_semantics
-      - exact_storage_accounting
-      - K_and_V_error_sweeps
-      - sparse_outlier_residual_accounting
-    boundary: >-
-      FLAT-ATTENTION already owns the attention-facing representation oracle.
-      Before implementing a private NNIS codec, audit whether DAL1 should be a
-      deterministic mapping/verification adapter to that canonical contract.
+      - explicit_FLAT_view_schema_and_oracle_payload_version_handshake
+      - deterministic_NNIS_plan_to_FLAT_contract_identity_mapping
+      - versioned_replayable_FLAT_oracle_evidence_fixture_or_interchange
+      - exact_storage_accounting_verification_without_private_nominal_recomputation
+      - K_and_V_reconstruction_error_evidence_validation
+      - one_field_semantic_and_accounting_drift_rejection
+      - preserve_NVIDIA_physical_layout_identity_as_separate_from_FLAT_semantic_identity
+    non_goals:
+      - no_private_NNIS_encode_decode_duplicate_of_FLAT_FDAL1
+      - no_CUDA_compressed_attention_kernel
+      - no_runtime_KV_mutation_or_default_change
+      - no_performance_quality_compression_or_novelty_claim
   - id: DAL2
     name: LUT-coded key scoring
     status: blocked_on_DAL1
@@ -207,8 +220,8 @@ fail_closed_conditions:
   - claiming_eight_to_sixteen_x_without_measured_effective_bits_per_value
 
 next_action: >-
-  Audit DAL1 against the now-merged FLAT-bound DAL0 contract and prefer a narrow
-  deterministic adapter/reuse of FLAT-owned representation semantics over a
-  duplicate private codec. Keep the existing dense runtime default and make no
-  compressed-KV performance or quality claim before later exact-storage,
-  correctness, real-model, and hardware gates.
+  Implement issue 95 as a narrow deterministic NNIS-to-FLAT evidence and identity
+  adapter over the already-qualified FLAT FDAL1 oracle. Do not create a second
+  codec. Preserve the dense runtime default and defer DAL2 CUDA scoring until the
+  cross-repository semantic, exact-storage, and reconstruction-evidence binding
+  passes exact-head CI.
