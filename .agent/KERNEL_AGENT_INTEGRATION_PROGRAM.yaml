@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_kernel_agent_integration_program
 status: active
-last_updated: "2026-09-01"
+last_updated: "2026-09-02"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -149,6 +149,70 @@ phase_evidence:
       CUDA-event measurements, fail-closed environment identity and paired
       ordering. No end-to-end plan may be created from the generic RMSNorm
       result.
+  NK3_f16_parallel_score_KA17_qualification:
+    result: physical_microbenchmark_correctness_gate_passed_not_promoted
+    qualification_pull_request: 90
+    qualification_exact_head: 6ff87a40810259e8e6299d4c32503a2e91e40b38
+    qualification_merge_commit: c6ba55d90fbcc8090e981a6424421590e6c1c35f
+    hardware_run: ka17_f16_attention_parallel_score_qualification
+    geometry:
+      query_heads: 9
+      key_value_heads: 3
+      head_dim: 64
+      kv_rows: "1..=35"
+      decode32_generation_kv_rows: "4..=34"
+    numerical_contract: F16_query_key_value_storage_F32_score_softmax_value_accumulation_final_F16_output
+    correctness:
+      fixture_families: 6
+      launch_widths: [64, 128, 256, 512]
+      cases: 840
+      bitwise_equal_cases: 840
+      differing_elements: 0
+      global_max_absolute_error: 0.0
+      global_max_relative_error: 0.0
+    predeclared_policy:
+      kv_le_3: reference
+      kv_4: block_128
+      kv_5_through_16: block_256
+      kv_17_through_35: block_512
+      decode32_policy_slower_rows: 0
+      decode32_generation_path_relative_improvement: 0.75058
+    post_hoc_observation: >-
+      Always using block 512 had a marginally lower isolated generation-path
+      sum-of-row-medians than the predeclared policy, about two tenths of one
+      percent. This must not be used to retune the policy from the same KA17
+      evidence; any alternative policy requires a separately declared and
+      independently confirmed campaign.
+    claim_boundary: >-
+      KA17 closes the synthetic short-context final-F16 correctness gate and
+      demonstrates a large isolated attention proxy reduction on this physical
+      environment. It is not decoder latency or tokens-per-second evidence and
+      does not authorize a runtime default change.
+  NK3_f16_parallel_score_KA18_e2e_surface:
+    result: merged_candidate_only_awaiting_physical_e2e_ABBA
+    pull_request: 91
+    exact_head_ci: 2a5b955cef9784c8300acf1a3b573326e9cf7fcb
+    merge_commit: 0ad21de369d9e3d832de5944aef64332d8445662
+    default_runtime_change: false
+    model_format_change: false
+    parent_projection_plan: resident_NK_transposed_projection
+    candidate_attention_plan: thor_ka17_parallel_score_candidate
+    dispatch_policy: reference_le_3_block128_at_4_block256_5_to_16_block512_17_to_35_reference_above_35
+    qualified_model_scope: SmolLM2_135M_geometry_only
+    failure_policy: selected_parallel_score_launch_resource_incompatibility_fails_closed
+    e2e_gate:
+      input_ids: [22007, 6463, 314]
+      generated_tokens: 32
+      required_exact_greedy_matches: 32
+      decoder_forward_intervals_per_request: 31
+      timing_primary: generation_stage_CUDA_event_total
+      ordering: repeated_ABBA
+      environment_compatibility: fail_closed
+    next_gate: >-
+      Run repeated physical reference versus parallel-score-KA17 ABBA on the
+      pinned SmolLM2 fixture. Every warmup and measured request must retain the
+      exact known 32-of-32 greedy trajectory. Inspect paired effect size and
+      order bias under one compatible environment before any promotion.
 
 phases:
   - id: NK0
@@ -174,7 +238,7 @@ phases:
       - require_destination_end_to_end_requalification_before_plan_promotion
   - id: NK3
     name: Attention_and_decode search
-    status: planned
+    status: in_progress
     goals:
       - expose_measured_bottlenecks_as_search_tasks
       - integrate_FLAT_ATTENTION_only_through_versioned_semantics
