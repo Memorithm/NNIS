@@ -1,5 +1,5 @@
-use crate::ModelConfig;
-use nnis_rt::{NnisError, Result};
+use crate::{Activation, ModelConfig, WeightDType};
+use nnis_rt::{Context, NnisError, Result};
 use serde::{Deserialize, Serialize};
 
 pub const F16_ATTENTION_PLAN_VERSION: u32 = 1;
@@ -44,11 +44,9 @@ impl F16ParallelScorePolicy {
 
 /// Versioned F16 attention-kernel policy, separate from numeric and projection plans.
 ///
-/// Candidate plans remain opt-in. The reference constructor is unchanged. The
-/// staged candidate may fall back to reference when below threshold or outside
-/// resource support. The KA17 parallel-score plan uses the reference kernel
-/// outside its explicitly qualified short-context domain and fails closed if a
-/// selected candidate launch is resource-incompatible.
+/// Generic APIs keep the reference constructor unchanged. Candidate plans remain
+/// explicit comparison surfaces. The promoted SmolLM2/Thor selector is separately
+/// fail-closed to the exact qualified model and GPU class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct F16AttentionPlan {
     pub schema_version: u32,
@@ -84,13 +82,13 @@ impl F16AttentionPlan {
         }
     }
 
-    /// Candidate-only plan carrying the launch policy fixed before KA17.
+    /// Historical candidate constructor carrying the policy fixed before KA17.
     ///
     /// KA17 qualified the final F16 output boundary for SmolLM2-135M attention
     /// geometry across KV rows 1..=35 and six deterministic fixture families.
-    /// This constructor does not promote the candidate: rows <=3 and >35 retain
-    /// the reference kernel, and rows 4..=35 use the predeclared 128/256/512
-    /// schedule. End-to-end greedy and timing evidence remains mandatory.
+    /// Rows <=3 and >35 retain the reference kernel; rows 4..=35 use the
+    /// predeclared 128/256/512 schedule. This constructor remains available for
+    /// evidence replay and explicit comparisons.
     pub const fn thor_ka17_parallel_score_candidate() -> Self {
         Self {
             schema_version: F16_ATTENTION_PLAN_VERSION,
@@ -98,6 +96,73 @@ impl F16AttentionPlan {
             staged_min_kv_rows: 0,
             parallel_score_policy: Some(F16ParallelScorePolicy::Ka17SmolLm2ShortContextV1),
         }
+    }
+
+    /// Qualified minimum-latency attention plan for the pinned SmolLM2-135M
+    /// short-context execution domain on NVIDIA Thor.
+    ///
+    /// Promotion basis: KA17 established 840/840 bitwise-identical final-F16
+    /// comparisons across KV rows 1..=35, six fixture families and four launch
+    /// widths. KA18 and KA19 then independently requalified the frozen policy on
+    /// the exact SmolLM2 decode32 trajectory with repeated ABBA ordering. Each
+    /// campaign won all six paired GPU rounds by at least 3%, preserved every
+    /// 32-token greedy trajectory, and reported median paired generation-stage
+    /// GPU improvements above 20%. The independent consensus verifier accepted
+    /// both campaigns under one compatible stable physical environment.
+    ///
+    /// This selector intentionally does not change [`Self::reference`]. It fails
+    /// closed outside the exact pinned model identity and NVIDIA Thor GPU class.
+    pub fn smollm2_135m_thor_min_latency(config: &ModelConfig, context: &Context) -> Result<Self> {
+        let plan = Self::thor_ka17_parallel_score_candidate();
+        plan.validate_smollm2_135m_min_latency_model_domain(config)?;
+
+        let properties = context.props();
+        if properties.name != "NVIDIA Thor"
+            || properties.compute_capability != (11, 0)
+            || properties.multiprocessor_count != 20
+        {
+            return Err(NnisError::unsupported(format!(
+                "qualified SmolLM2 F16 attention min-latency plan requires NVIDIA Thor cc 11.0 with 20 SMs; observed {} cc {}.{} with {} SMs",
+                properties.name,
+                properties.compute_capability.0,
+                properties.compute_capability.1,
+                properties.multiprocessor_count
+            )));
+        }
+        Ok(plan)
+    }
+
+    /// Validate the exact model-side promotion domain independently of CUDA
+    /// hardware. Hardware authorization still requires
+    /// [`Self::smollm2_135m_thor_min_latency`].
+    pub fn validate_smollm2_135m_min_latency_model_domain(
+        &self,
+        config: &ModelConfig,
+    ) -> Result<()> {
+        self.validate(config)?;
+        if *self != Self::thor_ka17_parallel_score_candidate() {
+            return Err(NnisError::unsupported(
+                "SmolLM2 F16 attention min-latency qualification requires the KA17 parallel-score policy",
+            ));
+        }
+        if config.vocab_size != 49_152
+            || config.eos_token_id != Some(0)
+            || config.hidden_size != 576
+            || config.intermediate_size != 1_536
+            || config.num_hidden_layers != 30
+            || config.num_attention_heads != 9
+            || config.num_key_value_heads != 3
+            || config.max_position_embeddings != 8_192
+            || config.rms_norm_eps != 1.0e-5
+            || config.rope_theta != 100_000.0
+            || config.activation != Activation::Silu
+            || config.weight_dtype != WeightDType::F32
+        {
+            return Err(NnisError::unsupported(
+                "qualified F16 attention min-latency plan is restricted to the pinned SmolLM2-135M model identity",
+            ));
+        }
+        Ok(())
     }
 
     #[must_use]
@@ -174,7 +239,6 @@ impl F16AttentionPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Activation, WeightDType};
 
     fn tiny_config() -> ModelConfig {
         ModelConfig {
@@ -260,5 +324,24 @@ mod tests {
         let encoded = serde_json::to_string(&plan).unwrap();
         assert!(encoded.contains("\"kernel\":\"parallel_score_candidate\""));
         assert!(encoded.contains("\"parallel_score_policy\":\"ka17_smol_lm2_short_context_v1\""));
+    }
+
+    #[test]
+    fn smollm2_min_latency_model_domain_is_fail_closed() {
+        let plan = F16AttentionPlan::thor_ka17_parallel_score_candidate();
+        plan.validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
+            .unwrap();
+        assert!(plan
+            .validate_smollm2_135m_min_latency_model_domain(&tiny_config())
+            .is_err());
+        assert!(F16AttentionPlan::reference()
+            .validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
+            .is_err());
+
+        let mut wrong_identity = smollm2_config();
+        wrong_identity.rope_theta = 10_000.0;
+        assert!(plan
+            .validate_smollm2_135m_min_latency_model_domain(&wrong_identity)
+            .is_err());
     }
 }
