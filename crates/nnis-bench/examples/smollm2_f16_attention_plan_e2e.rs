@@ -166,11 +166,10 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .map_err(|error| format!("invalid --device: {error}"))?;
             }
             "--attention" => {
-                attention_name = Some(AttentionPlanName::parse(
-                    &args.next().ok_or(
+                attention_name =
+                    Some(AttentionPlanName::parse(&args.next().ok_or(
                         "--attention requires reference, staged, or parallel-score-ka17",
-                    )?,
-                )?);
+                    )?)?);
             }
             "--warmups" => {
                 warmups = parse_usize(
@@ -201,9 +200,8 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     Ok(Arguments {
         model_dir: model_dir.ok_or("missing --model DIR")?,
         device,
-        attention_name: attention_name.ok_or(
-            "missing --attention reference|staged|parallel-score-ka17",
-        )?,
+        attention_name: attention_name
+            .ok_or("missing --attention reference|staged|parallel-score-ka17")?,
         warmups,
         iterations,
     })
@@ -388,7 +386,9 @@ fn run(arguments: Arguments) -> Result<Report> {
                 || attention_plan.parallel_score_threads_per_block(16) != Some(256)
                 || attention_plan.parallel_score_threads_per_block(17) != Some(512)
                 || attention_plan.parallel_score_threads_per_block(35) != Some(512)
-                || attention_plan.parallel_score_threads_per_block(36).is_some()
+                || attention_plan
+                    .parallel_score_threads_per_block(36)
+                    .is_some()
             {
                 return Err(NnisError::unsupported(
                     "parallel-score attention experiment did not preserve the fixed KA17 launch policy",
