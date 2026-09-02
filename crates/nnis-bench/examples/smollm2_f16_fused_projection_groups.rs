@@ -87,12 +87,7 @@ fn prepare_nk_weight(
     n: usize,
     salt: usize,
 ) -> Result<DeviceBuffer<u16>> {
-    let kn = narrow(
-        context,
-        stream,
-        reference,
-        &deterministic_f32(k * n, salt),
-    )?;
+    let kn = narrow(context, stream, reference, &deterministic_f32(k * n, salt))?;
     let nk = DeviceBuffer::<u16>::new(context, k * n)?;
     unsafe { transposed.enqueue_transpose_kn_to_nk(stream, &kn, &nk, k, n)? };
     stream.synchronize()?;
@@ -122,39 +117,10 @@ fn benchmark_qkv(
     fused: &F16FusedProjectionGroupsCandidate,
     config: BenchConfig,
 ) -> Result<GroupResult> {
-    let input = narrow(
-        context,
-        stream,
-        reference,
-        &deterministic_f32(HIDDEN, 1),
-    )?;
-    let q_weight = prepare_nk_weight(
-        context,
-        stream,
-        reference,
-        transposed,
-        HIDDEN,
-        HIDDEN,
-        2,
-    )?;
-    let k_weight = prepare_nk_weight(
-        context,
-        stream,
-        reference,
-        transposed,
-        HIDDEN,
-        KV_WIDTH,
-        3,
-    )?;
-    let v_weight = prepare_nk_weight(
-        context,
-        stream,
-        reference,
-        transposed,
-        HIDDEN,
-        KV_WIDTH,
-        4,
-    )?;
+    let input = narrow(context, stream, reference, &deterministic_f32(HIDDEN, 1))?;
+    let q_weight = prepare_nk_weight(context, stream, reference, transposed, HIDDEN, HIDDEN, 2)?;
+    let k_weight = prepare_nk_weight(context, stream, reference, transposed, HIDDEN, KV_WIDTH, 3)?;
+    let v_weight = prepare_nk_weight(context, stream, reference, transposed, HIDDEN, KV_WIDTH, 4)?;
 
     let q_sequential = DeviceBuffer::<u16>::new(context, HIDDEN)?;
     let k_sequential = DeviceBuffer::<u16>::new(context, KV_WIDTH)?;
@@ -164,14 +130,7 @@ fn benchmark_qkv(
     let v_fused = DeviceBuffer::<u16>::new(context, KV_WIDTH)?;
 
     unsafe {
-        transposed.enqueue_project_nk(
-            stream,
-            &input,
-            &q_weight,
-            &q_sequential,
-            HIDDEN,
-            HIDDEN,
-        )?;
+        transposed.enqueue_project_nk(stream, &input, &q_weight, &q_sequential, HIDDEN, HIDDEN)?;
         transposed.enqueue_project_nk(
             stream,
             &input,
@@ -189,17 +148,8 @@ fn benchmark_qkv(
             KV_WIDTH,
         )?;
         fused.enqueue_qkv_nk(
-            stream,
-            &input,
-            &q_weight,
-            &k_weight,
-            &v_weight,
-            &q_fused,
-            &k_fused,
-            &v_fused,
-            HIDDEN,
-            HIDDEN,
-            KV_WIDTH,
+            stream, &input, &q_weight, &k_weight, &v_weight, &q_fused, &k_fused, &v_fused, HIDDEN,
+            HIDDEN, KV_WIDTH,
         )?;
     }
     stream.synchronize()?;
@@ -217,14 +167,7 @@ fn benchmark_qkv(
         .with_work_items((HIDDEN * HIDDEN + 2 * HIDDEN * KV_WIDTH) as u64);
 
     let sequential_report = benchmark_gpu(context, stream, sequential_case, config, || unsafe {
-        transposed.enqueue_project_nk(
-            stream,
-            &input,
-            &q_weight,
-            &q_sequential,
-            HIDDEN,
-            HIDDEN,
-        )?;
+        transposed.enqueue_project_nk(stream, &input, &q_weight, &q_sequential, HIDDEN, HIDDEN)?;
         transposed.enqueue_project_nk(
             stream,
             &input,
@@ -233,28 +176,12 @@ fn benchmark_qkv(
             HIDDEN,
             KV_WIDTH,
         )?;
-        transposed.enqueue_project_nk(
-            stream,
-            &input,
-            &v_weight,
-            &v_sequential,
-            HIDDEN,
-            KV_WIDTH,
-        )
+        transposed.enqueue_project_nk(stream, &input, &v_weight, &v_sequential, HIDDEN, KV_WIDTH)
     })?;
     let fused_report = benchmark_gpu(context, stream, fused_case, config, || unsafe {
         fused.enqueue_qkv_nk(
-            stream,
-            &input,
-            &q_weight,
-            &k_weight,
-            &v_weight,
-            &q_fused,
-            &k_fused,
-            &v_fused,
-            HIDDEN,
-            HIDDEN,
-            KV_WIDTH,
+            stream, &input, &q_weight, &k_weight, &v_weight, &q_fused, &k_fused, &v_fused, HIDDEN,
+            HIDDEN, KV_WIDTH,
         )
     })?;
 
@@ -282,12 +209,7 @@ fn benchmark_gate_up(
     fused: &F16FusedProjectionGroupsCandidate,
     config: BenchConfig,
 ) -> Result<GroupResult> {
-    let input = narrow(
-        context,
-        stream,
-        reference,
-        &deterministic_f32(HIDDEN, 7),
-    )?;
+    let input = narrow(context, stream, reference, &deterministic_f32(HIDDEN, 7))?;
     let gate_weight = prepare_nk_weight(
         context,
         stream,
@@ -346,7 +268,11 @@ fn benchmark_gate_up(
         &gate_sequential.to_vec(stream)?,
         &gate_fused.to_vec(stream)?,
     )?;
-    require_equal("up", &up_sequential.to_vec(stream)?, &up_fused.to_vec(stream)?)?;
+    require_equal(
+        "up",
+        &up_sequential.to_vec(stream)?,
+        &up_fused.to_vec(stream)?,
+    )?;
 
     let sequential_case = BenchmarkCase::new("smollm2_gate_up_nk_sequential", "f16")
         .with_dimension("hidden", HIDDEN as u64)
@@ -393,7 +319,11 @@ fn benchmark_gate_up(
         &gate_sequential.to_vec(stream)?,
         &gate_fused.to_vec(stream)?,
     )?;
-    require_equal("up", &up_sequential.to_vec(stream)?, &up_fused.to_vec(stream)?)?;
+    require_equal(
+        "up",
+        &up_sequential.to_vec(stream)?,
+        &up_fused.to_vec(stream)?,
+    )?;
 
     Ok(GroupResult {
         name: "gate_up",
@@ -419,25 +349,11 @@ fn run() -> Result<()> {
     let config = BenchConfig::new(warmups, iterations);
     config.validate()?;
 
-    let qkv = benchmark_qkv(
-        &context,
-        &stream,
-        &reference,
-        &transposed,
-        &fused,
-        config,
-    )?;
-    let gate_up = benchmark_gate_up(
-        &context,
-        &stream,
-        &reference,
-        &transposed,
-        &fused,
-        config,
-    )?;
+    let qkv = benchmark_qkv(&context, &stream, &reference, &transposed, &fused, config)?;
+    let gate_up = benchmark_gate_up(&context, &stream, &reference, &transposed, &fused, config)?;
 
-    let sequential_per_layer = qkv.sequential.statistics.median_ms
-        + gate_up.sequential.statistics.median_ms;
+    let sequential_per_layer =
+        qkv.sequential.statistics.median_ms + gate_up.sequential.statistics.median_ms;
     let fused_per_layer = qkv.fused.statistics.median_ms + gate_up.fused.statistics.median_ms;
     let sequential_per_token = sequential_per_layer * LAYERS as f64;
     let fused_per_token = fused_per_layer * LAYERS as f64;
