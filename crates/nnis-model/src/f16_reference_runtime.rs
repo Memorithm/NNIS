@@ -1232,7 +1232,7 @@ mod tests {
 
     fn tiny_weights(context: &Arc<Context>, stream: &Stream) -> ModelWeights {
         let embedding = vec![
-            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         ];
         let zeros = vec![0.0_f32; 16];
         let kv_zeros = vec![0.0_f32; 8];
