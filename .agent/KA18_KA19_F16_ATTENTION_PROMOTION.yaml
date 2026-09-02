@@ -1,0 +1,93 @@
+schema_version: 1
+kind: nnis_f16_attention_promotion_evidence
+status: promoted_qualified_selector
+last_updated: "2026-09-02"
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+scope:
+  model: HuggingFaceTB/SmolLM2-135M
+  source_revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+  runtime_commit_under_test: 0ad21de369d9e3d832de5944aef64332d8445662
+  numerical_boundary: final_F16_attention_output
+  decode_steps: 32
+  generation_kv_rows: "4..=34"
+  hardware_class:
+    gpu_name: NVIDIA Thor
+    compute_capability: "11.0"
+    multiprocessor_count: 20
+
+policy:
+  name: ka17_smol_lm2_short_context_v1
+  kv_le_3: reference
+  kv_4: block_128
+  kv_5_through_16: block_256
+  kv_17_through_35: block_512
+  kv_above_35: reference
+
+correctness_gate:
+  campaign: KA17
+  cases: 840
+  bitwise_equal_cases: 840
+  differing_elements: 0
+  max_absolute_error: 0.0
+  max_relative_error: 0.0
+
+independent_e2e_campaigns:
+  KA18:
+    reports: 24
+    exact_greedy_reports: 24
+    paired_rounds: 6
+    candidate_round_wins: 6
+    reference_round_wins: 0
+    rounds_at_or_above_3pct: 6
+    median_paired_generation_gpu_improvement: 0.202664
+    mean_paired_generation_gpu_improvement: 0.205562
+    min_paired_generation_gpu_improvement: 0.198110
+    max_paired_generation_gpu_improvement: 0.213997
+    median_ab_improvement: 0.208013
+    median_ba_improvement: 0.198601
+    median_order_bias_delta_points: 0.009413
+    generation_wall_median_paired_improvement: 0.186990
+    request_total_wall_median_paired_improvement: 0.183811
+  KA19:
+    reports: 24
+    exact_greedy_reports: 24
+    paired_rounds: 6
+    candidate_round_wins: 6
+    reference_round_wins: 0
+    rounds_at_or_above_3pct: 6
+    median_paired_generation_gpu_improvement: 0.211596
+    mean_paired_generation_gpu_improvement: 0.210835
+    min_paired_generation_gpu_improvement: 0.202953
+    max_paired_generation_gpu_improvement: 0.217510
+    median_ab_improvement: 0.207310
+    median_ba_improvement: 0.207495
+    median_order_bias_delta_points: -0.000185
+    generation_wall_median_paired_improvement: 0.195819
+    request_total_wall_median_paired_improvement: 0.194086
+
+consensus_gate:
+  verifier_pull_request: 92
+  verifier_merge_commit: 30323aca4448aad43c43bfdd1392d416046ce964
+  environment_compatible_across_distinct_campaigns: true
+  exact_git_commit_equal: true
+  campaign_count: 2
+  minimum_review_effect: 0.03
+  promotion_review_eligible: true
+
+promotion:
+  pull_request: 93
+  exact_head_ci: 19709caa00e928ea6fa974e47f544971f5f16bbe
+  merge_commit: 0804a9f3fc55eab6c157b0d1cd6f8bdc6bf38930
+  api: F16AttentionPlan::smollm2_135m_thor_min_latency
+  generic_reference_default_changed: false
+  cross_model_claim: false
+  long_context_claim: false
+  model_format_change: false
+
+interpretation: >-
+  The frozen KA17 parallel-score policy is promoted to a destination-owned,
+  fail-closed selector for the exact SmolLM2-135M short-context domain on the
+  qualified NVIDIA Thor hardware class. The generic NNIS attention default
+  remains the reference path. The evidence does not authorize extrapolation to
+  other models, unseen KV lengths, or other GPU classes.
