@@ -11,6 +11,8 @@ scope:
   numerical_boundary: final_F16_attention_output
   decode_steps: 32
   generation_kv_rows: "4..=34"
+  qualified_parent_execution_plan: edge_llm_v0_10_0_transposed_projection_candidate
+  qualified_parent_projection_layout: nk_transposed_candidate
   hardware_class:
     gpu_name: NVIDIA Thor
     compute_capability: "11.0"
@@ -76,18 +78,25 @@ consensus_gate:
   promotion_review_eligible: true
 
 promotion:
-  pull_request: 93
-  exact_head_ci: 19709caa00e928ea6fa974e47f544971f5f16bbe
-  merge_commit: 0804a9f3fc55eab6c157b0d1cd6f8bdc6bf38930
+  initial_pull_request: 93
+  initial_exact_head_ci: 19709caa00e928ea6fa974e47f544971f5f16bbe
+  initial_merge_commit: 0804a9f3fc55eab6c157b0d1cd6f8bdc6bf38930
+  parent_boundary_fix_pull_request: 94
+  parent_boundary_fix_exact_head_ci: b8ea2bc901b5ce170414860340799c9e94181bdc
+  final_merge_commit: 62750422004d03a874a7a3911a358815b36e47f2
   api: F16AttentionPlan::smollm2_135m_thor_min_latency
   generic_reference_default_changed: false
   cross_model_claim: false
   long_context_claim: false
+  arbitrary_parent_plan_claim: false
+  fused_mlp_combination_qualified: false
   model_format_change: false
 
 interpretation: >-
   The frozen KA17 parallel-score policy is promoted to a destination-owned,
   fail-closed selector for the exact SmolLM2-135M short-context domain on the
-  qualified NVIDIA Thor hardware class. The generic NNIS attention default
+  qualified NVIDIA Thor hardware class and only under the exact transposed-
+  projection parent used by KA18 and KA19. The generic NNIS attention default
   remains the reference path. The evidence does not authorize extrapolation to
-  other models, unseen KV lengths, or other GPU classes.
+  other models, unseen KV lengths, other GPU classes, or combination with the
+  separately qualified fused-MLP execution plan without a new physical campaign.
