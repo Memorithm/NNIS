@@ -36,3 +36,4 @@ jobs:
           git add crates/nnis-model/src/da_luc_plan.rs
           git commit -m "fix(dal0): fail closed on invalid model geometry"
           git push origin HEAD:feat/dal0-flat-view-binding
+# staging-rerun: 2
