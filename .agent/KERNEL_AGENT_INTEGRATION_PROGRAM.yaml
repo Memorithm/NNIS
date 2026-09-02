@@ -189,7 +189,7 @@ phase_evidence:
       environment. It is not decoder latency or tokens-per-second evidence and
       does not authorize a runtime default change.
   NK3_f16_parallel_score_KA18_e2e_surface:
-    result: merged_candidate_only_awaiting_physical_e2e_ABBA
+    result: physical_e2e_ABBA_passed_awaiting_independent_repeat
     pull_request: 91
     exact_head_ci: 2a5b955cef9784c8300acf1a3b573326e9cf7fcb
     merge_commit: 0ad21de369d9e3d832de5944aef64332d8445662
@@ -200,19 +200,49 @@ phase_evidence:
     dispatch_policy: reference_le_3_block128_at_4_block256_5_to_16_block512_17_to_35_reference_above_35
     qualified_model_scope: SmolLM2_135M_geometry_only
     failure_policy: selected_parallel_score_launch_resource_incompatibility_fails_closed
-    e2e_gate:
-      input_ids: [22007, 6463, 314]
-      generated_tokens: 32
-      required_exact_greedy_matches: 32
-      decoder_forward_intervals_per_request: 31
-      timing_primary: generation_stage_CUDA_event_total
-      ordering: repeated_ABBA
-      environment_compatibility: fail_closed
+    physical_run:
+      run_context_id: ka18-f16-parallel-score-e2e-abba-thor-20260902T185142Z
+      reports: 24
+      rounds: 6
+      ordering: ABBA
+      warmups_per_report: 2
+      measured_requests_per_report: 7
+      exact_greedy_reports: 24
+      exact_greedy_tokens_per_report: 32
+      environment_compatible_within_campaign: true
+      candidate_round_wins: 6
+      reference_round_wins: 0
+      ties: 0
+      rounds_at_or_above_3pct: 6
+      generation_stage_gpu:
+        median_paired_relative_improvement: 0.202664
+        mean_paired_relative_improvement: 0.205562
+        min_paired_relative_improvement: 0.198110
+        max_paired_relative_improvement: 0.213997
+        stdev_paired_relative_improvement_points: 0.006551
+        median_AB_relative_improvement: 0.208013
+        median_BA_relative_improvement: 0.198601
+        median_order_bias_delta_points: 0.009413
+        median_reference_process_ms: 252.888033
+        median_candidate_process_ms: 201.226512
+        aggregate_speedup_ratio: 1.256733
+      secondary_wall_metrics:
+        generation_wall_median_paired_relative_improvement: 0.186990
+        request_total_wall_median_paired_relative_improvement: 0.183811
+    interpretation: >-
+      The fixed KA17 policy survives the real SmolLM2 decode32 path with the
+      exact known greedy trajectory in every warmup/measured report and wins all
+      six paired ABBA rounds. The observed order delta is small relative to the
+      roughly twenty-percent paired GPU effect and does not reverse any round.
+      This is end-to-end evidence for this exact model, short-context trajectory,
+      commit and physical environment, not a cross-model or long-context claim.
     next_gate: >-
-      Run repeated physical reference versus parallel-score-KA17 ABBA on the
-      pinned SmolLM2 fixture. Every warmup and measured request must retain the
-      exact known 32-of-32 greedy trajectory. Inspect paired effect size and
-      order bias under one compatible environment before any promotion.
+      Repeat the same frozen policy in a separately identified physical ABBA
+      campaign. Cross-campaign comparison must require distinct non-empty run
+      context ids while matching all stable hardware/software/power/clock fields,
+      the exact commit, model provenance, trajectory, warmup/iteration contract,
+      and campaign schema. Only a compatible independent repeat may authorize a
+      production-default promotion review.
 
 phases:
   - id: NK0
