@@ -1,22 +1,38 @@
 schema_version: 1
 kind: nnis_f16_fused_mlp_qualification
-status: awaiting_independent_repeat
+status: promoted_scoped_explicit_plan
 last_updated: "2026-09-02"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
 candidate:
-  execution_plan: nk_transposed_fused_mlp_candidate
+  execution_plan_schema_identity: nk_transposed_fused_mlp_candidate
+  promoted_selector: F16ReferenceExecutionPlan::smollm2_135m_thor_min_latency
   parent_execution_plan: nk_transposed_fused_groups_candidate
-  candidate_merge_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
-  default_runtime_change: false
+  qualified_runtime_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
+  promotion_pull_request: 88
+  promotion_exact_head_ci: e42ee251591735d03dac1c911a56978686097b29
+  promotion_merge_commit: b08c904437dc62a5215b942a75a0a41f7e2471dc
+  generic_default_changed: false
+  attention_staged_promoted: false
   semantic_change: false
+  promotion_scope:
+    model: HuggingFaceTB/SmolLM2-135M
+    source_revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+    hidden_size: 576
+    intermediate_size: 1536
+    layers: 30
+    attention_heads: 9
+    key_value_heads: 3
+    gpu_name: NVIDIA Thor
+    compute_capability: "11.0"
+    multiprocessor_count: 20
+  fail_closed_outside_scope: true
   structural_change:
     gate_up_and_silu_launches_per_layer:
       parent: 2
       candidate: 1
     launches_removed_per_layer: 1
-    smollm2_layers: 30
     launches_removed_per_token: 30
 
 microbenchmark_evidence:
@@ -28,12 +44,11 @@ microbenchmark_evidence:
   isolated_relative_improvement: 0.3905
   isolated_speedup_ratio: 1.6407
   interpretation: >-
-    The fused gate/up/SiLU kernel is strongly faster in the isolated measured
-    decoder sub-path, but this evidence alone cannot authorize runtime promotion.
+    Strong isolated evidence justified end-to-end integration testing but did
+    not authorize promotion by itself.
 
 end_to_end_evidence:
   KA13:
-    campaign: ka13_smollm2_f16_fused_vs_fused_mlp_abba_v1
     run_context_id: ka13-fused-mlp-e2e-abba-thor-20260902T135026Z
     exact_nnis_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
     rounds: 8
@@ -51,55 +66,67 @@ end_to_end_evidence:
     mean_paired_relative_improvement: 0.0783718850778209
     min_paired_relative_improvement: 0.05013859156747926
     max_paired_relative_improvement: 0.1036766996786688
-    aggregate_parent_over_candidate_ratio: 1.0853985019375019
-    median_pair_speedup_ratio: 1.083316943027804
-    absolute_generation_gpu_ms_saved_at_medians: 18.688512563705444
-    order_analysis:
-      parent_then_candidate_median_improvement: 0.07167514987944403
-      candidate_then_parent_median_improvement: 0.088010935580462
-      median_order_gap: 0.01633578570101797
-      interpretation: >-
-        A modest order effect is visible, but every observation remains positive
-        and the worst paired improvement is above the 3 percent qualification
-        floor. KA13 therefore passes the first end-to-end gate but does not by
-        itself establish repeatability across independent campaign runs.
+  KA14:
+    run_context_id: ka14-fused-mlp-e2e-abba-thor-20260902T140643Z
+    exact_nnis_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
+    rounds: 8
+    reports: 16
+    decode_steps: 32
+    generation_forward_runs_per_request: 31
+    exact_greedy_32_of_32_all: true
+    environment_compatible_within_run: true
+    candidate_round_wins: 8
+    parent_round_wins: 0
+    ties: 0
+    parent_generation_gpu_median_ms: 237.00433492660522
+    candidate_generation_gpu_median_ms: 218.09374356269836
+    median_paired_relative_improvement: 0.07846419374260727
+    mean_paired_relative_improvement: 0.07971066472366228
+    min_paired_relative_improvement: 0.050357020875372034
+    max_paired_relative_improvement: 0.11949790166638688
+  consensus:
+    schema: f16_smollm2_fused_mlp_e2e_consensus_v1
+    independent_run_count: 2
+    environment_compatible_across_runs: true
+    semantic_gate_passed_in_all_runs: true
+    all_pairs_positive_in_all_runs: true
+    total_positive_pairs: 16
+    total_pairs: 16
+    minimum_required_median_paired_relative_improvement: 0.03
+    median_paired_relative_improvement_across_runs: 0.07767900148545542
+    minimum_run_median_paired_relative_improvement: 0.07689380922830358
+    result: passed
 
-evidence_tooling:
-  pull_request: 87
-  exact_head_ci: 3cff25399bd034321e9ca1c6740f70ab2c2a0038
-  merge_commit: 8d0720244a10624d3a75709700f9686e408ae2b8
-  tool: tools/run_f16_fused_mlp_e2e_abba.py
-  runtime_code_changed_by_tooling_pr: false
-  capabilities:
-    - exact_git_and_clean_worktree_validation
-    - pinned_model_and_execution_plan_validation
-    - raw_GPU_sample_median_recomputation
-    - paired_improvement_recomputation_from_raw_reports
-    - within_run_environment_fail_closed_validation
-    - independent_run_context_validation
-    - cross_run_environment_and_experiment_consensus
-    - three_percent_floor_and_all_pairs_positive_gate
-    - no_automatic_promotion
+promotion_evidence:
+  main_evidence_file: evidence/r3_f16_fused_mlp_smollm2_thor.json
+  main_validator: tools/validate_f16_fused_mlp_promotion_evidence.py
+  exact_head_ci_validated: true
+  claim_boundary:
+    - no_universal_F16_default_change
+    - no_cross_device_portability_claim
+    - no_other_model_speedup_claim
+    - no_staged_attention_promotion
 
 promotion_policy:
   minimum_median_paired_relative_improvement: 0.03
   require_identical_greedy_trajectory: true
   require_all_rounds_positive: true
   require_fail_closed_environment_identity: true
-  require_exact_head_clean_git: true
+  require_exact_head_ci: true
   require_independent_run_contexts: true
   minimum_independent_campaigns: 2
   automatic_promotion: false
-  next_gate: >-
-    Run KA14 from the exact runtime commit 4101b8924f1e5400a7871259b9c1b732ae3c77bb
-    while invoking the verifier from tooling merge 8d0720244a10624d3a75709700f9686e408ae2b8.
-    Recompute both KA13 and KA14 from raw reports and require inter-run consensus.
-    Only a passing consensus can make fused_mlp eligible for explicit NNIS
-    promotion review; it still does not promote automatically.
+  result: satisfied_for_scoped_explicit_plan
+
+next_gate: >-
+  Reprofile the promoted fused-MLP execution layout on the same pinned Thor
+  workload. The earlier KA8 profile predates grouped QKV and fused MLP and is no
+  longer authoritative for hotspot selection. Use the new profile to choose the
+  next kernel or launch-structure target. Separately rerun the direct Edge-LLM
+  comparison before publishing any updated Edge/NNIS ratio.
 
 claim_boundary: >-
-  KA13 demonstrates a credible same-environment SmolLM2 F16 generation-stage
-  end-to-end win for fused_mlp versus fused under the measured workload. It does
-  not establish cross-device portability, other-model gains, or authorization
-  to change the production default without an independent repeat and promotion
-  review.
+  KA13 plus KA14 qualify the fused-MLP layout as a scoped explicit min-latency
+  plan for the pinned SmolLM2-135M workload on the measured NVIDIA Thor class.
+  They do not establish portability to other devices or models. Generic F16
+  constructors remain unchanged, and staged attention remains candidate-only.
