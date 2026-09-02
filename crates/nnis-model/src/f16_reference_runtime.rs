@@ -298,9 +298,9 @@ impl F16ReferenceModel {
             }
         };
         let fused_projection_candidate = match execution_plan.projection_layout {
-            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => {
-                Some(F16FusedProjectionGroupsCandidate::load(&context, &compiler)?)
-            }
+            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => Some(
+                F16FusedProjectionGroupsCandidate::load(&context, &compiler)?,
+            ),
             F16ReferenceProjectionLayout::KnReference
             | F16ReferenceProjectionLayout::NkTransposedCandidate => None,
         };
@@ -1267,11 +1267,7 @@ mod tests {
             .unwrap()
             .prefill(&[1, 2])
             .unwrap();
-        let fused_logits = fused_model
-            .new_session()
-            .unwrap()
-            .prefill(&[1, 2])
-            .unwrap();
+        let fused_logits = fused_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
         let expected_bits = reference_logits
             .iter()
             .map(|value| value.to_bits())
