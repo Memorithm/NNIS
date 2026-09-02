@@ -243,6 +243,44 @@ phase_evidence:
       the exact commit, model provenance, trajectory, warmup/iteration contract,
       and campaign schema. Only a compatible independent repeat may authorize a
       production-default promotion review.
+  NK3_f16_parallel_score_KA19_consensus_verifier:
+    result: merged_evidence_tooling_awaiting_independent_physical_repeat
+    pull_request: 92
+    exact_head_ci: 3871bd4967d50410a0f32086b4cbbfad6cfc81a2
+    merge_commit: 30323aca4448aad43c43bfdd1392d416046ce964
+    runtime_default_change: false
+    kernel_change: false
+    verifier: nnis-bench/examples/smollm2_f16_attention_abba_consensus
+    evidence_contract:
+      campaign_count: 2
+      reports_per_campaign: 24
+      rounds_per_campaign: 6
+      ordering: ABBA
+      warmups_per_report: 2
+      measured_requests_per_report: 7
+      exact_greedy_tokens_per_report: 32
+      minimum_paired_effect_for_review: 0.03
+      required_candidate_round_wins_per_campaign: 6
+      required_positive_order_directions: [AB, BA]
+    integrity:
+      - timing_medians_recomputed_from_raw_samples
+      - declared_medians_must_bit_match_recomputation
+      - paired_round_effects_reconstructed_from_raw_reports
+      - pinned_model_provenance_and_execution_plan_revalidated
+      - run_context_ids_must_be_nonempty_and_distinct
+      - exact_runtime_git_commit_must_match_across_campaigns
+      - clean_git_checkout_required
+      - stable_environment_fields_must_match_fail_closed
+      - only_run_context_id_is_normalized_for_cross_campaign_environment_check
+    next_gate: >-
+      Run KA19 as a separately identified ABBA repeat using exactly runtime
+      commit 0ad21de369d9e3d832de5944aef64332d8445662, the same frozen KA17 policy,
+      the same pinned SmolLM2 fixture and measurement contract, and a distinct
+      run-context id. Then validate KA18 plus KA19 with the verifier merged at
+      30323aca4448aad43c43bfdd1392d416046ce964. A successful verifier result
+      authorizes only a narrow production-default promotion review for the exact
+      qualified SmolLM2 decode32 short-context scope; it is not cross-device,
+      cross-model or long-context evidence.
 
 phases:
   - id: NK0
