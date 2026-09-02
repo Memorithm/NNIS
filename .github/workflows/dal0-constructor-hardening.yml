@@ -1,0 +1,101 @@
+name: Temporary DAL0 constructor hardening
+
+on:
+  push:
+    branches: [feat/dal0-flat-view-binding]
+    paths:
+      - ".github/workflows/dal0-constructor-hardening.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/dal0-flat-view-binding
+          fetch-depth: 0
+      - name: Harden constructor and tests
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/nnis-model/src/da_luc_plan.rs')
+          s = p.read_text()
+          old = '''        value_group_size: usize,
+    ) -> Self {
+        let head_dim = config.head_dim();
+        Self {
+'''
+          new = '''        value_group_size: usize,
+    ) -> Result<Self> {
+        config.validate_execution_support()?;
+        let head_dim = config.head_dim();
+        Ok(Self {
+'''
+          assert s.count(old) == 1
+          s = s.replace(old, new)
+          old = '''            physical_layout: NnisDalucCudaPhysicalLayout::Fdal3CompatibleWordPackedV1,
+        }
+    }
+
+    pub fn validate(
+'''
+          new = '''            physical_layout: NnisDalucCudaPhysicalLayout::Fdal3CompatibleWordPackedV1,
+        })
+    }
+
+    pub fn validate(
+'''
+          assert s.count(old) == 1
+          s = s.replace(old, new)
+          old = '''            NnisDalucCodebookScope::PerKvHead,
+            8,
+        )
+    }
+
+    #[test]
+    fn default_execution_policy_remains_dense_reference() {
+'''
+          new = '''            NnisDalucCodebookScope::PerKvHead,
+            8,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn constructor_rejects_invalid_model_geometry_without_panicking() {
+        let mut invalid = config();
+        invalid.num_attention_heads = 0;
+        assert!(NnisDalucCandidatePlan::fdal3_compatible_v1(
+            &invalid,
+            256,
+            8,
+            64,
+            NnisDalucCodebookScope::PerKvHead,
+            8,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn default_execution_policy_remains_dense_reference() {
+'''
+          assert s.count(old) == 1
+          s = s.replace(old, new)
+          p.write_text(s)
+          PY
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo test -p nnis-model da_luc_plan --lib
+          cargo clippy -p nnis-model --all-targets -- -D warnings
+      - name: Commit validated patch and remove temporary workflow
+        run: |
+          git config user.name "MEMOPERF"
+          git config user.email "contact@checkupauto.fr"
+          git rm .github/workflows/dal0-constructor-hardening.yml
+          git add crates/nnis-model/src/da_luc_plan.rs
+          git commit -m "fix(dal0): fail closed on invalid model geometry"
+          git push origin HEAD:feat/dal0-flat-view-binding
