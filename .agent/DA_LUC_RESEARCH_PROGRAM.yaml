@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_da_luc_research_program
 status: research_only
-last_updated: "2026-09-01"
+last_updated: "2026-09-02T18:04+0200"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -49,9 +49,9 @@ ownership:
     - fabricated_cross_repository_contracts
   FLAT_ATTENTION_boundary: >-
     Prefer a versioned attention-facing DA-LUC representation/view contract from
-    FLAT-ATTENTION when one exists. NNIS may prototype an NVIDIA-local candidate
-    first, but must not silently declare a private layout to be the ecosystem
-    semantic contract.
+    FLAT-ATTENTION when one exists. NNIS may implement an NVIDIA-specific
+    physical realization only while remaining explicitly bound to that logical
+    contract; backend packing never becomes the ecosystem semantic contract.
 
 reference_design_hypothesis:
   keys: >-
@@ -111,7 +111,26 @@ quality_and_performance_gates:
 research_phases:
   - id: DAL0
     name: Audit and contract
-    status: pending
+    status: complete
+    completion_evidence:
+      issue: 78
+      pull_request: 86
+      final_exact_head: 262606ec3236e323d2c408129306fa14e00125e6
+      merge_commit: b599a632900bed9628cc44f6359a212c441ed737
+      audited_FLAT_head: c35b044c5324963a300ff50da0f7ec10dcc6db71
+      audited_SLHAv2_head: b2cee0d0f30ff0fc752c03193cb9ed93dc91be53
+      validated_base_before_merge: c6ba55d90fbcc8090e981a6424421590e6c1c35f
+      required_CI:
+        - CI_success_on_final_exact_head
+        - SmolLM2_benchmark_harness_success_on_final_exact_head
+      guarantees:
+        - versioned_research_only_NNIS_candidate_plan_bound_to_FLAT_view_schema_v1
+        - semantic_view_identity_separate_from_NVIDIA_physical_layout_identity
+        - dense_reference_remains_default
+        - deterministic_SHA256_plan_and_semantic_fingerprints
+        - no_token_codebook_residual_payload_or_runtime_pointer_in_identity
+        - no_CUDA_compressed_attention_kernel_or_runtime_KV_mutation
+        - Rust_1_77_MSRV_preserved
     deliverables:
       - audit_current_NNIS_KV_layout_append_and_decode_paths
       - audit_FLAT_ATTENTION_and_SLHAv2_KV_contracts_before_cross_repo_assumptions
@@ -119,12 +138,16 @@ research_phases:
       - define_versioned_candidate_plan_without_changing_default_runtime
   - id: DAL1
     name: Exact representation oracle
-    status: blocked_on_DAL0
+    status: ready_after_DAL0_reuse_FLAT_semantics_before_duplication
     deliverables:
-      - host_reference_encode_decode
+      - host_reference_encode_decode_or_explicit_adapter_to_FLAT_owned_reference_semantics
       - exact_storage_accounting
       - K_and_V_error_sweeps
       - sparse_outlier_residual_accounting
+    boundary: >-
+      FLAT-ATTENTION already owns the attention-facing representation oracle.
+      Before implementing a private NNIS codec, audit whether DAL1 should be a
+      deterministic mapping/verification adapter to that canonical contract.
   - id: DAL2
     name: LUT-coded key scoring
     status: blocked_on_DAL1
@@ -184,7 +207,8 @@ fail_closed_conditions:
   - claiming_eight_to_sixteen_x_without_measured_effective_bits_per_value
 
 next_action: >-
-  Begin DAL0 only after rereading the NNIS sovereignty roadmap, ML maturity
-  overlay, and the current FLAT-ATTENTION KV roadmap/contract. Do not implement
-  DA-LUC by bypassing the currently promoted NNIS runtime plan or changing the
-  default KV representation implicitly.
+  Audit DAL1 against the now-merged FLAT-bound DAL0 contract and prefer a narrow
+  deterministic adapter/reuse of FLAT-owned representation semantics over a
+  duplicate private codec. Keep the existing dense runtime default and make no
+  compressed-KV performance or quality claim before later exact-storage,
+  correctness, real-model, and hardware gates.
