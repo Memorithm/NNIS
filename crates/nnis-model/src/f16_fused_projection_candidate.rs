@@ -176,20 +176,22 @@ impl F16FusedProjectionGroupsCandidate {
         self.validate_projection(stream, input, k_weight_nk, k_output, input_k, kv_n, "k")?;
         self.validate_projection(stream, input, v_weight_nk, v_output, input_k, kv_n, "v")?;
         let blocks = q_n
-            .checked_add(kv_n.checked_mul(2).ok_or_else(|| {
-                NnisError::invalid_input("F16 fused QKV 2*kv_n overflows usize")
-            })?)
+            .checked_add(
+                kv_n.checked_mul(2).ok_or_else(|| {
+                    NnisError::invalid_input("F16 fused QKV 2*kv_n overflows usize")
+                })?,
+            )
             .ok_or_else(|| NnisError::invalid_input("F16 fused QKV grid overflows usize"))?;
         if blocks == 0 {
             return Ok(());
         }
         let grid = u32::try_from(blocks)
             .map_err(|_| NnisError::invalid_input("F16 fused QKV grid exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(10, 7);
         args.push_buffer(input)
             .push_buffer(q_weight_nk)
@@ -249,11 +251,11 @@ impl F16FusedProjectionGroupsCandidate {
         }
         let grid = u32::try_from(blocks)
             .map_err(|_| NnisError::invalid_input("F16 fused gate/up grid exceeds u32"))?;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(
+                    REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32,
+                );
         let mut args = KernelArgs::with_capacity(7, 5);
         args.push_buffer(input)
             .push_buffer(gate_weight_nk)
@@ -353,12 +355,7 @@ mod tests {
         let input = narrow(&context, &stream, &reference, &deterministic(k, 1));
 
         let prepare_weight = |n: usize, salt: usize| {
-            let kn = narrow(
-                &context,
-                &stream,
-                &reference,
-                &deterministic(k * n, salt),
-            );
+            let kn = narrow(&context, &stream, &reference, &deterministic(k * n, salt));
             let nk = DeviceBuffer::<u16>::new(&context, k * n).unwrap();
             unsafe {
                 sequential
@@ -398,8 +395,7 @@ mod tests {
                 .unwrap();
             fused
                 .enqueue_qkv_nk(
-                    &stream, &input, &q_w, &k_w, &v_w, &q_fused, &k_fused, &v_fused, k, q_n,
-                    kv_n,
+                    &stream, &input, &q_w, &k_w, &v_w, &q_fused, &k_fused, &v_fused, k, q_n, kv_n,
                 )
                 .unwrap();
             sequential
@@ -410,19 +406,38 @@ mod tests {
                 .unwrap();
             fused
                 .enqueue_gate_up_nk(
-                    &stream, &input, &gate_w, &up_w, &gate_fused, &up_fused, k, mlp_n,
+                    &stream,
+                    &input,
+                    &gate_w,
+                    &up_w,
+                    &gate_fused,
+                    &up_fused,
+                    k,
+                    mlp_n,
                 )
                 .unwrap();
         }
         stream.synchronize().unwrap();
 
-        assert_eq!(q_seq.to_vec(&stream).unwrap(), q_fused.to_vec(&stream).unwrap());
-        assert_eq!(k_seq.to_vec(&stream).unwrap(), k_fused.to_vec(&stream).unwrap());
-        assert_eq!(v_seq.to_vec(&stream).unwrap(), v_fused.to_vec(&stream).unwrap());
+        assert_eq!(
+            q_seq.to_vec(&stream).unwrap(),
+            q_fused.to_vec(&stream).unwrap()
+        );
+        assert_eq!(
+            k_seq.to_vec(&stream).unwrap(),
+            k_fused.to_vec(&stream).unwrap()
+        );
+        assert_eq!(
+            v_seq.to_vec(&stream).unwrap(),
+            v_fused.to_vec(&stream).unwrap()
+        );
         assert_eq!(
             gate_seq.to_vec(&stream).unwrap(),
             gate_fused.to_vec(&stream).unwrap()
         );
-        assert_eq!(up_seq.to_vec(&stream).unwrap(), up_fused.to_vec(&stream).unwrap());
+        assert_eq!(
+            up_seq.to_vec(&stream).unwrap(),
+            up_fused.to_vec(&stream).unwrap()
+        );
     }
 }
