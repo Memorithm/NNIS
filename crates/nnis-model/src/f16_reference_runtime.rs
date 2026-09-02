@@ -14,10 +14,10 @@
 use crate::runtime::build_rope_cache;
 use crate::{
     load_model_directory, F16AttentionPlan, F16CachedAttentionKernel,
-    F16CachedAttentionStagedWeightsCandidate, F16FusedMlpCandidate,
-    F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan, F16ReferenceKernels,
-    F16ReferenceProjectionLayout, F16TransposedProjectionCandidate, F32RuntimeKernels,
-    GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
+    F16CachedAttentionParallelScoreCandidate, F16CachedAttentionStagedWeightsCandidate,
+    F16FusedMlpCandidate, F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan,
+    F16ReferenceKernels, F16ReferenceProjectionLayout, F16TransposedProjectionCandidate,
+    F32RuntimeKernels, GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -254,6 +254,7 @@ pub struct F16ReferenceModel {
     fused_projection_candidate: Option<F16FusedProjectionGroupsCandidate>,
     fused_mlp_candidate: Option<F16FusedMlpCandidate>,
     attention_candidate: Option<F16CachedAttentionStagedWeightsCandidate>,
+    parallel_score_attention_candidate: Option<F16CachedAttentionParallelScoreCandidate>,
     top_k: F32TopK,
     token_runtime: F32RuntimeKernels,
     rope_cos: DeviceBuffer<f32>,
@@ -335,10 +336,18 @@ impl F16ReferenceModel {
             | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => None,
         };
         let attention_candidate = match attention_plan.kernel {
-            F16CachedAttentionKernel::ReferencePerPositionBarriers => None,
+            F16CachedAttentionKernel::ReferencePerPositionBarriers
+            | F16CachedAttentionKernel::ParallelScoreCandidate => None,
             F16CachedAttentionKernel::StagedWeightsCandidate => Some(
                 F16CachedAttentionStagedWeightsCandidate::load(&context, &compiler)?,
             ),
+        };
+        let parallel_score_attention_candidate = match attention_plan.kernel {
+            F16CachedAttentionKernel::ParallelScoreCandidate => Some(
+                F16CachedAttentionParallelScoreCandidate::load(&context, &compiler)?,
+            ),
+            F16CachedAttentionKernel::ReferencePerPositionBarriers
+            | F16CachedAttentionKernel::StagedWeightsCandidate => None,
         };
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;
@@ -365,6 +374,7 @@ impl F16ReferenceModel {
             fused_projection_candidate,
             fused_mlp_candidate,
             attention_candidate,
+            parallel_score_attention_candidate,
             top_k,
             token_runtime,
             rope_cos,
@@ -581,18 +591,51 @@ impl F16ReferenceModel {
         scale: f32,
     ) -> Result<()> {
         let kv_rows = cache.len(layer)?;
-        let staged_candidate = match self.attention_plan.kernel {
-            F16CachedAttentionKernel::ReferencePerPositionBarriers => None,
-            F16CachedAttentionKernel::StagedWeightsCandidate => self.attention_candidate.as_ref(),
-        };
-        if let Some(candidate) = staged_candidate {
-            if kv_rows >= self.attention_plan.staged_min_kv_rows
-                && candidate.supports_kv_rows(kv_rows)
-            {
-                return unsafe {
-                    candidate
-                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
-                };
+        match self.attention_plan.kernel {
+            F16CachedAttentionKernel::ReferencePerPositionBarriers => {}
+            F16CachedAttentionKernel::StagedWeightsCandidate => {
+                if let Some(candidate) = self.attention_candidate.as_ref() {
+                    if kv_rows >= self.attention_plan.staged_min_kv_rows
+                        && candidate.supports_kv_rows(kv_rows)
+                    {
+                        return unsafe {
+                            candidate.enqueue_cached_attention_decode(
+                                stream, query, cache, layer, output, scale,
+                            )
+                        };
+                    }
+                }
+            }
+            F16CachedAttentionKernel::ParallelScoreCandidate => {
+                if let Some(threads_per_block) = self
+                    .attention_plan
+                    .parallel_score_threads_per_block(kv_rows)
+                {
+                    let candidate = self.parallel_score_attention_candidate.as_ref().ok_or_else(
+                        || {
+                            NnisError::unsupported(
+                                "parallel-score F16 attention plan selected without candidate kernels",
+                            )
+                        },
+                    )?;
+                    if !candidate.supports_kv_rows(kv_rows) {
+                        return Err(NnisError::unsupported(format!(
+                            "KA17 parallel-score plan selected at {kv_rows} KV rows but this device/kernel supports at most {}",
+                            candidate.max_supported_kv_rows()
+                        )));
+                    }
+                    return unsafe {
+                        candidate.enqueue_cached_attention_decode(
+                            stream,
+                            query,
+                            cache,
+                            layer,
+                            output,
+                            scale,
+                            threads_per_block,
+                        )
+                    };
+                }
             }
         }
         unsafe {
