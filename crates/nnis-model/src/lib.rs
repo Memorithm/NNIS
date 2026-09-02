@@ -11,6 +11,7 @@ mod da_luc_plan;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
+mod f16_parallel_score_attention_candidate;
 mod f16_reference_execution_plan;
 mod f16_reference_kernels;
 mod f16_reference_runtime;
@@ -43,6 +44,7 @@ pub use f16_attention_plan::{
 };
 pub use f16_fused_mlp_candidate::F16FusedMlpCandidate;
 pub use f16_fused_projection_candidate::F16FusedProjectionGroupsCandidate;
+pub use f16_parallel_score_attention_candidate::F16CachedAttentionParallelScoreCandidate;
 pub use f16_reference_execution_plan::{
     F16ReferenceExecutionPlan, F16ReferenceProjectionLayout, F16_REFERENCE_EXECUTION_PLAN_VERSION,
 };
