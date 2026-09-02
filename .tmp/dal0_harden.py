@@ -2,6 +2,29 @@ from pathlib import Path
 
 p = Path("crates/nnis-model/src/da_luc_plan.rs")
 s = p.read_text()
+old = """#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = \"policy\", content = \"candidate\", rename_all = \"snake_case\")]
+pub enum NnisKvExecutionPolicy {
+    DenseReference,
+    DaLucCandidate(NnisDalucCandidatePlan),
+}
+
+impl Default for NnisKvExecutionPolicy {
+    fn default() -> Self {
+        Self::DenseReference
+    }
+}
+"""
+new = """#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = \"policy\", content = \"candidate\", rename_all = \"snake_case\")]
+pub enum NnisKvExecutionPolicy {
+    #[default]
+    DenseReference,
+    DaLucCandidate(NnisDalucCandidatePlan),
+}
+"""
+assert s.count(old) == 1
+s = s.replace(old, new)
 old = """        value_group_size: usize,
     ) -> Self {
         let head_dim = config.head_dim();
