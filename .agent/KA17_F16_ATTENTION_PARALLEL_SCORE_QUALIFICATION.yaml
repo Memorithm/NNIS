@@ -1,0 +1,110 @@
+schema_version: 1
+kind: nnis_physical_kernel_qualification_evidence
+status: candidate_qualified_for_end_to_end_opt_in_gate
+recorded_at: "2026-09-02"
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+campaign:
+  id: KA17
+  name: smollm2_f16_attention_parallel_score_qualification
+  exact_nnis_commit: c6ba55d90fbcc8090e981a6424421590e6c1c35f
+  benchmark_schema: KA17-smollm2-f16-attention-parallel-score-qualification-v1
+  promotion_state: candidate_only_no_runtime_attention_plan_or_default_change
+  numerical_scope: F16_query_K_V_storage_F32_score_softmax_value_accumulation_final_F16_output
+
+model_geometry:
+  model: SmolLM2-135M
+  query_heads: 9
+  kv_heads: 3
+  head_dim: 64
+  short_context_kv_rows: [1, 35]
+  decode32_generation_kv_rows: [4, 34]
+
+correctness:
+  fixture_families:
+    - baseline
+    - small_magnitude
+    - wide_magnitude
+    - cancellation
+    - near_tie
+    - signed_ramp
+  candidate_blocks: [64, 128, 256, 512]
+  total_cases: 840
+  bitwise_equal_cases: 840
+  non_bitwise_cases: 0
+  total_differing_elements: 0
+  global_worst_absolute_error: 0.0
+  global_worst_relative_error: 0.0
+  interpretation: >-
+    Every tested candidate launch width matched the qualified reference bitwise at
+    the final F16 attention output boundary for all 35 KV lengths and six fixture
+    families. The internal F32 Q-dot-K reduction tree remains different, so this
+    does not establish internal floating-point operation-order equivalence.
+
+measurement_protocol:
+  warmups: 100
+  measured_iterations_per_row_variant: 1000
+  metric: CUDA_event_median_per_isolated_attention_call
+  rows_measured: 35
+  note: >-
+    Sum-of-row-medians is a short-context attention proxy only. It is not decoder
+    latency, request latency, serving throughput, or tokens-per-second evidence.
+
+predeclared_policy:
+  source: fixed_from_KA16_before_KA17_dense_row_measurement
+  rules:
+    - reference_for_KV_rows_1_to_3
+    - block_128_for_KV_row_4
+    - block_256_for_KV_rows_5_to_16
+    - block_512_for_KV_rows_17_and_above
+  post_hoc_retuning_forbidden_without_new_confirmation_campaign: true
+
+generation_path_proxy_KV_4_to_34:
+  reference_sum_of_row_medians_ms: 1.1920640002936125
+  staged_sum_of_row_medians_ms: 1.0817120047286153
+  block_64_sum_of_row_medians_ms: 0.4467680025845766
+  block_128_sum_of_row_medians_ms: 0.3579839989542961
+  block_256_sum_of_row_medians_ms: 0.31179199647158384
+  block_512_sum_of_row_medians_ms: 0.2966719977557659
+  predeclared_policy_sum_of_row_medians_ms: 0.2973279980942607
+  predeclared_policy_relative_improvement: 0.7505771518802455
+  reference_over_predeclared_policy_ratio: 4.009255798089009
+  policy_slower_generation_rows: 0
+  interpretation: >-
+    The predeclared policy reduced the isolated attention proxy by 75.06 percent
+    across the exact decode32 KV-row domain and was not slower than the reference
+    at any generation row. This remains microbenchmark evidence only.
+
+full_short_context_proxy_KV_1_to_35:
+  reference_sum_of_row_medians_ms: 1.2833600006997585
+  predeclared_policy_sum_of_row_medians_ms: 0.33537599816918373
+  predeclared_policy_relative_improvement: 0.7386734836785327
+
+qualification_decision:
+  runtime_default_change_authorized: false
+  end_to_end_opt_in_plan_infrastructure_authorized: true
+  reason: >-
+    Broad bitwise F16-output correctness and a large consistent isolated reduction
+    justify constructing an explicit fail-closed candidate plan for real-model A/B
+    qualification. NNIS promotion policy still forbids runtime promotion from
+    microbenchmark evidence alone.
+
+next_gate:
+  id: KA18
+  requirements:
+    - preserve_current_qualified_F16_min_latency_parent_for_both_A_and_B
+    - explicit_opt_in_parallel_score_attention_plan_only
+    - retain_reference_attention_as_default
+    - pinned_SmolLM2_135M_weights_config_tokenizer_prompt_and_32_token_greedy_trajectory
+    - exact_32_of_32_generated_ID_equality_for_every_process
+    - repeated_ABBA_process_ordering
+    - fingerprint_compatible_environment_and_clean_exact_git_head
+    - generation_GPU_wall_and_request_distributions_retained_machine_readably
+    - no_promotion_without_credible_end_to_end_separation_relative_to_variance
+
+claim_boundary:
+  - no_decoder_latency_claim_from_KA17
+  - no_tokens_per_second_claim_from_KA17
+  - no_cross_model_or_long_context_generalization
+  - no_internal_F32_bitwise_equivalence_claim
+  - no_runtime_default_change
