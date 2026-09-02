@@ -14,17 +14,12 @@ pub const SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION: u16 = 1;
 ///
 /// `Default` deliberately preserves the dense reference path. Merely constructing
 /// a DA-LUC candidate never changes runtime behavior.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "policy", content = "candidate", rename_all = "snake_case")]
 pub enum NnisKvExecutionPolicy {
+    #[default]
     DenseReference,
     DaLucCandidate(NnisDalucCandidatePlan),
-}
-
-impl Default for NnisKvExecutionPolicy {
-    fn default() -> Self {
-        Self::DenseReference
-    }
 }
 
 impl NnisKvExecutionPolicy {
@@ -134,7 +129,9 @@ pub enum NnisDalucRowOrder {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NnisDalucStorageTopology {
-    Contiguous { capacity_tokens: usize },
+    Contiguous {
+        capacity_tokens: usize,
+    },
     Paged {
         page_size: usize,
         physical_pages_per_batch: usize,
@@ -235,9 +232,10 @@ impl NnisDalucCandidatePlan {
         codebook_entries: usize,
         codebook_scope: NnisDalucCodebookScope,
         value_group_size: usize,
-    ) -> Self {
+    ) -> Result<Self> {
+        config.validate_execution_support()?;
         let head_dim = config.head_dim();
-        Self {
+        Ok(Self {
             schema_version: NNIS_DA_LUC_PLAN_VERSION,
             flat_view_schema_version: SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
             geometry: NnisDalucHeadGeometry {
@@ -271,7 +269,7 @@ impl NnisDalucCandidatePlan {
             },
             consumption: NnisDalucConsumptionMode::DirectCompressedNoDenseKvMaterialization,
             physical_layout: NnisDalucCudaPhysicalLayout::Fdal3CompatibleWordPackedV1,
-        }
+        })
     }
 
     pub fn validate(
@@ -330,9 +328,7 @@ impl NnisDalucCandidatePlan {
             ));
         }
 
-        if self.keys.subspace_dim == 0
-            || self.geometry.key_head_dim % self.keys.subspace_dim != 0
-        {
+        if self.keys.subspace_dim == 0 || self.geometry.key_head_dim % self.keys.subspace_dim != 0 {
             return Err(NnisError::invalid_input(
                 "DA-LUC K subspace_dim must exactly partition key_head_dim",
             ));
@@ -434,10 +430,7 @@ impl NnisDalucCandidatePlan {
                 "zero-filled alignment padding",
             ),
             (backend.supports_f32_codebooks, "F32 K codebooks"),
-            (
-                backend.supports_lsb0_u8_key_indices,
-                "8-bit LSB0 K indices",
-            ),
+            (backend.supports_lsb0_u8_key_indices, "8-bit LSB0 K indices"),
             (
                 backend.supports_groupwise_affine_u8_values,
                 "groupwise-affine U8 V",
@@ -570,11 +563,30 @@ mod tests {
             NnisDalucCodebookScope::PerKvHead,
             8,
         )
+        .unwrap()
+    }
+
+    #[test]
+    fn constructor_rejects_invalid_model_geometry_without_panicking() {
+        let mut invalid = config();
+        invalid.num_attention_heads = 0;
+        assert!(NnisDalucCandidatePlan::fdal3_compatible_v1(
+            &invalid,
+            256,
+            8,
+            64,
+            NnisDalucCodebookScope::PerKvHead,
+            8,
+        )
+        .is_err());
     }
 
     #[test]
     fn default_execution_policy_remains_dense_reference() {
-        assert_eq!(NnisKvExecutionPolicy::default(), NnisKvExecutionPolicy::DenseReference);
+        assert_eq!(
+            NnisKvExecutionPolicy::default(),
+            NnisKvExecutionPolicy::DenseReference
+        );
         NnisKvExecutionPolicy::default()
             .validate(&config(), &backend())
             .unwrap();
@@ -643,7 +655,10 @@ mod tests {
     #[test]
     fn canonical_serialization_and_fingerprints_are_deterministic() {
         let plan = candidate();
-        assert_eq!(plan.canonical_json().unwrap(), plan.canonical_json().unwrap());
+        assert_eq!(
+            plan.canonical_json().unwrap(),
+            plan.canonical_json().unwrap()
+        );
         assert_eq!(plan.fingerprint().unwrap(), plan.fingerprint().unwrap());
         assert_eq!(
             plan.semantic_fingerprint().unwrap(),
@@ -660,8 +675,14 @@ mod tests {
 
         let mut changed_plan_version = plan.clone();
         changed_plan_version.schema_version += 1;
-        assert_eq!(changed_plan_version.semantic_fingerprint().unwrap(), semantic);
-        assert_ne!(changed_plan_version.fingerprint().unwrap(), plan.fingerprint().unwrap());
+        assert_eq!(
+            changed_plan_version.semantic_fingerprint().unwrap(),
+            semantic
+        );
+        assert_ne!(
+            changed_plan_version.fingerprint().unwrap(),
+            plan.fingerprint().unwrap()
+        );
 
         // v1 currently has one physical layout variant; prove the semantic encoder
         // omits the field by comparing against the independently serialized view.
