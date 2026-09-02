@@ -1,0 +1,42 @@
+name: Temporary DAL0 lockfile staging
+on:
+  push:
+    branches: [staging/dal0-lock-fix]
+permissions:
+  contents: write
+jobs:
+  repair-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Refresh lockfile
+        run: cargo check --workspace --all-targets
+      - name: Validate locked workspace
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --workspace --all-targets
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo test --locked --workspace --all-targets
+      - name: Validate locked benchmark harness examples
+        run: |
+          cargo check --locked -p nnis-bench --example smollm2_e2e
+          cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
+          cargo check --locked -p nnis-bench --example compare_smollm2_reports
+          cargo check --locked -p nnis-bench --example silu_multiply_fusion
+          cargo check --locked -p nnis-bench --example cached_attention_parallel_value
+      - name: Validate Rust 1.77 locked
+        run: |
+          rustup toolchain install 1.77.0 --profile minimal
+          cargo +1.77.0 check --locked --workspace --all-targets
+      - name: Commit product lockfile only
+        run: |
+          git config user.name 'MEMOPERF'
+          git config user.email 'contact@checkupauto.fr'
+          git add Cargo.lock
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(dal0): refresh lockfile for sha2 binding'
+          git push origin HEAD:staging/dal0-lock-fix
