@@ -247,8 +247,10 @@ mod tests {
         assert!(plan
             .validate_smollm2_135m_min_latency_model_domain(&tiny_config())
             .is_err());
-        assert!(F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate()
-            .validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
-            .is_err());
+        assert!(
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate()
+                .validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
+                .is_err()
+        );
     }
 }
