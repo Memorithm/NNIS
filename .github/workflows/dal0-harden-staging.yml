@@ -1,0 +1,38 @@
+name: DAL0 temporary hardening staging
+
+"on":
+  push:
+    branches:
+      - feat/dal0-flat-view-binding
+    paths:
+      - .github/workflows/dal0-harden-staging.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/dal0-flat-view-binding
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 .tmp/dal0_harden.py
+      - name: Validate source
+        run: |
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo test -p nnis-model da_luc_plan --lib
+          cargo clippy -p nnis-model --all-targets -- -D warnings
+      - name: Commit source and remove staging files
+        run: |
+          git config user.name "MEMOPERF"
+          git config user.email "contact@checkupauto.fr"
+          git rm .github/workflows/dal0-harden-staging.yml .tmp/dal0_harden.py
+          git add crates/nnis-model/src/da_luc_plan.rs
+          git commit -m "fix(dal0): fail closed on invalid model geometry"
+          git push origin HEAD:feat/dal0-flat-view-binding
