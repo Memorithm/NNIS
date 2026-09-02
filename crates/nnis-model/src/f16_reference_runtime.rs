@@ -538,9 +538,8 @@ impl F16ReferenceModel {
                 && candidate.supports_kv_rows(kv_rows)
             {
                 return unsafe {
-                    candidate.enqueue_cached_attention_decode(
-                        stream, query, cache, layer, output, scale,
-                    )
+                    candidate
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
                 };
             }
         }
@@ -1340,7 +1339,10 @@ mod tests {
             fused_model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
         );
-        assert_eq!(candidate_model.attention_plan(), F16AttentionPlan::reference());
+        assert_eq!(
+            candidate_model.attention_plan(),
+            F16AttentionPlan::reference()
+        );
         assert_eq!(fused_model.attention_plan(), F16AttentionPlan::reference());
 
         let reference_logits = reference_model

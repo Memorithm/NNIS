@@ -113,7 +113,10 @@ mod tests {
         let candidate = F16AttentionPlan::thor_staged_weights_candidate();
         candidate.validate(&config).unwrap();
         assert_eq!(candidate.staged_min_kv_rows, 16);
-        assert_eq!(candidate.kernel, F16CachedAttentionKernel::StagedWeightsCandidate);
+        assert_eq!(
+            candidate.kernel,
+            F16CachedAttentionKernel::StagedWeightsCandidate
+        );
 
         let encoded = serde_json::to_string(&candidate).unwrap();
         assert!(encoded.contains("\"schema_version\":1"));

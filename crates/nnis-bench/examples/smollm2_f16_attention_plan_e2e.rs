@@ -20,9 +20,8 @@ const INPUT_IDS: [u32; 3] = [22_007, 6_463, 314];
 const DECODE_STEPS: usize = 32;
 const MAX_PROFILE_KV_ROWS: usize = INPUT_IDS.len() + DECODE_STEPS - 1;
 const EXPECTED_GREEDY_IDS: [u32; DECODE_STEPS] = [
-    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872, 314,
-    253, 8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260, 2_591,
-    30,
+    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872, 314, 253,
+    8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260, 2_591, 30,
 ];
 
 #[derive(Debug, Clone, Copy)]
@@ -298,7 +297,8 @@ fn timing_report(samples_ms: Vec<f64>) -> Result<TimingReport> {
 
 fn run(arguments: Arguments) -> Result<Report> {
     validate_provenance(&arguments.model_dir)?;
-    let execution_plan = F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
+    let execution_plan =
+        F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
     let attention_plan = arguments.attention_name.plan();
     let device = Device::get(arguments.device)?;
     let context = Context::new(&device)?;
