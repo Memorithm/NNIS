@@ -8,9 +8,8 @@ use std::path::Path;
 
 const EXPECTED_INPUT_IDS: [u64; 3] = [22_007, 6_463, 314];
 const EXPECTED_GREEDY_IDS: [u64; 32] = [
-    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872,
-    314, 253, 8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260,
-    2_591, 30,
+    260, 3_075, 338, 6_650, 260, 2_591, 284, 260, 8_872, 1_592, 30, 198, 198, 504, 8_872, 314, 253,
+    8_304, 282, 260, 2_591, 30, 657, 314, 253, 19_284, 1_248, 338, 21_837, 260, 2_591, 30,
 ];
 const EXPECTED_REPORTS: usize = 24;
 const EXPECTED_ROUNDS: usize = 6;
@@ -183,9 +182,7 @@ fn recompute_median(report: &Value, field: &str) -> Result<f64, String> {
         .ok_or_else(|| format!("JSON field {declared_pointer} is not an f64"))?;
     require(
         declared.to_bits() == recomputed.to_bits(),
-        format!(
-            "{field} declared median {declared:?} does not match recomputed {recomputed:?}"
-        ),
+        format!("{field} declared median {declared:?} does not match recomputed {recomputed:?}"),
     )?;
     Ok(recomputed)
 }
@@ -201,7 +198,9 @@ fn validate_attention_plan(mode: &str, report: &Value) -> Result<(), String> {
             )?;
             require(staged_min == 0, "reference staged_min_kv_rows must be zero")?;
             require(
-                report.pointer("/attention_plan/parallel_score_policy").is_none(),
+                report
+                    .pointer("/attention_plan/parallel_score_policy")
+                    .is_none(),
                 "reference report unexpectedly carries parallel_score_policy",
             )?;
             require(
@@ -244,7 +243,10 @@ fn validate_raw_report(
         string_at(report, "/benchmark")? == "smollm2-135m-f16-attention-plan-e2e",
         "unexpected benchmark kind",
     )?;
-    require(string_at(report, "/backend")? == "nnis", "unexpected backend")?;
+    require(
+        string_at(report, "/backend")? == "nnis",
+        "unexpected backend",
+    )?;
     require(
         string_at(report, "/attention_name")? == entry.mode,
         "entry mode and report attention_name differ",
@@ -277,7 +279,10 @@ fn validate_raw_report(
         u64_array_at(report, "/input_ids")? == EXPECTED_INPUT_IDS,
         "input ids differ from the qualified fixture",
     )?;
-    require(usize_at(report, "/decode_steps")? == 32, "decode_steps must be 32")?;
+    require(
+        usize_at(report, "/decode_steps")? == 32,
+        "decode_steps must be 32",
+    )?;
     require(
         usize_at(report, "/max_profile_kv_rows")? == 34,
         "max_profile_kv_rows must be 34",
@@ -312,8 +317,9 @@ fn validate_raw_report(
     )?;
     validate_attention_plan(&entry.mode, report)?;
 
-    let metadata: BenchmarkMetadata = serde_json::from_value(value_at(report, "/metadata")?.clone())
-        .map_err(|error| format!("decode benchmark metadata: {error}"))?;
+    let metadata: BenchmarkMetadata =
+        serde_json::from_value(value_at(report, "/metadata")?.clone())
+            .map_err(|error| format!("decode benchmark metadata: {error}"))?;
     require(
         metadata.git_commit == bundle_commit,
         format!(
@@ -342,13 +348,21 @@ fn validate_raw_report(
     })
 }
 
-fn validate_campaign(bundle: Bundle) -> Result<(CampaignEvidence, BenchmarkMetadata, Value), String> {
-    require(bundle.schema_version == 1, "bundle schema_version must be 1")?;
+fn validate_campaign(
+    bundle: Bundle,
+) -> Result<(CampaignEvidence, BenchmarkMetadata, Value), String> {
+    require(
+        bundle.schema_version == 1,
+        "bundle schema_version must be 1",
+    )?;
     require(
         bundle.campaign.ends_with(CAMPAIGN_SUFFIX),
         format!("unexpected campaign contract {:?}", bundle.campaign),
     )?;
-    require(!bundle.git_commit.trim().is_empty(), "bundle git_commit is empty")?;
+    require(
+        !bundle.git_commit.trim().is_empty(),
+        "bundle git_commit is empty",
+    )?;
     require(
         !bundle.run_context_id.trim().is_empty(),
         "bundle run_context_id is empty",
@@ -396,7 +410,10 @@ fn validate_campaign(bundle: Bundle) -> Result<(CampaignEvidence, BenchmarkMetad
     }
     require(
         by_round.len() == EXPECTED_ROUNDS,
-        format!("campaign has {} rounds; expected {EXPECTED_ROUNDS}", by_round.len()),
+        format!(
+            "campaign has {} rounds; expected {EXPECTED_ROUNDS}",
+            by_round.len()
+        ),
     )?;
     require(
         by_round.keys().copied().eq(1..=EXPECTED_ROUNDS),
@@ -490,7 +507,10 @@ fn sample_stdev(values: &[f64], mean: f64) -> f64 {
     if values.len() < 2 {
         return 0.0;
     }
-    let sum = values.iter().map(|value| (value - mean).powi(2)).sum::<f64>();
+    let sum = values
+        .iter()
+        .map(|value| (value - mean).powi(2))
+        .sum::<f64>();
     (sum / (values.len() - 1) as f64).sqrt()
 }
 
@@ -519,10 +539,7 @@ fn summarize_rounds(rows: &[RoundEvidence]) -> MetricSummary {
         median_paired_relative_improvement: median(&paired),
         mean_paired_relative_improvement: mean,
         min_paired_relative_improvement: paired.iter().copied().fold(f64::INFINITY, f64::min),
-        max_paired_relative_improvement: paired
-            .iter()
-            .copied()
-            .fold(f64::NEG_INFINITY, f64::max),
+        max_paired_relative_improvement: paired.iter().copied().fold(f64::NEG_INFINITY, f64::max),
         sample_stdev_paired_relative_improvement: sample_stdev(&paired, mean),
         median_ab_relative_improvement: median(&ab),
         median_ba_relative_improvement: median(&ba),
@@ -581,7 +598,8 @@ fn review_eligible(summary: &MetricSummary) -> bool {
 }
 
 fn run(first_path: &Path, second_path: &Path) -> Result<ConsensusReport, String> {
-    let (first, first_metadata, first_execution_plan) = validate_campaign(read_bundle(first_path)?)?;
+    let (first, first_metadata, first_execution_plan) =
+        validate_campaign(read_bundle(first_path)?)?;
     let (second, second_metadata, second_execution_plan) =
         validate_campaign(read_bundle(second_path)?)?;
 
