@@ -25,6 +25,7 @@ const EXPECTED_GREEDY_IDS: [u32; DECODE_STEPS] = [
 enum PlanName {
     Reference,
     Transposed,
+    Fused,
 }
 
 impl PlanName {
@@ -32,8 +33,9 @@ impl PlanName {
         match value {
             "reference" => Ok(Self::Reference),
             "transposed" => Ok(Self::Transposed),
+            "fused" => Ok(Self::Fused),
             other => Err(format!(
-                "unknown --plan {other:?}; expected reference or transposed"
+                "unknown --plan {other:?}; expected reference, transposed, or fused"
             )),
         }
     }
@@ -42,6 +44,7 @@ impl PlanName {
         match self {
             Self::Reference => "reference",
             Self::Transposed => "transposed",
+            Self::Fused => "fused",
         }
     }
 
@@ -52,6 +55,9 @@ impl PlanName {
             }
             Self::Transposed => {
                 F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate()
+            }
+            Self::Fused => {
+                F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate()
             }
         }
     }
@@ -162,7 +168,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                 plan_name = Some(PlanName::parse(
                     &args
                         .next()
-                        .ok_or("--plan requires reference or transposed")?,
+                        .ok_or("--plan requires reference, transposed, or fused")?,
                 )?);
             }
             "--warmups" => {
@@ -178,7 +184,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                 )?;
             }
             "--help" | "-h" => {
-                return Err("usage: smollm2_f16_projection_plan_e2e --model DIR --plan reference|transposed [--device N] [--warmups N] [--iterations N]".to_string());
+                return Err("usage: smollm2_f16_projection_plan_e2e --model DIR --plan reference|transposed|fused [--device N] [--warmups N] [--iterations N]".to_string());
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
@@ -194,7 +200,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     Ok(Arguments {
         model_dir: model_dir.ok_or("missing --model DIR")?,
         device,
-        plan_name: plan_name.ok_or("missing --plan reference|transposed")?,
+        plan_name: plan_name.ok_or("missing --plan reference|transposed|fused")?,
         warmups,
         iterations,
     })
@@ -316,6 +322,7 @@ fn run(arguments: Arguments) -> Result<Report> {
     let expected_layout = match arguments.plan_name {
         PlanName::Reference => F16ReferenceProjectionLayout::KnReference,
         PlanName::Transposed => F16ReferenceProjectionLayout::NkTransposedCandidate,
+        PlanName::Fused => F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate,
     };
     if model.execution_plan().projection_layout != expected_layout {
         return Err(NnisError::unsupported(
