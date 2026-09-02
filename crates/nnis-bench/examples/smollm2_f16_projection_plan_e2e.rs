@@ -171,11 +171,10 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .map_err(|error| format!("invalid --device: {error}"))?;
             }
             "--plan" => {
-                plan_name = Some(PlanName::parse(
-                    &args
-                        .next()
-                        .ok_or("--plan requires reference, transposed, fused, or fused_mlp")?,
-                )?);
+                plan_name =
+                    Some(PlanName::parse(&args.next().ok_or(
+                        "--plan requires reference, transposed, fused, or fused_mlp",
+                    )?)?);
             }
             "--warmups" => {
                 warmups = parse_usize(

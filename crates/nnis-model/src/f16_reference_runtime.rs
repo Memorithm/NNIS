@@ -169,10 +169,34 @@ impl F16ModelWeights {
         for layer in &source.layers {
             layers.push(F16DecoderLayerWeights {
                 input_norm: narrow(stream, kernels, layer.input_norm.tensor().as_f32()?)?,
-                q_proj: narrow_projection(stream, kernels, &layer.q_proj, layout, projection_candidate)?,
-                k_proj: narrow_projection(stream, kernels, &layer.k_proj, layout, projection_candidate)?,
-                v_proj: narrow_projection(stream, kernels, &layer.v_proj, layout, projection_candidate)?,
-                o_proj: narrow_projection(stream, kernels, &layer.o_proj, layout, projection_candidate)?,
+                q_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.q_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                k_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.k_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                v_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.v_proj,
+                    layout,
+                    projection_candidate,
+                )?,
+                o_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.o_proj,
+                    layout,
+                    projection_candidate,
+                )?,
                 post_attention_norm: narrow(
                     stream,
                     kernels,
@@ -185,7 +209,13 @@ impl F16ModelWeights {
                     layout,
                     projection_candidate,
                 )?,
-                up_proj: narrow_projection(stream, kernels, &layer.up_proj, layout, projection_candidate)?,
+                up_proj: narrow_projection(
+                    stream,
+                    kernels,
+                    &layer.up_proj,
+                    layout,
+                    projection_candidate,
+                )?,
                 down_proj: narrow_projection(
                     stream,
                     kernels,
@@ -196,7 +226,13 @@ impl F16ModelWeights {
             });
         }
         let final_norm = narrow(stream, kernels, source.final_norm.tensor().as_f32()?)?;
-        let lm_head = narrow_projection(stream, kernels, &source.lm_head, layout, projection_candidate)?;
+        let lm_head = narrow_projection(
+            stream,
+            kernels,
+            &source.lm_head,
+            layout,
+            projection_candidate,
+        )?;
         Ok(Self {
             token_embedding,
             layers,
@@ -407,7 +443,8 @@ impl F16ReferenceModel {
     ) -> Result<()> {
         match self.execution_plan.projection_layout {
             F16ReferenceProjectionLayout::KnReference => unsafe {
-                self.kernels.enqueue_project_kn(stream, input, weight, output, k, n)
+                self.kernels
+                    .enqueue_project_kn(stream, input, weight, output, k, n)
             },
             F16ReferenceProjectionLayout::NkTransposedCandidate
             | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
@@ -480,7 +517,14 @@ impl F16ReferenceModel {
             };
         }
         unsafe {
-            self.enqueue_projection(stream, input, gate_weight, gate_output, hidden, intermediate)?;
+            self.enqueue_projection(
+                stream,
+                input,
+                gate_weight,
+                gate_output,
+                hidden,
+                intermediate,
+            )?;
             self.enqueue_projection(stream, input, up_weight, up_output, hidden, intermediate)
         }
     }
@@ -546,7 +590,8 @@ impl F16ReferenceModel {
                 && candidate.supports_kv_rows(kv_rows)
             {
                 return unsafe {
-                    candidate.enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
+                    candidate
+                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
                 };
             }
         }
@@ -1313,25 +1358,49 @@ mod tests {
             fused_mlp_model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate
         );
-        assert_eq!(candidate_model.attention_plan(), F16AttentionPlan::reference());
+        assert_eq!(
+            candidate_model.attention_plan(),
+            F16AttentionPlan::reference()
+        );
         assert_eq!(fused_model.attention_plan(), F16AttentionPlan::reference());
-        assert_eq!(fused_mlp_model.attention_plan(), F16AttentionPlan::reference());
+        assert_eq!(
+            fused_mlp_model.attention_plan(),
+            F16AttentionPlan::reference()
+        );
 
-        let reference_logits = reference_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
-        let candidate_logits = candidate_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
+        let reference_logits = reference_model
+            .new_session()
+            .unwrap()
+            .prefill(&[1, 2])
+            .unwrap();
+        let candidate_logits = candidate_model
+            .new_session()
+            .unwrap()
+            .prefill(&[1, 2])
+            .unwrap();
         let fused_logits = fused_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
-        let fused_mlp_logits = fused_mlp_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
+        let fused_mlp_logits = fused_mlp_model
+            .new_session()
+            .unwrap()
+            .prefill(&[1, 2])
+            .unwrap();
         let expected_bits = reference_logits
             .iter()
             .map(|value| value.to_bits())
             .collect::<Vec<_>>();
         assert_eq!(
             expected_bits,
-            candidate_logits.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            candidate_logits
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             expected_bits,
-            fused_logits.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+            fused_logits
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
         );
         assert_eq!(
             expected_bits,
