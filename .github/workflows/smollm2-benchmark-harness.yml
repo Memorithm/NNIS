@@ -16,6 +16,7 @@ on:
       - "tools/run_w1_e2e_abba.py"
       - "tools/run_r2_silu_fusion_e2e_abba.py"
       - "tools/run_r2_attention_parallel_value_e2e_abba.py"
+      - "tools/run_f16_fused_mlp_e2e_abba.py"
       - "tools/requirements-smollm2-benchmark-gpu.txt"
       - "docs/SMOLLM2_BENCHMARK.md"
       - "docs/W1_LM_HEAD_BF16_SWEEP.md"
@@ -68,11 +69,14 @@ jobs:
           python3 -m py_compile tools/run_w1_e2e_abba.py
           python3 -m py_compile tools/run_r2_silu_fusion_e2e_abba.py
           python3 -m py_compile tools/run_r2_attention_parallel_value_e2e_abba.py
+          python3 -m py_compile tools/run_f16_fused_mlp_e2e_abba.py
           python3 tools/bench_smollm2_transformers.py --help >/dev/null
           python3 tools/run_w1_lm_head_bf16_sweep.py --help >/dev/null
           python3 tools/run_w1_e2e_abba.py --help >/dev/null
           python3 tools/run_r2_silu_fusion_e2e_abba.py --help >/dev/null
           python3 tools/run_r2_attention_parallel_value_e2e_abba.py --help >/dev/null
+          python3 tools/run_f16_fused_mlp_e2e_abba.py --help >/dev/null
+          python3 tools/run_f16_fused_mlp_e2e_abba.py --self-test
           grep -q '^transformers==4.40.1$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^safetensors==0.4.5$' tools/requirements-smollm2-benchmark-gpu.txt
           grep -q '^huggingface_hub==0.24.7$' tools/requirements-smollm2-benchmark-gpu.txt
