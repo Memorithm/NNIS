@@ -33,11 +33,10 @@ pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
 pub use da_luc_plan::{
     NnisDalucBackendCapabilities, NnisDalucBitOrder, NnisDalucCandidatePlan,
     NnisDalucCodebookScope, NnisDalucConsumptionMode, NnisDalucCudaPhysicalLayout,
-    NnisDalucFloatDType, NnisDalucHeadGeometry, NnisDalucKeyRepresentation,
-    NnisDalucPaddingRule, NnisDalucResidualSemantics, NnisDalucRowOrder,
-    NnisDalucStorageTopology, NnisDalucValueRepresentation, NnisDalucViewLayout,
-    NnisDalucZeroPointStorage, NnisKvExecutionPolicy, NNIS_DA_LUC_PLAN_VERSION,
-    SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
+    NnisDalucFloatDType, NnisDalucHeadGeometry, NnisDalucKeyRepresentation, NnisDalucPaddingRule,
+    NnisDalucResidualSemantics, NnisDalucRowOrder, NnisDalucStorageTopology,
+    NnisDalucValueRepresentation, NnisDalucViewLayout, NnisDalucZeroPointStorage,
+    NnisKvExecutionPolicy, NNIS_DA_LUC_PLAN_VERSION, SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
 };
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16_ATTENTION_PLAN_VERSION,
