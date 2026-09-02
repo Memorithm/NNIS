@@ -259,8 +259,6 @@ mod tests {
 
         let encoded = serde_json::to_string(&plan).unwrap();
         assert!(encoded.contains("\"kernel\":\"parallel_score_candidate\""));
-        assert!(encoded.contains(
-            "\"parallel_score_policy\":\"ka17_smol_lm2_short_context_v1\""
-        ));
+        assert!(encoded.contains("\"parallel_score_policy\":\"ka17_smol_lm2_short_context_v1\""));
     }
 }
