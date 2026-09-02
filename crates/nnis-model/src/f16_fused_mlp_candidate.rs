@@ -158,11 +158,9 @@ impl F16FusedMlpCandidate {
         let grid = u32::try_from(output_n)
             .map_err(|_| NnisError::invalid_input("F16 fused MLP output_n exceeds u32"))?;
         let shared_bytes = 2 * REDUCTION_BLOCK_SIZE * std::mem::size_of::<f32>() as u32;
-        let config = LaunchConfig::new(
-            Dim3::new(grid, 1, 1),
-            Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1),
-        )
-        .with_dynamic_shared_memory(shared_bytes);
+        let config =
+            LaunchConfig::new(Dim3::new(grid, 1, 1), Dim3::new(REDUCTION_BLOCK_SIZE, 1, 1))
+                .with_dynamic_shared_memory(shared_bytes);
         let mut args = KernelArgs::with_capacity(6, 4);
         args.push_buffer(input)
             .push_buffer(gate_weight_nk)
@@ -179,8 +177,7 @@ impl F16FusedMlpCandidate {
 mod tests {
     use super::*;
     use crate::{
-        F16FusedProjectionGroupsCandidate, F16ReferenceKernels,
-        F16TransposedProjectionCandidate,
+        F16FusedProjectionGroupsCandidate, F16ReferenceKernels, F16TransposedProjectionCandidate,
     };
     use nnis_rt::gpu_context;
 
@@ -246,16 +243,7 @@ mod tests {
 
         unsafe {
             grouped
-                .enqueue_gate_up_nk(
-                    &stream,
-                    &input,
-                    &gate_weight,
-                    &up_weight,
-                    &gate,
-                    &up,
-                    k,
-                    n,
-                )
+                .enqueue_gate_up_nk(&stream, &input, &gate_weight, &up_weight, &gate, &up, k, n)
                 .unwrap();
             reference
                 .enqueue_silu_multiply(&stream, &gate, &up, &reference_output)
