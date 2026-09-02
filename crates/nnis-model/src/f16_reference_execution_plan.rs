@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 
 pub const F16_REFERENCE_EXECUTION_PLAN_VERSION: u32 = 1;
 
-/// Physical resident layout used by F16 decoder projection weights.
+/// Physical resident layout and candidate launch policy used by F16 decoder projections.
 ///
 /// This is deliberately separate from [`F16ReferencePlan`], which remains the
-/// stable numeric contract. Changing this enum changes only the explicit
-/// physical execution representation selected by the caller.
+/// stable numeric contract. Candidate variants never change arithmetic or weight
+/// storage precision; they only select an explicit physical representation and
+/// launch envelope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum F16ReferenceProjectionLayout {
@@ -16,6 +17,12 @@ pub enum F16ReferenceProjectionLayout {
     KnReference,
     /// Candidate layout: resident one-time transpose `[N, K]`.
     NkTransposedCandidate,
+    /// Candidate layout: resident `[N, K]` plus grouped QKV and gate/up launches.
+    ///
+    /// O-projection, down-projection and LM-head launches remain the existing
+    /// transposed kernels. This variant is qualification-only until a separate
+    /// end-to-end promotion gate succeeds.
+    NkTransposedFusedGroupsCandidate,
 }
 
 /// Versioned physical execution plan for the NNML5 F16 runtime.
@@ -45,6 +52,15 @@ impl F16ReferenceExecutionPlan {
             schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
             numeric: F16ReferencePlan::edge_llm_v0_10_0_alignment(),
             projection_layout: F16ReferenceProjectionLayout::NkTransposedCandidate,
+        }
+    }
+
+    /// Explicit grouped-launch candidate measured in PR #79 / KA9.
+    pub const fn edge_llm_v0_10_0_transposed_fused_groups_candidate() -> Self {
+        Self {
+            schema_version: F16_REFERENCE_EXECUTION_PLAN_VERSION,
+            numeric: F16ReferencePlan::edge_llm_v0_10_0_alignment(),
+            projection_layout: F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate,
         }
     }
 
@@ -103,6 +119,17 @@ mod tests {
         assert!(encoded.contains("\"schema_version\":1"));
         assert!(encoded.contains("\"projection_layout\":\"nk_transposed_candidate\""));
         assert!(encoded.contains("\"numeric\""));
+
+        let fused = F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate();
+        fused.validate(&config).unwrap();
+        assert_eq!(
+            fused.projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+        );
+        let encoded_fused = serde_json::to_string(&fused).unwrap();
+        assert!(encoded_fused.contains(
+            "\"projection_layout\":\"nk_transposed_fused_groups_candidate\""
+        ));
 
         let mut future = candidate;
         future.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
