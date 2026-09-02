@@ -155,6 +155,7 @@ impl F16CachedAttentionParallelScoreCandidate {
         kv_rows > 0 && kv_rows <= self.max_supported_kv_rows()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn cached_attention_decode(
         &self,
         stream: &Stream,
@@ -188,6 +189,7 @@ impl F16CachedAttentionParallelScoreCandidate {
     /// The stream, kernel, query/output buffers, and cache allocations must stay
     /// alive and otherwise untouched until the stream completes. The cache must
     /// not be reset or mutated concurrently from another stream.
+    #[allow(clippy::too_many_arguments)]
     pub unsafe fn enqueue_cached_attention_decode(
         &self,
         stream: &Stream,
