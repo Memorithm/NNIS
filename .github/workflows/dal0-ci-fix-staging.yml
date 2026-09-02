@@ -1,0 +1,45 @@
+name: Temporary DAL0 CI fix staging
+on:
+  push:
+    branches: [staging/dal0-ci-fix]
+permissions:
+  contents: write
+jobs:
+  fix-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Derive default and format
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/nnis-model/src/da_luc_plan.rs')
+          s=p.read_text()
+          old='''#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(tag = "policy", content = "candidate", rename_all = "snake_case")]\npub enum NnisKvExecutionPolicy {\n    DenseReference,\n    DaLucCandidate(NnisDalucCandidatePlan),\n}\n\nimpl Default for NnisKvExecutionPolicy {\n    fn default() -> Self {\n        Self::DenseReference\n    }\n}\n'''
+          new='''#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]\n#[serde(tag = "policy", content = "candidate", rename_all = "snake_case")]\npub enum NnisKvExecutionPolicy {\n    #[default]\n    DenseReference,\n    DaLucCandidate(NnisDalucCandidatePlan),\n}\n'''
+          assert s.count(old)==1
+          p.write_text(s.replace(old,new))
+          PY
+          rustup component add rustfmt clippy
+          cargo fmt --all
+      - name: Validate exact source
+        run: |
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+      - name: Validate Rust 1.77
+        run: |
+          rustup toolchain install 1.77.0 --profile minimal
+          cargo +1.77.0 check --workspace --all-targets
+      - name: Commit product files only
+        run: |
+          git config user.name 'MEMOPERF'
+          git config user.email 'contact@checkupauto.fr'
+          git add crates/nnis-model/src/da_luc_plan.rs crates/nnis-model/src/lib.rs
+          git diff --cached --quiet && exit 0
+          git commit -m 'fix(dal0): satisfy exact CI quality gates'
+          git push origin HEAD:staging/dal0-ci-fix
