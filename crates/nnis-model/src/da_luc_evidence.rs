@@ -1,8 +1,7 @@
 use crate::{
-    NnisDalucCandidatePlan, NnisDalucFloatDType, NnisDalucHeadGeometry,
-    NnisDalucKeyRepresentation, NnisDalucPaddingRule, NnisDalucStorageTopology,
-    NnisDalucValueRepresentation, NnisDalucViewLayout,
-    SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
+    NnisDalucCandidatePlan, NnisDalucFloatDType, NnisDalucHeadGeometry, NnisDalucKeyRepresentation,
+    NnisDalucPaddingRule, NnisDalucStorageTopology, NnisDalucValueRepresentation,
+    NnisDalucViewLayout, SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
 };
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
@@ -295,11 +294,8 @@ impl NnisDalucFlatOracleEvidence {
             capacity_tokens,
         ])?;
         let scalar_bytes = dtype_bytes(self.storage.dense_baseline_dtype);
-        let key_raw = checked_mul_many(&[
-            physical_rows,
-            self.view.geometry.key_head_dim,
-            scalar_bytes,
-        ])?;
+        let key_raw =
+            checked_mul_many(&[physical_rows, self.view.geometry.key_head_dim, scalar_bytes])?;
         let value_raw = checked_mul_many(&[
             physical_rows,
             self.view.geometry.value_head_dim,
@@ -473,7 +469,7 @@ mod tests {
         }
     }
 
-    fn evidence(plan: &NnisDalucCandidatePlan) -> NnisDalucFlatOracleEvidence {
+    fn fixture(plan: &NnisDalucCandidatePlan) -> NnisDalucFlatOracleEvidence {
         let view = NnisDalucFlatViewSnapshot {
             schema_version: SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
             batch: 1,
@@ -536,7 +532,7 @@ mod tests {
     #[test]
     fn valid_flat_oracle_evidence_binds_to_plan() {
         let plan = plan();
-        let evidence = evidence(&plan);
+        let evidence = fixture(&plan);
         evidence.validate_against_plan(&plan).unwrap();
         assert_eq!(evidence.fingerprint().unwrap().len(), 64);
     }
@@ -544,7 +540,7 @@ mod tests {
     #[test]
     fn semantic_view_drift_is_rejected_even_with_rehashed_snapshot() {
         let plan = plan();
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.view.keys.codebook_entries += 1;
         evidence.adapter_view_fingerprint = evidence.view.adapter_fingerprint().unwrap();
         assert!(evidence.validate_against_plan(&plan).is_err());
@@ -553,11 +549,11 @@ mod tests {
     #[test]
     fn exact_storage_tampering_is_rejected() {
         let plan = plan();
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.storage.total_representation_bytes += 1;
         assert!(evidence.validate_against_plan(&plan).is_err());
 
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.storage.effective_bits_per_value = 1.0;
         assert!(evidence.validate_against_plan(&plan).is_err());
     }
@@ -565,11 +561,11 @@ mod tests {
     #[test]
     fn source_and_oracle_version_are_fail_closed() {
         let plan = plan();
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.flat_source_commit = "not-a-commit".into();
         assert!(evidence.validate_against_plan(&plan).is_err());
 
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.flat_oracle_payload_version += 1;
         assert!(evidence.validate_against_plan(&plan).is_err());
     }
@@ -577,7 +573,7 @@ mod tests {
     #[test]
     fn non_finite_reconstruction_evidence_is_rejected() {
         let plan = plan();
-        let mut evidence = evidence(&plan);
+        let mut evidence = fixture(&plan);
         evidence.reconstruction.keys.rmse = f64::NAN;
         assert!(evidence.validate_against_plan(&plan).is_err());
     }
@@ -585,7 +581,7 @@ mod tests {
     #[test]
     fn evidence_serialization_contains_no_payload_or_performance_surface() {
         let plan = plan();
-        let json = serde_json::to_string(&evidence(&plan)).unwrap();
+        let json = serde_json::to_string(&fixture(&plan)).unwrap();
         for forbidden in [
             "codebook_values",
             "residual_values",
