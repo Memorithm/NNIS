@@ -7,6 +7,7 @@
 mod attention_plan;
 mod cached_attention_candidate;
 mod config;
+mod da_luc_plan;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
@@ -30,6 +31,14 @@ mod weights;
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
 pub use cached_attention_candidate::F32CachedAttentionDecodeParallelValue;
 pub use config::{Activation, GenerationConfig, ModelConfig, WeightDType};
+pub use da_luc_plan::{
+    NnisDalucBackendCapabilities, NnisDalucBitOrder, NnisDalucCandidatePlan,
+    NnisDalucCodebookScope, NnisDalucConsumptionMode, NnisDalucCudaPhysicalLayout,
+    NnisDalucFloatDType, NnisDalucHeadGeometry, NnisDalucKeyRepresentation, NnisDalucPaddingRule,
+    NnisDalucResidualSemantics, NnisDalucRowOrder, NnisDalucStorageTopology,
+    NnisDalucValueRepresentation, NnisDalucViewLayout, NnisDalucZeroPointStorage,
+    NnisKvExecutionPolicy, NNIS_DA_LUC_PLAN_VERSION, SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
+};
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16_ATTENTION_PLAN_VERSION,
 };
