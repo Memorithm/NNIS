@@ -40,7 +40,8 @@ pub use da_luc_plan::{
     NnisKvExecutionPolicy, NNIS_DA_LUC_PLAN_VERSION, SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
 };
 pub use f16_attention_plan::{
-    F16AttentionPlan, F16CachedAttentionKernel, F16_ATTENTION_PLAN_VERSION,
+    F16AttentionPlan, F16CachedAttentionKernel, F16ParallelScorePolicy,
+    F16_ATTENTION_PLAN_VERSION, F16_PARALLEL_SCORE_KA17_MAX_KV_ROWS,
 };
 pub use f16_fused_mlp_candidate::F16FusedMlpCandidate;
 pub use f16_fused_projection_candidate::F16FusedProjectionGroupsCandidate;
