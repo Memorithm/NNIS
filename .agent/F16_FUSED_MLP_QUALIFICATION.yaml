@@ -1,0 +1,88 @@
+schema_version: 1
+kind: nnis_f16_fused_mlp_qualification
+status: awaiting_independent_repeat
+last_updated: "2026-09-02"
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+candidate:
+  execution_plan: nk_transposed_fused_mlp_candidate
+  parent_execution_plan: nk_transposed_fused_groups_candidate
+  candidate_merge_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
+  default_runtime_change: false
+  semantic_change: false
+  structural_change:
+    gate_up_and_silu_launches_per_layer:
+      parent: 2
+      candidate: 1
+    launches_removed_per_layer: 1
+    smollm2_layers: 30
+    launches_removed_per_token: 30
+
+microbenchmark_evidence:
+  campaign: KA12
+  scope: SmolLM2_F16_gate_up_SiLU_shape_576x1536
+  bitwise_equal: true
+  parent_median_ms: 0.033760
+  candidate_median_ms: 0.020576
+  isolated_relative_improvement: 0.3905
+  isolated_speedup_ratio: 1.6407
+  interpretation: >-
+    The fused gate/up/SiLU kernel is strongly faster in the isolated measured
+    decoder sub-path, but this evidence alone cannot authorize runtime promotion.
+
+end_to_end_evidence:
+  KA13:
+    campaign: ka13_smollm2_f16_fused_vs_fused_mlp_abba_v1
+    run_context_id: ka13-fused-mlp-e2e-abba-thor-20260902T135026Z
+    exact_nnis_commit: 4101b8924f1e5400a7871259b9c1b732ae3c77bb
+    rounds: 8
+    reports: 16
+    decode_steps: 32
+    generation_forward_runs_per_request: 31
+    exact_greedy_32_of_32_all: true
+    environment_compatible_within_run: true
+    candidate_round_wins: 8
+    parent_round_wins: 0
+    ties: 0
+    parent_generation_gpu_median_ms: 237.52739310264587
+    candidate_generation_gpu_median_ms: 218.83888053894043
+    median_paired_relative_improvement: 0.07689380922830358
+    mean_paired_relative_improvement: 0.0783718850778209
+    min_paired_relative_improvement: 0.05013859156747926
+    max_paired_relative_improvement: 0.1036766996786688
+    aggregate_parent_over_candidate_ratio: 1.0853985019375019
+    median_pair_speedup_ratio: 1.083316943027804
+    absolute_generation_gpu_ms_saved_at_medians: 18.688512563705444
+    order_analysis:
+      parent_then_candidate_median_improvement: 0.07167514987944403
+      candidate_then_parent_median_improvement: 0.088010935580462
+      median_order_gap: 0.01633578570101797
+      interpretation: >-
+        A modest order effect is visible, but every observation remains positive
+        and the worst paired improvement is above the 3 percent qualification
+        floor. KA13 therefore passes the first end-to-end gate but does not by
+        itself establish repeatability across independent campaign runs.
+
+promotion_policy:
+  minimum_median_paired_relative_improvement: 0.03
+  require_identical_greedy_trajectory: true
+  require_all_rounds_positive: true
+  require_fail_closed_environment_identity: true
+  require_exact_head_clean_git: true
+  require_independent_run_contexts: true
+  minimum_independent_campaigns: 2
+  automatic_promotion: false
+  next_gate: >-
+    Run an independent KA14 ABBA campaign from the exact candidate commit using
+    a committed fail-closed driver. Then validate inter-run environment and
+    experiment compatibility and require the candidate decision to remain
+    positive in both runs before considering an explicit production-plan
+    promotion. Do not change the default from KA13 alone.
+
+claim_boundary: >-
+  KA13 demonstrates a credible same-environment SmolLM2 F16 generation-stage
+  end-to-end win for fused_mlp versus fused under the measured workload. It does
+  not establish cross-device portability, other-model gains, or authorization
+  to change the production default without an independent repeat and promotion
+  review.
