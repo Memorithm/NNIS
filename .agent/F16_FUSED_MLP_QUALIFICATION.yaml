@@ -64,6 +64,23 @@ end_to_end_evidence:
         floor. KA13 therefore passes the first end-to-end gate but does not by
         itself establish repeatability across independent campaign runs.
 
+evidence_tooling:
+  pull_request: 87
+  exact_head_ci: 3cff25399bd034321e9ca1c6740f70ab2c2a0038
+  merge_commit: 8d0720244a10624d3a75709700f9686e408ae2b8
+  tool: tools/run_f16_fused_mlp_e2e_abba.py
+  runtime_code_changed_by_tooling_pr: false
+  capabilities:
+    - exact_git_and_clean_worktree_validation
+    - pinned_model_and_execution_plan_validation
+    - raw_GPU_sample_median_recomputation
+    - paired_improvement_recomputation_from_raw_reports
+    - within_run_environment_fail_closed_validation
+    - independent_run_context_validation
+    - cross_run_environment_and_experiment_consensus
+    - three_percent_floor_and_all_pairs_positive_gate
+    - no_automatic_promotion
+
 promotion_policy:
   minimum_median_paired_relative_improvement: 0.03
   require_identical_greedy_trajectory: true
@@ -74,11 +91,11 @@ promotion_policy:
   minimum_independent_campaigns: 2
   automatic_promotion: false
   next_gate: >-
-    Run an independent KA14 ABBA campaign from the exact candidate commit using
-    a committed fail-closed driver. Then validate inter-run environment and
-    experiment compatibility and require the candidate decision to remain
-    positive in both runs before considering an explicit production-plan
-    promotion. Do not change the default from KA13 alone.
+    Run KA14 from the exact runtime commit 4101b8924f1e5400a7871259b9c1b732ae3c77bb
+    while invoking the verifier from tooling merge 8d0720244a10624d3a75709700f9686e408ae2b8.
+    Recompute both KA13 and KA14 from raw reports and require inter-run consensus.
+    Only a passing consensus can make fused_mlp eligible for explicit NNIS
+    promotion review; it still does not promote automatically.
 
 claim_boundary: >-
   KA13 demonstrates a credible same-environment SmolLM2 F16 generation-stage
