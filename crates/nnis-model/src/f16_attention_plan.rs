@@ -1,4 +1,4 @@
-use crate::{Activation, ModelConfig, WeightDType};
+use crate::{Activation, F16ReferenceExecutionPlan, ModelConfig, WeightDType};
 use nnis_rt::{Context, NnisError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -46,7 +46,7 @@ impl F16ParallelScorePolicy {
 ///
 /// Generic APIs keep the reference constructor unchanged. Candidate plans remain
 /// explicit comparison surfaces. The promoted SmolLM2/Thor selector is separately
-/// fail-closed to the exact qualified model and GPU class.
+/// fail-closed to the exact qualified model, parent execution plan, and GPU class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct F16AttentionPlan {
     pub schema_version: u32,
@@ -99,7 +99,8 @@ impl F16AttentionPlan {
     }
 
     /// Qualified minimum-latency attention plan for the pinned SmolLM2-135M
-    /// short-context execution domain on NVIDIA Thor.
+    /// short-context execution domain on NVIDIA Thor, under the exact parent
+    /// projection plan used by KA18 and KA19.
     ///
     /// Promotion basis: KA17 established 840/840 bitwise-identical final-F16
     /// comparisons across KV rows 1..=35, six fixture families and four launch
@@ -110,11 +111,18 @@ impl F16AttentionPlan {
     /// GPU improvements above 20%. The independent consensus verifier accepted
     /// both campaigns under one compatible stable physical environment.
     ///
-    /// This selector intentionally does not change [`Self::reference`]. It fails
-    /// closed outside the exact pinned model identity and NVIDIA Thor GPU class.
-    pub fn smollm2_135m_thor_min_latency(config: &ModelConfig, context: &Context) -> Result<Self> {
+    /// Both campaigns used
+    /// [`F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate`]
+    /// as the parent execution plan. Combining this attention policy with another
+    /// projection/MLP plan requires a separate physical end-to-end qualification.
+    /// This selector intentionally does not change [`Self::reference`].
+    pub fn smollm2_135m_thor_min_latency(
+        config: &ModelConfig,
+        execution_plan: F16ReferenceExecutionPlan,
+        context: &Context,
+    ) -> Result<Self> {
         let plan = Self::thor_ka17_parallel_score_candidate();
-        plan.validate_smollm2_135m_min_latency_model_domain(config)?;
+        plan.validate_smollm2_135m_min_latency_domain(config, execution_plan)?;
 
         let properties = context.props();
         if properties.name != "NVIDIA Thor"
@@ -132,17 +140,25 @@ impl F16AttentionPlan {
         Ok(plan)
     }
 
-    /// Validate the exact model-side promotion domain independently of CUDA
-    /// hardware. Hardware authorization still requires
+    /// Validate the exact model and parent-execution-plan promotion domain
+    /// independently of CUDA hardware. Hardware authorization still requires
     /// [`Self::smollm2_135m_thor_min_latency`].
-    pub fn validate_smollm2_135m_min_latency_model_domain(
+    pub fn validate_smollm2_135m_min_latency_domain(
         &self,
         config: &ModelConfig,
+        execution_plan: F16ReferenceExecutionPlan,
     ) -> Result<()> {
         self.validate(config)?;
         if *self != Self::thor_ka17_parallel_score_candidate() {
             return Err(NnisError::unsupported(
                 "SmolLM2 F16 attention min-latency qualification requires the KA17 parallel-score policy",
+            ));
+        }
+        if execution_plan
+            != F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate()
+        {
+            return Err(NnisError::unsupported(
+                "SmolLM2 F16 attention min-latency qualification requires the exact transposed-projection parent used by KA18 and KA19",
             ));
         }
         if config.vocab_size != 49_152
@@ -327,21 +343,30 @@ mod tests {
     }
 
     #[test]
-    fn smollm2_min_latency_model_domain_is_fail_closed() {
+    fn smollm2_min_latency_domain_is_fail_closed_to_ka18_parent() {
         let plan = F16AttentionPlan::thor_ka17_parallel_score_candidate();
-        plan.validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
+        let qualified_parent =
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
+        plan.validate_smollm2_135m_min_latency_domain(&smollm2_config(), qualified_parent)
             .unwrap();
+
         assert!(plan
-            .validate_smollm2_135m_min_latency_model_domain(&tiny_config())
+            .validate_smollm2_135m_min_latency_domain(&tiny_config(), qualified_parent)
             .is_err());
         assert!(F16AttentionPlan::reference()
-            .validate_smollm2_135m_min_latency_model_domain(&smollm2_config())
+            .validate_smollm2_135m_min_latency_domain(&smollm2_config(), qualified_parent)
+            .is_err());
+
+        let fused_mlp_parent =
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_mlp_candidate();
+        assert!(plan
+            .validate_smollm2_135m_min_latency_domain(&smollm2_config(), fused_mlp_parent)
             .is_err());
 
         let mut wrong_identity = smollm2_config();
         wrong_identity.rope_theta = 10_000.0;
         assert!(plan
-            .validate_smollm2_135m_min_latency_model_domain(&wrong_identity)
+            .validate_smollm2_135m_min_latency_domain(&wrong_identity, qualified_parent)
             .is_err());
     }
 }
