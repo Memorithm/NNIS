@@ -14,10 +14,10 @@
 use crate::runtime::build_rope_cache;
 use crate::{
     load_model_directory, F16AttentionPlan, F16CachedAttentionKernel,
-    F16CachedAttentionStagedWeightsCandidate, F16FusedProjectionGroupsCandidate,
-    F16ReferenceExecutionPlan, F16ReferenceKernels, F16ReferenceProjectionLayout,
-    F16TransposedProjectionCandidate, F32RuntimeKernels, GenerationConfig, MatrixWeight,
-    ModelConfig, ModelWeights, WeightDType,
+    F16CachedAttentionStagedWeightsCandidate, F16FusedMlpCandidate,
+    F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan, F16ReferenceKernels,
+    F16ReferenceProjectionLayout, F16TransposedProjectionCandidate, F32RuntimeKernels,
+    GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -124,8 +124,6 @@ impl F16ModelWeights {
             source: &DeviceBuffer<f32>,
         ) -> Result<Arc<DeviceBuffer<u16>>> {
             let output = Arc::new(DeviceBuffer::<u16>::new(stream.ctx(), source.len())?);
-            // SAFETY: source/output stay alive across the immediately following
-            // stream synchronization, so no async conversion outlives either buffer.
             unsafe { kernels.enqueue_narrow_from_f32(stream, source, &output)? };
             stream.synchronize()?;
             Ok(output)
@@ -142,14 +140,14 @@ impl F16ModelWeights {
             match layout {
                 F16ReferenceProjectionLayout::KnReference => Ok(kn),
                 F16ReferenceProjectionLayout::NkTransposedCandidate
-                | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => {
+                | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+                | F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => {
                     let candidate = projection_candidate.ok_or_else(|| {
                         NnisError::unsupported(
                             "F16 transposed projection plan selected without candidate kernels",
                         )
                     })?;
                     let nk = Arc::new(DeviceBuffer::<u16>::new(stream.ctx(), kn.len())?);
-                    // SAFETY: both buffers remain alive through synchronization.
                     unsafe {
                         candidate.enqueue_transpose_kn_to_nk(
                             stream,
@@ -171,34 +169,10 @@ impl F16ModelWeights {
         for layer in &source.layers {
             layers.push(F16DecoderLayerWeights {
                 input_norm: narrow(stream, kernels, layer.input_norm.tensor().as_f32()?)?,
-                q_proj: narrow_projection(
-                    stream,
-                    kernels,
-                    &layer.q_proj,
-                    layout,
-                    projection_candidate,
-                )?,
-                k_proj: narrow_projection(
-                    stream,
-                    kernels,
-                    &layer.k_proj,
-                    layout,
-                    projection_candidate,
-                )?,
-                v_proj: narrow_projection(
-                    stream,
-                    kernels,
-                    &layer.v_proj,
-                    layout,
-                    projection_candidate,
-                )?,
-                o_proj: narrow_projection(
-                    stream,
-                    kernels,
-                    &layer.o_proj,
-                    layout,
-                    projection_candidate,
-                )?,
+                q_proj: narrow_projection(stream, kernels, &layer.q_proj, layout, projection_candidate)?,
+                k_proj: narrow_projection(stream, kernels, &layer.k_proj, layout, projection_candidate)?,
+                v_proj: narrow_projection(stream, kernels, &layer.v_proj, layout, projection_candidate)?,
+                o_proj: narrow_projection(stream, kernels, &layer.o_proj, layout, projection_candidate)?,
                 post_attention_norm: narrow(
                     stream,
                     kernels,
@@ -211,13 +185,7 @@ impl F16ModelWeights {
                     layout,
                     projection_candidate,
                 )?,
-                up_proj: narrow_projection(
-                    stream,
-                    kernels,
-                    &layer.up_proj,
-                    layout,
-                    projection_candidate,
-                )?,
+                up_proj: narrow_projection(stream, kernels, &layer.up_proj, layout, projection_candidate)?,
                 down_proj: narrow_projection(
                     stream,
                     kernels,
@@ -228,13 +196,7 @@ impl F16ModelWeights {
             });
         }
         let final_norm = narrow(stream, kernels, source.final_norm.tensor().as_f32()?)?;
-        let lm_head = narrow_projection(
-            stream,
-            kernels,
-            &source.lm_head,
-            layout,
-            projection_candidate,
-        )?;
+        let lm_head = narrow_projection(stream, kernels, &source.lm_head, layout, projection_candidate)?;
         Ok(Self {
             token_embedding,
             layers,
@@ -244,7 +206,6 @@ impl F16ModelWeights {
     }
 }
 
-/// Immutable F16 reference-alignment model. Sessions own mutable state.
 #[derive(Debug)]
 pub struct F16ReferenceModel {
     config: ModelConfig,
@@ -255,6 +216,7 @@ pub struct F16ReferenceModel {
     kernels: F16ReferenceKernels,
     projection_candidate: Option<F16TransposedProjectionCandidate>,
     fused_projection_candidate: Option<F16FusedProjectionGroupsCandidate>,
+    fused_mlp_candidate: Option<F16FusedMlpCandidate>,
     attention_candidate: Option<F16CachedAttentionStagedWeightsCandidate>,
     top_k: F32TopK,
     token_runtime: F32RuntimeKernels,
@@ -315,16 +277,26 @@ impl F16ReferenceModel {
         let projection_candidate = match execution_plan.projection_layout {
             F16ReferenceProjectionLayout::KnReference => None,
             F16ReferenceProjectionLayout::NkTransposedCandidate
-            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => {
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => {
                 Some(F16TransposedProjectionCandidate::load(&context, &compiler)?)
             }
         };
         let fused_projection_candidate = match execution_plan.projection_layout {
-            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => Some(
+            F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => Some(
                 F16FusedProjectionGroupsCandidate::load(&context, &compiler)?,
             ),
             F16ReferenceProjectionLayout::KnReference
             | F16ReferenceProjectionLayout::NkTransposedCandidate => None,
+        };
+        let fused_mlp_candidate = match execution_plan.projection_layout {
+            F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => {
+                Some(F16FusedMlpCandidate::load(&context, &compiler)?)
+            }
+            F16ReferenceProjectionLayout::KnReference
+            | F16ReferenceProjectionLayout::NkTransposedCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => None,
         };
         let attention_candidate = match attention_plan.kernel {
             F16CachedAttentionKernel::ReferencePerPositionBarriers => None,
@@ -355,6 +327,7 @@ impl F16ReferenceModel {
             kernels,
             projection_candidate,
             fused_projection_candidate,
+            fused_mlp_candidate,
             attention_candidate,
             top_k,
             token_runtime,
@@ -434,11 +407,11 @@ impl F16ReferenceModel {
     ) -> Result<()> {
         match self.execution_plan.projection_layout {
             F16ReferenceProjectionLayout::KnReference => unsafe {
-                self.kernels
-                    .enqueue_project_kn(stream, input, weight, output, k, n)
+                self.kernels.enqueue_project_kn(stream, input, weight, output, k, n)
             },
             F16ReferenceProjectionLayout::NkTransposedCandidate
-            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => unsafe {
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => unsafe {
                 self.projection_candidate
                     .as_ref()
                     .ok_or_else(|| {
@@ -507,15 +480,50 @@ impl F16ReferenceModel {
             };
         }
         unsafe {
-            self.enqueue_projection(
+            self.enqueue_projection(stream, input, gate_weight, gate_output, hidden, intermediate)?;
+            self.enqueue_projection(stream, input, up_weight, up_output, hidden, intermediate)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn enqueue_gate_up_silu(
+        &self,
+        stream: &Stream,
+        input: &DeviceBuffer<u16>,
+        gate_weight: &DeviceBuffer<u16>,
+        up_weight: &DeviceBuffer<u16>,
+        gate_output: &DeviceBuffer<u16>,
+        up_output: &DeviceBuffer<u16>,
+        gated_output: &DeviceBuffer<u16>,
+        hidden: usize,
+        intermediate: usize,
+    ) -> Result<()> {
+        if let Some(candidate) = &self.fused_mlp_candidate {
+            return unsafe {
+                candidate.enqueue_gate_up_silu_nk(
+                    stream,
+                    input,
+                    gate_weight,
+                    up_weight,
+                    gated_output,
+                    hidden,
+                    intermediate,
+                )
+            };
+        }
+        unsafe {
+            self.enqueue_gate_up_group(
                 stream,
                 input,
                 gate_weight,
+                up_weight,
                 gate_output,
+                up_output,
                 hidden,
                 intermediate,
             )?;
-            self.enqueue_projection(stream, input, up_weight, up_output, hidden, intermediate)
+            self.kernels
+                .enqueue_silu_multiply(stream, gate_output, up_output, gated_output)
         }
     }
 
@@ -538,8 +546,7 @@ impl F16ReferenceModel {
                 && candidate.supports_kv_rows(kv_rows)
             {
                 return unsafe {
-                    candidate
-                        .enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
+                    candidate.enqueue_cached_attention_decode(stream, query, cache, layer, output, scale)
                 };
             }
         }
@@ -564,7 +571,8 @@ impl F16ReferenceModel {
                     .enqueue_lm_head_f32_logits(stream, input, weight, output, k, n)
             },
             F16ReferenceProjectionLayout::NkTransposedCandidate
-            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate => unsafe {
+            | F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
+            | F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate => unsafe {
                 self.projection_candidate
                     .as_ref()
                     .ok_or_else(|| {
@@ -630,7 +638,6 @@ impl F16DecodeWorkspace {
     }
 }
 
-/// Mutable autoregressive state for the explicit F16 reference model.
 #[derive(Debug)]
 pub struct F16ReferenceSession<'model> {
     model: &'model F16ReferenceModel,
@@ -641,13 +648,6 @@ pub struct F16ReferenceSession<'model> {
     position: usize,
 }
 
-/// CUDA-event profile matching the TensorRT Edge-LLM generation-stage metric.
-///
-/// For `N` generated tokens this path samples token 0 from prefill logits and
-/// measures exactly `N - 1` decoder forwards. Top-1 sampling and token recording
-/// are deliberately outside every generation-forward CUDA-event interval. The
-/// final generated token is not consumed by the model because Edge-LLM likewise
-/// reports 32 generated tokens from 31 `llm_generation` stage executions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct F16ReferenceGenerationProfile {
     pub schema_version: u32,
@@ -723,7 +723,6 @@ impl<'model> F16ReferenceSession<'model> {
         }
         let host = [token];
         let enqueue_result = (|| {
-            // SAFETY: host/current_token stay alive through `finish` below.
             unsafe {
                 self.workspace
                     .current_token
@@ -750,12 +749,6 @@ impl<'model> F16ReferenceSession<'model> {
         }
     }
 
-    /// Profile a fixed greedy request with the same generation-stage accounting
-    /// used by the qualified TensorRT Edge-LLM v0.10.0 R1 reference.
-    ///
-    /// This is a qualification-only metric. It intentionally leaves the session
-    /// one token behind normal `generate()` state advancement because the final
-    /// generated token is sampled but not consumed by a decoder forward.
     pub fn profile_greedy_edge_generation_semantics(
         &mut self,
         input_ids: &[u32],
@@ -779,10 +772,6 @@ impl<'model> F16ReferenceSession<'model> {
             prefill_start.record(&self.stream)?;
             self.enqueue_prefill(&device_ids)?;
             prefill_end.record(&self.stream)?;
-
-            // Token 0 is sampled from prefill logits and is outside the
-            // generation-stage CUDA timing, matching the NVIDIA definition.
-            // SAFETY: buffers remain live through the final stream sync below.
             unsafe {
                 self.model.top_k.enqueue_top_k(
                     &self.stream,
@@ -799,16 +788,12 @@ impl<'model> F16ReferenceSession<'model> {
                     0,
                 )?;
             }
-
             for step in 1..max_new_tokens {
                 let start = nnis_rt::Event::new(&self.model.context)?;
                 let end = nnis_rt::Event::new(&self.model.context)?;
                 start.record(&self.stream)?;
                 self.enqueue_current_token()?;
                 end.record(&self.stream)?;
-
-                // SAFETY: top-1 and record are ordered after `end`, so their GPU
-                // work is excluded from the decoder-forward timing interval.
                 unsafe {
                     self.model.top_k.enqueue_top_k(
                         &self.stream,
@@ -850,8 +835,7 @@ impl<'model> F16ReferenceSession<'model> {
 
         Ok(F16ReferenceGenerationProfile {
             schema_version: 1,
-            metric_definition: "generated_tokens / cumulative GPU time of N-1 decoder forwards after prefill; CUDA events bracket decoder forward only; top-1 sampling excluded; final generated token not consumed"
-                .to_string(),
+            metric_definition: "generated_tokens / cumulative GPU time of N-1 decoder forwards after prefill; CUDA events bracket decoder forward only; top-1 sampling excluded; final generated token not consumed".to_string(),
             generated_tokens: max_new_tokens,
             generation_forward_runs: generation_forward_gpu_ms.len(),
             prefill_gpu_ms,
@@ -872,8 +856,6 @@ impl<'model> F16ReferenceSession<'model> {
         let enqueue_result = (|| {
             self.enqueue_prefill(&device_ids)?;
             for step in 0..max_new_tokens {
-                // SAFETY: session-owned buffers remain live and are serialized
-                // on one stream for the whole fixed-length graph.
                 unsafe {
                     self.model.top_k.enqueue_top_k(
                         &self.stream,
@@ -908,12 +890,10 @@ impl<'model> F16ReferenceSession<'model> {
         let device_ids = DeviceBuffer::from_host(&self.model.context, &self.stream, input_ids)?;
         let enqueue_result = self.enqueue_prefill(&device_ids);
         self.finish(enqueue_result)?;
-
         let mut generated = Vec::with_capacity(max_new_tokens);
         for _ in 0..max_new_tokens {
             let mut token_host = [0_u32; 1];
             let enqueue_result = (|| {
-                // SAFETY: token_host/current_token remain alive until `finish`.
                 unsafe {
                     self.model.top_k.enqueue_top_k(
                         &self.stream,
@@ -946,7 +926,6 @@ impl<'model> F16ReferenceSession<'model> {
 
     fn enqueue_prefill(&mut self, input_ids: &DeviceBuffer<u32>) -> Result<()> {
         for token_position in 0..input_ids.len() {
-            // SAFETY: buffers remain session/call-owned until the final finish.
             unsafe {
                 self.model.token_runtime.enqueue_select_token(
                     &self.stream,
@@ -970,8 +949,6 @@ impl<'model> F16ReferenceSession<'model> {
             )));
         }
 
-        // SAFETY: current_token is validated or produced by top-1 over exactly
-        // vocab_size logits; all dependent accesses are ordered on one stream.
         unsafe {
             self.model.kernels.enqueue_gather(
                 &self.stream,
@@ -987,8 +964,6 @@ impl<'model> F16ReferenceSession<'model> {
         let kv_width = config.key_value_width()?;
         for layer_index in 0..config.num_hidden_layers {
             let layer = &self.model.weights.layers[layer_index];
-            // SAFETY: one session exclusively owns every mutable tensor and
-            // submits the decoder graph in dependency order on one stream.
             unsafe {
                 self.model.kernels.enqueue_weighted_rms_norm(
                     &self.stream,
@@ -1034,7 +1009,6 @@ impl<'model> F16ReferenceSession<'model> {
                     config.max_position_embeddings,
                 )?;
             }
-
             let append = self.cache.append_layer_async(
                 layer_index,
                 Arc::clone(&self.workspace.k_rope),
@@ -1042,8 +1016,6 @@ impl<'model> F16ReferenceSession<'model> {
                 1,
             )?;
             self.pending_appends.push(append);
-
-            // SAFETY: cache append and all consumers share this session stream.
             unsafe {
                 self.model.enqueue_attention(
                     &self.stream,
@@ -1076,21 +1048,16 @@ impl<'model> F16ReferenceSession<'model> {
                     config.hidden_size,
                     config.rms_norm_eps,
                 )?;
-                self.model.enqueue_gate_up_group(
+                self.model.enqueue_gate_up_silu(
                     &self.stream,
                     &self.workspace.normed,
                     &layer.gate_proj,
                     &layer.up_proj,
                     &self.workspace.gate,
                     &self.workspace.up,
+                    &self.workspace.gated,
                     config.hidden_size,
                     config.intermediate_size,
-                )?;
-                self.model.kernels.enqueue_silu_multiply(
-                    &self.stream,
-                    &self.workspace.gate,
-                    &self.workspace.up,
-                    &self.workspace.gated,
                 )?;
                 self.model.enqueue_projection(
                     &self.stream,
@@ -1109,8 +1076,6 @@ impl<'model> F16ReferenceSession<'model> {
             }
         }
 
-        // SAFETY: final norm/logit buffers and immutable resident F16 weights
-        // remain alive for the complete model/session lifetime.
         unsafe {
             self.model.kernels.enqueue_weighted_rms_norm(
                 &self.stream,
@@ -1264,7 +1229,6 @@ mod tests {
         let mut future = plan;
         future.schema_version = F16_REFERENCE_PLAN_VERSION + 1;
         assert!(future.validate(&config).is_err());
-
         let mut unsupported = config;
         unsupported.weight_dtype = WeightDType::Bf16;
         assert!(plan.validate(&unsupported).is_err());
@@ -1295,7 +1259,6 @@ mod tests {
             .unwrap();
         assert_eq!(generated, vec![0, 0]);
         assert_eq!(session.position(), 4);
-
         let generated = session
             .generate(&[1, 2], GenerationConfig::greedy_until_eos(4, 0))
             .unwrap();
@@ -1331,6 +1294,13 @@ mod tests {
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate(),
         )
         .unwrap();
+        let fused_mlp_model = F16ReferenceModel::new_with_execution_plan(
+            tiny_config(),
+            tiny_weights(&context, &construction_stream),
+            &construction_stream,
+            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_mlp_candidate(),
+        )
+        .unwrap();
         assert_eq!(
             candidate_model.execution_plan().projection_layout,
             F16ReferenceProjectionLayout::NkTransposedCandidate
@@ -1340,36 +1310,32 @@ mod tests {
             F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
         );
         assert_eq!(
-            candidate_model.attention_plan(),
-            F16AttentionPlan::reference()
+            fused_mlp_model.execution_plan().projection_layout,
+            F16ReferenceProjectionLayout::NkTransposedFusedMlpCandidate
         );
+        assert_eq!(candidate_model.attention_plan(), F16AttentionPlan::reference());
         assert_eq!(fused_model.attention_plan(), F16AttentionPlan::reference());
+        assert_eq!(fused_mlp_model.attention_plan(), F16AttentionPlan::reference());
 
-        let reference_logits = reference_model
-            .new_session()
-            .unwrap()
-            .prefill(&[1, 2])
-            .unwrap();
-        let candidate_logits = candidate_model
-            .new_session()
-            .unwrap()
-            .prefill(&[1, 2])
-            .unwrap();
+        let reference_logits = reference_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
+        let candidate_logits = candidate_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
         let fused_logits = fused_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
+        let fused_mlp_logits = fused_mlp_model.new_session().unwrap().prefill(&[1, 2]).unwrap();
         let expected_bits = reference_logits
             .iter()
             .map(|value| value.to_bits())
             .collect::<Vec<_>>();
         assert_eq!(
             expected_bits,
-            candidate_logits
-                .iter()
-                .map(|value| value.to_bits())
-                .collect::<Vec<_>>()
+            candidate_logits.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
         );
         assert_eq!(
             expected_bits,
-            fused_logits
+            fused_logits.iter().map(|value| value.to_bits()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            expected_bits,
+            fused_mlp_logits
                 .iter()
                 .map(|value| value.to_bits())
                 .collect::<Vec<_>>()
@@ -1390,8 +1356,14 @@ mod tests {
             .unwrap()
             .generate(&[1, 2], GenerationConfig::greedy(2))
             .unwrap();
+        let fused_mlp_ids = fused_mlp_model
+            .new_session()
+            .unwrap()
+            .generate(&[1, 2], GenerationConfig::greedy(2))
+            .unwrap();
         assert_eq!(reference_ids, candidate_ids);
         assert_eq!(reference_ids, fused_ids);
+        assert_eq!(reference_ids, fused_mlp_ids);
     }
 
     #[test]
