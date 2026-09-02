@@ -188,7 +188,7 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
         FixtureKind::Cancellation => {
             let query = (0..query_elements)
                 .map(|index| {
-                    let sign = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
+                    let sign = if index & 1 == 0 { 1.0 } else { -1.0 };
                     sign * (1.0 + (index % 7) as f32 * 0.015625)
                 })
                 .collect();
@@ -196,7 +196,7 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
                 .map(|index| {
                     let dim = index % HEAD_DIM;
                     let pos = (index / HEAD_DIM) % kv_rows;
-                    let sign = if (dim + pos).is_multiple_of(2) { -1.0 } else { 1.0 };
+                    let sign = if (dim + pos) & 1 == 0 { -1.0 } else { 1.0 };
                     sign * (1.0 + ((dim * 3 + pos) % 11) as f32 * 0.0078125)
                 })
                 .collect();
@@ -220,7 +220,7 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
             let query = (0..query_elements)
                 .map(|index| {
                     let dim = index % HEAD_DIM;
-                    let sign = if (index / HEAD_DIM).is_multiple_of(2) { 1.0 } else { -1.0 };
+                    let sign = if ((index / HEAD_DIM) & 1) == 0 { 1.0 } else { -1.0 };
                     sign * (dim as f32 - 31.5) * 0.015625
                 })
                 .collect();
@@ -228,7 +228,7 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
                 .map(|index| {
                     let dim = index % HEAD_DIM;
                     let pos = (index / HEAD_DIM) % kv_rows;
-                    let sign = if pos.is_multiple_of(2) { 1.0 } else { -1.0 };
+                    let sign = if pos & 1 == 0 { 1.0 } else { -1.0 };
                     sign * (dim as f32 - 31.5) * 0.0078125
                 })
                 .collect();
