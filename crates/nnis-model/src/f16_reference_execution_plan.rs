@@ -127,9 +127,8 @@ mod tests {
             F16ReferenceProjectionLayout::NkTransposedFusedGroupsCandidate
         );
         let encoded_fused = serde_json::to_string(&fused).unwrap();
-        assert!(encoded_fused.contains(
-            "\"projection_layout\":\"nk_transposed_fused_groups_candidate\""
-        ));
+        assert!(encoded_fused
+            .contains("\"projection_layout\":\"nk_transposed_fused_groups_candidate\""));
 
         let mut future = candidate;
         future.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
