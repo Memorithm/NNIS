@@ -220,7 +220,11 @@ fn fixture_values(kind: FixtureKind, kv_rows: usize) -> (Vec<f32>, Vec<f32>, Vec
             let query = (0..query_elements)
                 .map(|index| {
                     let dim = index % HEAD_DIM;
-                    let sign = if ((index / HEAD_DIM) & 1) == 0 { 1.0 } else { -1.0 };
+                    let sign = if ((index / HEAD_DIM) & 1) == 0 {
+                        1.0
+                    } else {
+                        -1.0
+                    };
                     sign * (dim as f32 - 31.5) * 0.015625
                 })
                 .collect();
@@ -378,11 +382,17 @@ fn correctness_aggregates(records: &[CorrectnessRecord]) -> Vec<CorrectnessAggre
     BLOCKS
         .iter()
         .map(|&block| {
-            let selected: Vec<_> = records.iter().filter(|record| record.block == block).collect();
+            let selected: Vec<_> = records
+                .iter()
+                .filter(|record| record.block == block)
+                .collect();
             CorrectnessAggregate {
                 block,
                 cases: selected.len(),
-                bitwise_equal_cases: selected.iter().filter(|record| record.bitwise_equal).count(),
+                bitwise_equal_cases: selected
+                    .iter()
+                    .filter(|record| record.bitwise_equal)
+                    .count(),
                 differing_elements_total: selected
                     .iter()
                     .map(|record| record.differing_elements)
@@ -559,7 +569,10 @@ fn benchmark_row(
         block_512_relative_improvement: relative_improvement(reference_median, m512)?,
         predeclared_policy_block: policy_block,
         predeclared_policy_median_ms: policy_median,
-        predeclared_policy_relative_improvement: relative_improvement(reference_median, policy_median)?,
+        predeclared_policy_relative_improvement: relative_improvement(
+            reference_median,
+            policy_median,
+        )?,
     })
 }
 
@@ -632,13 +645,7 @@ fn main() -> Result<()> {
     let mut performance_rows = Vec::with_capacity(MAX_KV_ROWS - MIN_KV_ROWS + 1);
     for kv_rows in MIN_KV_ROWS..=MAX_KV_ROWS {
         performance_rows.push(benchmark_row(
-            &context,
-            &stream,
-            &kernels,
-            &staged,
-            &candidate,
-            kv_rows,
-            config,
+            &context, &stream, &kernels, &staged, &candidate, kv_rows, config,
         )?);
     }
     let full_short_context_aggregate = aggregate(&performance_rows, MIN_KV_ROWS, MAX_KV_ROWS)?;
@@ -682,9 +689,8 @@ fn main() -> Result<()> {
     };
     println!(
         "{}",
-        serde_json::to_string_pretty(&report).map_err(|error| NnisError::invalid_input(
-            format!("serialize KA17 report: {error}")
-        ))?
+        serde_json::to_string_pretty(&report)
+            .map_err(|error| NnisError::invalid_input(format!("serialize KA17 report: {error}")))?
     );
     Ok(())
 }
