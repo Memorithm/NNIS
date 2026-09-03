@@ -100,10 +100,14 @@ def require_nonempty_string(value: object, name: str) -> str:
     return value
 
 
-def validate_evidence(document: object, expected_commit: str | None = None) -> None:
+def validate_evidence(document: object, expected_commit: str) -> None:
+    if COMMIT_RE.fullmatch(expected_commit) is None:
+        raise EvidenceError(f"invalid expected commit {expected_commit!r}")
+
     root = require_dict(document, "evidence", TOP_LEVEL_KEYS)
-    if root["schema_version"] != SCHEMA_VERSION:
-        raise EvidenceError(f"unsupported schema_version {root['schema_version']!r}")
+    schema_version = require_int(root["schema_version"], "schema_version", minimum=1)
+    if schema_version != SCHEMA_VERSION:
+        raise EvidenceError(f"unsupported schema_version {schema_version!r}")
     if root["kind"] != KIND:
         raise EvidenceError(f"unexpected evidence kind {root['kind']!r}")
     if root["result"] != "pass":
@@ -113,7 +117,7 @@ def validate_evidence(document: object, expected_commit: str | None = None) -> N
     commit = require_nonempty_string(root["nnis_git_commit"], "nnis_git_commit")
     if COMMIT_RE.fullmatch(commit) is None:
         raise EvidenceError(f"invalid nnis_git_commit {commit!r}")
-    if expected_commit is not None and commit != expected_commit:
+    if commit != expected_commit:
         raise EvidenceError(
             f"evidence commit {commit} does not match expected commit {expected_commit}"
         )
@@ -145,9 +149,14 @@ def validate_evidence(document: object, expected_commit: str | None = None) -> N
 
     model = require_dict(root["model"], "model", MODEL_KEYS)
     for key, expected in EXPECTED_MODEL.items():
-        if model[key] != expected:
+        actual = model[key]
+        if isinstance(expected, int):
+            actual = require_int(actual, f"model.{key}", minimum=0)
+        elif isinstance(expected, str):
+            actual = require_nonempty_string(actual, f"model.{key}")
+        if actual != expected:
             raise EvidenceError(
-                f"model.{key} mismatch: got {model[key]!r}, expected {expected!r}"
+                f"model.{key} mismatch: got {actual!r}, expected {expected!r}"
             )
     rms_norm_eps = model["rms_norm_eps"]
     if isinstance(rms_norm_eps, bool) or not isinstance(rms_norm_eps, (int, float)):
@@ -200,6 +209,7 @@ def negative_self_tests() -> None:
 
     mutations: list[tuple[str, object]] = [
         ("schema", lambda d: d.__setitem__("schema_version", 2)),
+        ("schema_bool", lambda d: d.__setitem__("schema_version", True)),
         ("kind", lambda d: d.__setitem__("kind", "other")),
         ("result", lambda d: d.__setitem__("result", "fail")),
         ("dirty", lambda d: d.__setitem__("nnis_git_dirty", True)),
@@ -208,8 +218,11 @@ def negative_self_tests() -> None:
         ("gpu_name", lambda d: d["device"].__setitem__("name", "")),
         ("gpu_uuid", lambda d: d["device"].__setitem__("uuid", None)),
         ("gpu_cc", lambda d: d["device"].__setitem__("compute_capability_major", 0)),
+        ("gpu_cc_bool", lambda d: d["device"].__setitem__("compute_capability_major", True)),
         ("dtype", lambda d: d["model"].__setitem__("weight_dtype", "f32")),
+        ("eos_bool", lambda d: d["model"].__setitem__("eos_token_id", False)),
         ("layers", lambda d: d["model"].__setitem__("num_hidden_layers", 29)),
+        ("layers_bool", lambda d: d["model"].__setitem__("num_hidden_layers", True)),
         ("kv_width", lambda d: d["model"].__setitem__("key_value_width", 576)),
         ("eps", lambda d: d["model"].__setitem__("rms_norm_eps", float("nan"))),
         ("extra_key", lambda d: d.__setitem__("unexpected", True)),
@@ -230,6 +243,13 @@ def negative_self_tests() -> None:
     else:
         raise AssertionError("expected-commit mismatch was accepted")
 
+    try:
+        validate_evidence(good, expected_commit="bad")
+    except EvidenceError:
+        pass
+    else:
+        raise AssertionError("malformed expected commit was accepted")
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -244,6 +264,8 @@ def main() -> None:
         negative_self_tests()
         print("NNML0 real Safetensors evidence negative self-tests passed")
     if args.evidence is not None:
+        if args.expected_commit is None:
+            parser.error("--expected-commit is required when validating an evidence file")
         document = json.loads(args.evidence.read_text())
         validate_evidence(document, expected_commit=args.expected_commit)
         print(f"NNML0_REAL_SAFETENSORS_EVIDENCE_OK {args.evidence}")
