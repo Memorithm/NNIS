@@ -654,7 +654,8 @@ fn run_block(
         if model.config() != &suite.expected_config {
             return Err(NnisError::invalid_input(format!(
                 "loaded model config differs from suite expected_config: actual={:?} expected={:?}",
-                model.config(), suite.expected_config
+                model.config(),
+                suite.expected_config
             )));
         }
         if model.execution_plan() != plan_name.execution_plan()
