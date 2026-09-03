@@ -33,8 +33,8 @@ fn parse_arguments() -> std::result::Result<PathBuf, String> {
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
-    let mut file =
-        File::open(path).map_err(|error| NnisError::io(format!("open {}", path.display()), error))?;
+    let mut file = File::open(path)
+        .map_err(|error| NnisError::io(format!("open {}", path.display()), error))?;
     let mut digest = Sha256::new();
     let mut buffer = [0_u8; 1024 * 1024];
     loop {
@@ -104,8 +104,7 @@ fn run(model_dir: PathBuf) -> Result<()> {
     let device = Device::first()?;
     let context = Context::new(&device)?;
     let stream = Stream::new(&context)?;
-    let (model_config, weights) =
-        load_model_from_safetensors(&context, &stream, &load_config)?;
+    let (model_config, weights) = load_model_from_safetensors(&context, &stream, &load_config)?;
     stream.synchronize()?;
 
     validate_pinned_config(&model_config)?;
