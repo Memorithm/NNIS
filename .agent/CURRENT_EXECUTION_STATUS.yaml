@@ -1,0 +1,100 @@
+schema_version: 1
+kind: nnis_agent_current_execution_status
+status: active
+last_updated: "2026-09-03"
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+purpose: >-
+  Current execution ledger complementing NNIS_SOVEREIGNTY_ROADMAP.yaml and the
+  dedicated qualification evidence files. This file records post-roadmap work
+  without retroactively changing previously qualified evidence.
+
+qualified_history:
+  ka18_ka19_parallel_score_attention:
+    status: promoted_qualified_selector
+    evidence_file: .agent/KA18_KA19_F16_ATTENTION_PROMOTION.yaml
+    model: HuggingFaceTB/SmolLM2-135M
+    hardware: NVIDIA_Thor_CC_11_0
+    campaigns: [KA18, KA19]
+    combined_paired_rounds: 12
+    combined_candidate_round_wins: 12
+    combination_with_fused_mlp_qualified: false
+
+main_repository_state:
+  combined_f16_candidate_harness:
+    status: merged_unqualified_combination
+    pull_request: 98
+    merge_commit: 8e108754e4f2535c3e7f3fa8be939d036d9754f1
+    harness: crates/nnis-bench/examples/smollm2_f16_combined_candidate_e2e.rs
+    composition:
+      - qualified_fused_mlp_execution_plan
+      - frozen_KA17_parallel_score_attention_candidate
+    physical_combination_campaign_complete: false
+    promotion_authorized: false
+    next: run_fingerprint_compatible_physical_ABBA_on_Thor_before_any_combined_selector_promotion
+
+  tinyllama_massive_f16_campaign:
+    status: merged_harness_physical_evidence_pending
+    pull_request: 99
+    merge_commit: 775f7f4e61d0714e0c725c74a3f87b553a6b4032
+    model: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+    pinned_revision: d9128824c0c80111be21424e68086f52413fb413
+    planned_generation_requests: 11520
+    planned_generated_tokens: 552960
+    physical_campaign_complete: false
+    promotion_authorized: false
+    note: KA17_parallel_score_is_intentionally_excluded_outside_its_SmolLM2_geometry
+
+  nnml0_safetensors_loader:
+    status: repaired_ci_qualified_real_checkpoint_gate_pending
+    original_pull_request: 100
+    repair_pull_request: 101
+    repair_exact_head: 1c7b9786ba1d30381f899e2fa890652027f05dbf
+    repair_merge_commit: a21aa8619ec94179d7ba14e3839046b733c3e349
+    rust_msrv: "1.77"
+    exact_head_ci:
+      rust_1_77: pass
+      rustfmt: pass
+      cargo_check: pass
+      clippy_minus_D_warnings: pass
+      workspace_tests: pass
+      benchmark_harness: pass
+    repaired_contract:
+      - config_json_is_authoritative_for_model_geometry
+      - unsupported_architecture_and_dtype_fail_closed
+      - source_F32_and_BF16_payloads_preserved_without_zero_fill_fallback
+      - GQA_K_and_V_shapes_use_actual_Safetensors_geometry
+      - Hugging_Face_out_in_matrices_transpose_to_NNIS_in_out_orientation
+      - single_file_and_indexed_sharded_Safetensors_supported
+      - shard_parent_traversal_rejected
+      - unused_hf_hub_and_tokio_runtime_dependencies_removed
+      - Rust_1_77_qualified_dependency_lock_restored
+    nnml0_exit_criterion_complete: false
+    blocker: real_checkpoint_load_has_not_yet_been_executed_through_the_repaired_loader
+
+current_execution_order:
+  - id: P0_REAL_CHECKPOINT
+    status: next
+    action: validate_then_load_a_pinned_real_SmolLM2_checkpoint_through_the_repaired_Safetensors_path
+    claim_boundary: structural_or_load_success_is_not_model_quality_or_performance_evidence
+  - id: P1_COMBINED_F16
+    status: blocked_on_P0_and_Thor_execution
+    action: run_two_independent_ABBA_campaigns_for_fused_mlp_plus_parallel_score_on_Thor
+  - id: P1_REPROFILE
+    status: blocked_on_P1_COMBINED_F16
+    action: reprofile_the_winning_exact_plan_and_select_the_new_measured_bottleneck
+  - id: P1_P2_TINYLLAMA
+    status: ready_after_combined_campaign
+    action: execute_the_pinned_massive_TinyLlama_campaign_without_cross_model_KA17_extrapolation
+  - id: LONG_RUN_RESEARCH
+    status: blocked_until_new_profile_exists
+    action: generate_the_new_long_run_agent_protocol_from_current_measured_bottlenecks
+
+invariants:
+  - no_performance_claim_from_loader_CI
+  - no_NNML0_completion_claim_before_real_checkpoint_execution
+  - no_combined_fused_mlp_parallel_score_promotion_before_physical_Thor_ABBA
+  - no_cross_model_KA17_promotion
+  - exact_head_required_CI_must_be_green_before_promotion_or_merge
+  - preserve_Rust_1_77_MSRV
