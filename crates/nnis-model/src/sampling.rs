@@ -301,8 +301,14 @@ mod tests {
             .is_err());
         assert!(SamplingConfig::seeded(1).with_top_k(0).validate(4).is_err());
         assert!(SamplingConfig::seeded(1).with_top_k(5).validate(4).is_err());
-        assert!(SamplingConfig::seeded(1).with_top_p(0.0).validate(4).is_err());
-        assert!(SamplingConfig::seeded(1).with_top_p(1.1).validate(4).is_err());
+        assert!(SamplingConfig::seeded(1)
+            .with_top_p(0.0)
+            .validate(4)
+            .is_err());
+        assert!(SamplingConfig::seeded(1)
+            .with_top_p(1.1)
+            .validate(4)
+            .is_err());
         assert!(SamplingConfig::seeded(1)
             .with_top_p(f32::INFINITY)
             .validate(4)
