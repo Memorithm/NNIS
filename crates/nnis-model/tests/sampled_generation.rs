@@ -85,7 +85,7 @@ fn sampled_generation_is_seed_reproducible_on_gpu() {
     let first_tokens = first
         .generate_sampled(
             &[1, 2],
-            GenerationConfig::greedy(3),
+            GenerationConfig::fixed(3),
             SamplingConfig::seeded(42),
         )
         .unwrap();
@@ -96,7 +96,7 @@ fn sampled_generation_is_seed_reproducible_on_gpu() {
     let second_tokens = second
         .generate_sampled(
             &[1, 2],
-            GenerationConfig::greedy(3),
+            GenerationConfig::fixed(3),
             SamplingConfig::seeded(42),
         )
         .unwrap();
@@ -117,7 +117,7 @@ fn sampled_generation_observes_requested_eos_on_gpu() {
     let generated = session
         .generate_sampled(
             &[1, 2],
-            GenerationConfig::greedy_until_eos(4, 2),
+            GenerationConfig::until_eos(4, 2),
             SamplingConfig::seeded(42),
         )
         .unwrap();
