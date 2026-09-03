@@ -7,7 +7,9 @@
 //! features or dtypes. Hugging Face matrices stored as `[out, in]` are
 //! transposed to NNIS's internal `[in, out]` GEMM orientation before upload.
 
-use crate::{Activation, DecoderLayerWeights, DeviceTensor, ModelConfig, ModelWeights, WeightDType};
+use crate::{
+    Activation, DecoderLayerWeights, DeviceTensor, ModelConfig, ModelWeights, WeightDType,
+};
 use nnis_rt::{Context, DeviceBuffer, NnisError, Result, Stream};
 use safetensors::{Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
@@ -111,8 +113,8 @@ enum HostTensor {
 
 fn parse_metadata(directory: &Path) -> Result<SafetensorsMetadata> {
     let path = directory.join(HF_CONFIG);
-    let bytes = fs::read(&path)
-        .map_err(|error| NnisError::io("read Hugging Face config.json", error))?;
+    let bytes =
+        fs::read(&path).map_err(|error| NnisError::io("read Hugging Face config.json", error))?;
     parse_metadata_bytes(&bytes)
 }
 
@@ -239,8 +241,8 @@ fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
         ));
     }
 
-    let bytes = fs::read(&index)
-        .map_err(|error| NnisError::io("read Safetensors shard index", error))?;
+    let bytes =
+        fs::read(&index).map_err(|error| NnisError::io("read Safetensors shard index", error))?;
     let index: SafetensorsIndex = serde_json::from_slice(&bytes).map_err(|error| {
         NnisError::invalid_input(format!("invalid Safetensors shard index: {error}"))
     })?;
@@ -286,7 +288,9 @@ fn checked_relative_path(file: &str) -> Result<&Path> {
 fn tensor_spec(hf_name: &str, metadata: &SafetensorsMetadata) -> Option<TensorSpec> {
     let hidden = metadata.hidden_size;
     let intermediate = metadata.intermediate_size;
-    let kv_width = metadata.num_key_value_heads.checked_mul(metadata.head_dim)?;
+    let kv_width = metadata
+        .num_key_value_heads
+        .checked_mul(metadata.head_dim)?;
 
     let direct = match hf_name {
         "model.embed_tokens.weight" => Some((
@@ -295,12 +299,7 @@ fn tensor_spec(hf_name: &str, metadata: &SafetensorsMetadata) -> Option<TensorSp
             vec![metadata.vocab_size, hidden],
             false,
         )),
-        "model.norm.weight" => Some((
-            "final_norm".to_string(),
-            vec![hidden],
-            vec![hidden],
-            false,
-        )),
+        "model.norm.weight" => Some(("final_norm".to_string(), vec![hidden], vec![hidden], false)),
         "lm_head.weight" => Some((
             "lm_head".to_string(),
             vec![metadata.vocab_size, hidden],
@@ -436,11 +435,7 @@ fn decode_host_tensor(data: &[u8], dtype: Dtype, elements: usize) -> Result<Host
     }
 }
 
-fn transpose_matrix<T: Copy + Default>(
-    values: Vec<T>,
-    rows: usize,
-    cols: usize,
-) -> Result<Vec<T>> {
+fn transpose_matrix<T: Copy + Default>(values: Vec<T>, rows: usize, cols: usize) -> Result<Vec<T>> {
     let elements = rows
         .checked_mul(cols)
         .ok_or_else(|| NnisError::invalid_input("matrix transpose shape overflows usize"))?;
@@ -495,8 +490,8 @@ fn load_shard(
     metadata: &SafetensorsMetadata,
     tensors: &mut HashMap<String, (Vec<usize>, DeviceTensor)>,
 ) -> Result<()> {
-    let data = fs::read(path)
-        .map_err(|error| NnisError::io(format!("read {}", path.display()), error))?;
+    let data =
+        fs::read(path).map_err(|error| NnisError::io(format!("read {}", path.display()), error))?;
     let safetensors = SafeTensors::deserialize(&data).map_err(|error| {
         NnisError::invalid_input(format!("invalid {}: {error}", path.display()))
     })?;
@@ -508,7 +503,8 @@ fn load_shard(
         if view.shape() != spec.hf_shape.as_slice() {
             return Err(NnisError::invalid_input(format!(
                 "tensor {hf_name} has Safetensors shape {:?}; expected {:?}",
-                view.shape(), spec.hf_shape
+                view.shape(),
+                spec.hf_shape
             )));
         }
         let source_dtype = dtype_to_weight_dtype(view.dtype())?;
@@ -603,12 +599,7 @@ fn build_model_weights(
                 hidden,
                 intermediate,
             )?,
-            up_proj: take_mat(
-                &mut tensors,
-                &format!("{p}.up_proj"),
-                hidden,
-                intermediate,
-            )?,
+            up_proj: take_mat(&mut tensors, &format!("{p}.up_proj"), hidden, intermediate)?,
             down_proj: take_mat(
                 &mut tensors,
                 &format!("{p}.down_proj"),
