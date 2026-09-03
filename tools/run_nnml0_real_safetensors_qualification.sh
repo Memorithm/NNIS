@@ -15,6 +15,13 @@ require_command() {
     fi
 }
 
+require_clean_worktree() {
+    if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+        echo "refusing qualification from a dirty worktree" >&2
+        exit 2
+    fi
+}
+
 require_command git
 require_command cargo
 require_command curl
@@ -22,10 +29,7 @@ require_command sha256sum
 
 cd "$ROOT"
 HEAD_SHA="$(git rev-parse HEAD)"
-if [[ -n "$(git status --porcelain)" ]]; then
-    echo "refusing qualification from a dirty worktree" >&2
-    exit 2
-fi
+require_clean_worktree
 
 mkdir -p "$MODEL_DIR"
 
@@ -44,6 +48,7 @@ download_if_missing() {
 
 download_if_missing config.json
 download_if_missing model.safetensors
+require_clean_worktree
 
 echo "${SOURCE_MODEL_SHA256}  ${MODEL_DIR}/model.safetensors" | sha256sum --check --strict
 
