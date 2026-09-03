@@ -37,6 +37,9 @@ jobs:
           python3 tools/validate_f16_fused_mlp_promotion_evidence.py --self-test
           evidence/r3_f16_fused_mlp_smollm2_thor.json
 
+      - name: Validate NNML0 real-checkpoint evidence contract
+        run: python3 tools/validate_nnml0_real_safetensors_evidence.py --self-test
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
