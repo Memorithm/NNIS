@@ -271,6 +271,14 @@ struct BlockReport {
     cases: Vec<CaseMeasurement>,
 }
 
+struct BlockExecution {
+    model_setup_wall_ms: f64,
+    staged_max_rows: Option<usize>,
+    memory_before: MemorySnapshot,
+    memory_after: MemorySnapshot,
+    cases: Vec<CaseMeasurement>,
+}
+
 #[derive(Debug, Serialize)]
 struct CaseRoundEvidence {
     case_name: String,
@@ -382,10 +390,8 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .map_err(|error| format!("invalid --device: {error}"))?;
             }
             "--rounds" => {
-                rounds = positive_usize(
-                    "--rounds",
-                    args.next().ok_or("--rounds requires a value")?,
-                )?;
+                rounds =
+                    positive_usize("--rounds", args.next().ok_or("--rounds requires a value")?)?;
             }
             "--warmups" => {
                 warmups = positive_usize(
@@ -615,13 +621,7 @@ fn run_block(
     slot: &'static str,
     reverse_cases: bool,
 ) -> BlockReport {
-    let result = (|| -> Result<(
-        f64,
-        Option<usize>,
-        MemorySnapshot,
-        MemorySnapshot,
-        Vec<CaseMeasurement>,
-    )> {
+    let result = (|| -> Result<BlockExecution> {
         let device = Device::get(arguments.device)?;
         let context = Context::new(&device)?;
         let construction_stream = Stream::new(&context)?;
@@ -680,18 +680,18 @@ fn run_block(
                 Err(error) => cases.push(failed_case(case, error)),
             }
         }
-        Ok((
+        Ok(BlockExecution {
             model_setup_wall_ms,
             staged_max_rows,
             memory_before,
             memory_after,
             cases,
-        ))
+        })
     })();
 
     match result {
-        Ok((model_setup_wall_ms, staged_max_rows, memory_before, memory_after, cases)) => {
-            let success = cases.iter().all(|case| case.success);
+        Ok(execution) => {
+            let success = execution.cases.iter().all(|case| case.success);
             BlockReport {
                 slot,
                 plan_name: plan_name.as_str(),
@@ -701,11 +701,11 @@ fn run_block(
                 } else {
                     Some("one or more cases failed correctness or execution".to_string())
                 },
-                model_setup_wall_ms: Some(model_setup_wall_ms),
-                staged_candidate_max_supported_kv_rows: staged_max_rows,
-                memory_before_model: Some(memory_before),
-                memory_after_model: Some(memory_after),
-                cases,
+                model_setup_wall_ms: Some(execution.model_setup_wall_ms),
+                staged_candidate_max_supported_kv_rows: execution.staged_max_rows,
+                memory_before_model: Some(execution.memory_before),
+                memory_after_model: Some(execution.memory_after),
+                cases: execution.cases,
             }
         }
         Err(error) => BlockReport {
@@ -727,10 +727,7 @@ fn run_block(
 }
 
 fn case_in_block<'a>(block: &'a BlockReport, case_name: &str) -> Option<&'a CaseMeasurement> {
-    block
-        .cases
-        .iter()
-        .find(|case| case.case_name == case_name)
+    block.cases.iter().find(|case| case.case_name == case_name)
 }
 
 fn median_of_metric(case: &CaseMeasurement, metric: &str) -> Option<f64> {
@@ -743,28 +740,22 @@ fn median_of_metric(case: &CaseMeasurement, metric: &str) -> Option<f64> {
     Some(report.statistics.median_ms)
 }
 
-fn paired_metric(
-    blocks: &[BlockReport],
-    case_name: &str,
-    metric: &str,
-) -> Option<(f64, f64, f64)> {
+fn paired_metric(blocks: &[BlockReport], case_name: &str, metric: &str) -> Option<(f64, f64, f64)> {
     if blocks.len() != 4 {
         return None;
     }
     let values: Vec<f64> = blocks
         .iter()
-        .map(|block| case_in_block(block, case_name).and_then(|case| median_of_metric(case, metric)))
+        .map(|block| {
+            case_in_block(block, case_name).and_then(|case| median_of_metric(case, metric))
+        })
         .collect::<Option<Vec<_>>>()?;
     let reference = (values[0] + values[3]) / 2.0;
     let candidate = (values[1] + values[2]) / 2.0;
     if !reference.is_finite() || reference <= 0.0 || !candidate.is_finite() || candidate <= 0.0 {
         return None;
     }
-    Some((
-        reference,
-        candidate,
-        (reference - candidate) / reference,
-    ))
+    Some((reference, candidate, (reference - candidate) / reference))
 }
 
 fn summarize_round(
@@ -809,22 +800,10 @@ fn run(arguments: Arguments) -> Result<MassiveReport> {
         for round in 0..arguments.rounds {
             let reverse_cases = round % 2 == 1;
             let blocks = vec![
-                run_block(
-                    &arguments,
-                    &suite,
-                    PlanName::Reference,
-                    "A1",
-                    reverse_cases,
-                ),
+                run_block(&arguments, &suite, PlanName::Reference, "A1", reverse_cases),
                 run_block(&arguments, &suite, *candidate, "B1", reverse_cases),
                 run_block(&arguments, &suite, *candidate, "B2", reverse_cases),
-                run_block(
-                    &arguments,
-                    &suite,
-                    PlanName::Reference,
-                    "A2",
-                    reverse_cases,
-                ),
+                run_block(&arguments, &suite, PlanName::Reference, "A2", reverse_cases),
             ];
             let case_evidence = summarize_round(*candidate, &blocks, &suite);
             if blocks.iter().any(|block| !block.success)
