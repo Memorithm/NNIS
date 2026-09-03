@@ -216,12 +216,10 @@ fn run(arguments: Arguments) -> Result<Report> {
     let context = Context::new(&device)?;
     let construction_stream = Stream::new(&context)?;
 
-    let (config, weights) = nnis_model::load_model_directory(
-        &context,
-        &construction_stream,
-        &arguments.model_dir,
-    )?;
-    let execution_plan = F16ReferenceExecutionPlan::smollm2_135m_thor_min_latency(&config, &context)?;
+    let (config, weights) =
+        nnis_model::load_model_directory(&context, &construction_stream, &arguments.model_dir)?;
+    let execution_plan =
+        F16ReferenceExecutionPlan::smollm2_135m_thor_min_latency(&config, &context)?;
     let attention_plan = F16AttentionPlan::smollm2_135m_thor_min_latency(&config, &context)?;
     let model = F16ReferenceModel::new_with_execution_and_attention_plan(
         config,
