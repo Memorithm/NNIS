@@ -191,7 +191,10 @@ fn write_evidence(path: &Path, evidence: &QualificationEvidence) -> Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|error| {
-                NnisError::io(format!("create evidence directory {}", parent.display()), error)
+                NnisError::io(
+                    format!("create evidence directory {}", parent.display()),
+                    error,
+                )
             })?;
         }
     }
