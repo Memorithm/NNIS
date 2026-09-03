@@ -125,7 +125,11 @@ impl ModelConfig {
     }
 }
 
-/// Deterministic generation policy. Sampling is intentionally not exposed yet.
+/// Strategy-neutral generation length and optional EOS envelope.
+///
+/// Token selection is owned by the caller: [`crate::InferenceSession::generate`]
+/// uses greedy top-1 while [`crate::InferenceSession::generate_sampled`] uses a
+/// [`crate::SamplingConfig`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GenerationConfig {
     pub max_new_tokens: usize,
@@ -133,33 +137,44 @@ pub struct GenerationConfig {
 }
 
 impl GenerationConfig {
-    /// Fixed-length greedy generation. This preserves the fully
-    /// device-resident generation graph and does not stop on EOS.
-    pub const fn greedy(max_new_tokens: usize) -> Self {
+    /// Fixed-length generation without EOS termination.
+    pub const fn fixed(max_new_tokens: usize) -> Self {
         Self {
             max_new_tokens,
             eos_token_id: None,
         }
     }
 
-    /// Greedy generation that stops after producing `eos_token_id`.
-    ///
-    /// EOS-aware generation deliberately introduces one host-visible
-    /// token observation per step so the session can stop submitting
-    /// decoder work once the termination token has been produced.
-    pub const fn greedy_until_eos(max_new_tokens: usize, eos_token_id: u32) -> Self {
+    /// Generation that stops after producing `eos_token_id`.
+    pub const fn until_eos(max_new_tokens: usize, eos_token_id: u32) -> Self {
         Self {
             max_new_tokens,
             eos_token_id: Some(eos_token_id),
         }
     }
 
+    /// Backward-compatible name for fixed-length greedy generation.
+    ///
+    /// Prefer [`Self::fixed`] when the same envelope is used with a sampling
+    /// strategy.
+    pub const fn greedy(max_new_tokens: usize) -> Self {
+        Self::fixed(max_new_tokens)
+    }
+
+    /// Backward-compatible name for EOS-aware greedy generation.
+    ///
+    /// Prefer [`Self::until_eos`] when the same envelope is used with a
+    /// sampling strategy.
+    pub const fn greedy_until_eos(max_new_tokens: usize, eos_token_id: u32) -> Self {
+        Self::until_eos(max_new_tokens, eos_token_id)
+    }
+
     pub fn validate(&self, vocab_size: usize) -> Result<()> {
         if let Some(eos_token_id) = self.eos_token_id {
             if eos_token_id as usize >= vocab_size {
                 return Err(NnisError::invalid_input(format!(
-"generation eos_token_id {eos_token_id} is out of range for vocabulary {vocab_size}"
-      )));
+                    "generation eos_token_id {eos_token_id} is out of range for vocabulary {vocab_size}"
+                )));
             }
         }
         Ok(())
@@ -229,8 +244,17 @@ mod tests {
         config.eos_token_id = Some(32_000);
         assert!(config.validate().is_err());
 
-        assert!(GenerationConfig::greedy_until_eos(4, 32_000)
+        assert!(GenerationConfig::until_eos(4, 32_000)
             .validate(32_000)
             .is_err());
+    }
+
+    #[test]
+    fn strategy_neutral_generation_aliases_preserve_greedy_contracts() {
+        assert_eq!(GenerationConfig::fixed(7), GenerationConfig::greedy(7));
+        assert_eq!(
+            GenerationConfig::until_eos(7, 2),
+            GenerationConfig::greedy_until_eos(7, 2)
+        );
     }
 }
