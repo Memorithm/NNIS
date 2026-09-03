@@ -13,6 +13,7 @@ on:
       - "crates/nnis-bench/examples/cached_attention_parallel_value.rs"
       - "crates/nnis-bench/examples/smollm2_f16_attention_parallel_score_matrix.rs"
       - "crates/nnis-bench/examples/smollm2_f16_attention_parallel_score_qualification.rs"
+      - "crates/nnis-bench/examples/smollm2_f16_qualified_min_latency_e2e.rs"
       - "tools/bench_smollm2_transformers.py"
       - "tools/run_w1_lm_head_bf16_sweep.py"
       - "tools/run_w1_e2e_abba.py"
@@ -57,6 +58,7 @@ jobs:
           cargo check --locked -p nnis-bench --example cached_attention_parallel_value
           cargo check --locked -p nnis-bench --example smollm2_f16_attention_parallel_score_matrix
           cargo check --locked -p nnis-bench --example smollm2_f16_attention_parallel_score_qualification
+          cargo check --locked -p nnis-bench --example smollm2_f16_qualified_min_latency_e2e
 
       - name: Clippy NNIS benchmark examples
         run: |
@@ -67,6 +69,7 @@ jobs:
           cargo clippy --locked -p nnis-bench --example cached_attention_parallel_value -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_f16_attention_parallel_score_matrix -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_f16_attention_parallel_score_qualification -- -D warnings
+          cargo clippy --locked -p nnis-bench --example smollm2_f16_qualified_min_latency_e2e -- -D warnings
 
       - name: Validate benchmark Python harnesses
         run: |
