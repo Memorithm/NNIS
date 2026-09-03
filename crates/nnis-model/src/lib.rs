@@ -11,10 +11,12 @@ mod format;
 mod fused_swiglu;
 mod fusion_plan;
 mod kernels;
+mod parallel_score_attention;
 mod projection_plan;
 mod representation_plan;
 mod runtime;
 mod runtime_kernels;
+mod safetensors_loader;
 mod weights;
 
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
@@ -27,6 +29,7 @@ pub use format::{
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
 pub use kernels::F32DecoderKernels;
+pub use parallel_score_attention::F32CachedAttentionDecodeParallelScore;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
 pub use representation_plan::{
     load_model_directory_with_representation_plan, PhysicalWeightRepresentation,
@@ -35,3 +38,4 @@ pub use representation_plan::{
 pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
 pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
+pub use safetensors_loader::{load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata};

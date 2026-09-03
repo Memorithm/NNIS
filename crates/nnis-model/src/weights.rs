@@ -3,7 +3,7 @@ use nnis_rt::{Context, DeviceBuffer, NnisError, Result};
 use std::sync::Arc;
 
 /// Device-resident tensor storage in the numeric formats NNIS currently owns.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DeviceTensor {
     F32(Arc<DeviceBuffer<f32>>),
     Bf16(Arc<DeviceBuffer<u16>>),
