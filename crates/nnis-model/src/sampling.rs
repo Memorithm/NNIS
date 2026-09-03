@@ -1,3 +1,4 @@
+use crate::{GenerationConfig, InferenceSession};
 use nnis_rt::{NnisError, Result};
 use std::cmp::Ordering;
 
@@ -6,11 +7,11 @@ pub const NNIS_SAMPLING_POLICY_VERSION: u32 = 1;
 
 /// Reproducible host-side sampling policy for decoder logits.
 ///
-/// The filters are applied in this order:
-/// 1. temperature scaling,
-/// 2. top-k truncation by descending logit with lower token IDs winning ties,
-/// 3. top-p (nucleus) truncation over the remaining normalized probabilities,
-/// 4. one SplitMix64 draw from the retained distribution.
+/// Positive-temperature scaling preserves logit rank, so top-k candidates are
+/// selected by the original descending logits, with lower token IDs winning
+/// ties. Temperature-scaled softmax weights are then computed over that set,
+/// top-p (nucleus) truncation is applied to the normalized ordering, and one
+/// SplitMix64 draw selects the retained token.
 ///
 /// Sampling is intentionally host-visible in NNML1. Moving candidate selection
 /// and RNG fully onto the device belongs to NNML2 and must not be inferred from
@@ -197,6 +198,60 @@ impl HostLogitSampler {
             .last()
             .map(|candidate| candidate.token)
             .ok_or_else(|| NnisError::invalid_input("sampling retained no candidates"))
+    }
+}
+
+impl<'model> InferenceSession<'model> {
+    /// Seeded top-k/top-p/temperature generation through NNIS.
+    ///
+    /// This NNML1 correctness path is deliberately host-visible: `prefill` and
+    /// every `decode_one` return the full vocabulary logits to the host, where
+    /// the frozen sampler above chooses the next token. The sampled token is
+    /// then copied back to the device for the next decoder step. The existing
+    /// greedy [`InferenceSession::generate`] path is unchanged and retains its
+    /// device-resident fixed-length behavior.
+    ///
+    /// NNML2, not this API, owns any future claim that sampling avoids those
+    /// full-logit host roundtrips.
+    pub fn generate_sampled(
+        &mut self,
+        input_ids: &[u32],
+        generation: GenerationConfig,
+        sampling: SamplingConfig,
+    ) -> Result<Vec<u32>> {
+        let required_positions = input_ids
+            .len()
+            .checked_add(generation.max_new_tokens)
+            .ok_or_else(|| {
+                NnisError::invalid_input("prompt + sampled generation length overflows usize")
+            })?;
+        if required_positions > self.capacity() {
+            return Err(NnisError::invalid_input(format!(
+                "prompt + sampled generation requires {required_positions} positions; session capacity is {}",
+                self.capacity()
+            )));
+        }
+
+        // Prefill is also the first trustworthy source of this session's real
+        // vocabulary width without exposing private model internals here.
+        let mut logits = self.prefill(input_ids)?;
+        generation.validate(logits.len())?;
+        let mut sampler = HostLogitSampler::new(sampling, logits.len())?;
+        let mut generated = Vec::with_capacity(generation.max_new_tokens);
+
+        for _ in 0..generation.max_new_tokens {
+            let token = sampler.sample(&logits)?;
+            generated.push(token);
+
+            // Execute every emitted token, including EOS and the final token,
+            // so session.position()/KV state remain ready for continuation in
+            // the same way as NNIS's existing greedy generation path.
+            logits = self.decode_one(token)?;
+            if generation.eos_token_id == Some(token) {
+                break;
+            }
+        }
+        Ok(generated)
     }
 }
 
