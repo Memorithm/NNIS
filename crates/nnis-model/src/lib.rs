@@ -26,6 +26,7 @@ mod projection_plan;
 mod representation_plan;
 mod runtime;
 mod runtime_kernels;
+mod safetensors_loader;
 mod weighted_rmsnorm_candidate;
 mod weights;
 
@@ -77,5 +78,6 @@ pub use representation_plan::{
 };
 pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
+pub use safetensors_loader::{load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata};
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
