@@ -22,7 +22,7 @@ require_command sha256sum
 
 cd "$ROOT"
 HEAD_SHA="$(git rev-parse HEAD)"
-if ! git diff --quiet || ! git diff --cached --quiet; then
+if [[ -n "$(git status --porcelain)" ]]; then
     echo "refusing qualification from a dirty worktree" >&2
     exit 2
 fi
