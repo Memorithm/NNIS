@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODEL_DIR="${1:-/tmp/nnis-nnml0-smollm2-135m}"
+EVIDENCE_PATH="${2:-/tmp/nnis-nnml0-real-safetensors-evidence.json}"
 SOURCE_REPO="HuggingFaceTB/SmolLM2-135M"
 SOURCE_REVISION="93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
 SOURCE_MODEL_SHA256="80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1"
@@ -51,12 +52,23 @@ download_if_missing model.safetensors
 require_clean_worktree
 
 echo "${SOURCE_MODEL_SHA256}  ${MODEL_DIR}/model.safetensors" | sha256sum --check --strict
+rm -f "$EVIDENCE_PATH"
 
 echo "NNIS_HEAD=${HEAD_SHA}"
 echo "SOURCE=${SOURCE_REPO}@${SOURCE_REVISION}"
 echo "MODEL_DIR=${MODEL_DIR}"
+echo "EVIDENCE_PATH=${EVIDENCE_PATH}"
 if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia-smi || true
 fi
 
-cargo run --locked -p nnis-model --example nnml0_real_safetensors -- --model "$MODEL_DIR"
+cargo run --locked -p nnis-model --example nnml0_real_safetensors -- \
+    --model "$MODEL_DIR" \
+    --evidence "$EVIDENCE_PATH"
+
+if [[ ! -s "$EVIDENCE_PATH" ]]; then
+    echo "qualification completed without non-empty evidence: $EVIDENCE_PATH" >&2
+    exit 1
+fi
+
+echo "NNML0_EVIDENCE_PATH=${EVIDENCE_PATH}"
