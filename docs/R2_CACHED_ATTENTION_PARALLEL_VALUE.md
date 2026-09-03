@@ -1,9 +1,11 @@
-# R2 cached-attention parallel-value candidate
+# R2 cached-attention parallel-value plan
 
 R2 has a full-model CUDA profile for the promoted E1.1 parent on the physical
 Jetson AGX Thor. That evidence made cached attention a measured target rather
-than a speculative fusion, and physical isolated gates now qualify the
-parallel-value candidate for an explicit end-to-end ABBA test.
+than a speculative fusion. The parallel-value implementation subsequently
+passed both isolated and end-to-end physical gates and is now promoted for
+`MinLatency` as an **explicit plan**. The historical serial path remains the
+runtime default and correctness oracle.
 
 ## Nsight Systems evidence
 
@@ -44,7 +46,7 @@ benchmark because Nsight instrumentation is active.
 
 ## Structural problem
 
-The current correctness-first cached-attention kernel launches one block per
+The historical correctness-first cached-attention kernel launches one block per
 query head with a block size of **one thread**. For SmolLM2 that means nine CUDA
 threads total per layer. Each thread serially performs:
 
@@ -55,7 +57,7 @@ threads total per layer. Each thread serially performs:
 The value/output components are independent once the scalar softmax weights for
 a position are known.
 
-## Candidate
+## Parallel-value implementation
 
 `F32CachedAttentionDecodeParallelValue` keeps lane zero as the sole owner of the
 score and online-softmax chain, preserving the same increasing-dimension score
@@ -63,7 +65,7 @@ FMA order and the same increasing-position softmax order. A 64-thread block then
 updates the 64 independent value/output components in parallel, with a barrier
 before advancing to the next KV position.
 
-The candidate intentionally does **not**:
+The implementation intentionally does **not**:
 
 - parallel-reduce the query/key dot product;
 - reassociate the score FMA chain;
@@ -95,7 +97,7 @@ This is isolated evidence only, not an end-to-end speed claim.
 
 The same fail-closed deterministic fixture was then evaluated across the active
 prefix lengths below. Every tested case remained bitwise equal, and the
-parallel-value candidate was faster at every tested length.
+parallel-value path was faster at every tested length.
 
 | KV rows | Reference median (ms) | Candidate median (ms) | Ref/candidate speed ratio |
 | ---: | ---: | ---: | ---: |
@@ -107,17 +109,54 @@ parallel-value candidate was faster at every tested length.
 | 24 | 0.13312000036239624 | 0.05777600035071373 | 2.3040708867752517 |
 | 35 | 0.19041600078344345 | 0.08188799768686295 | 2.325322466811169 |
 
-No threshold is therefore introduced into the candidate plan. The physically
-qualified geometry is simply 64 threads per query head, and runtime integration
-fails closed if a model head dimension differs from 64.
+No threshold is therefore introduced into the plan. The physically qualified
+geometry is simply 64 threads per query head, and runtime integration fails
+closed if a model head dimension differs from 64.
+
+## End-to-end ABBA gate and promotion
+
+Exact integration head and physical gate head:
+`befc70790485385bce81b33eb4956fc7de3984f9`.
+
+Run context: `r2-attention-e2e-20260831T204137Z`.
+
+Two A/B/B/A rounds used the pinned SmolLM2 checkpoint, 32 greedy decode steps,
+2 warmups and 5 measured iterations per run. A and B were identical except for
+the explicit attention axis:
+
+- A: E1.1 all-f32 LM-head GEMV64 + serial cached attention;
+- B: E1.1 all-f32 LM-head GEMV64 + parallel-value64 cached attention.
+
+Measured aggregate result:
+
+- parent generation median: `688.191749 ms`;
+- parallel-value generation median: `597.418587 ms`;
+- generation latency reduction: `13.190097401182288%`;
+- generation throughput gain: `15.19423131038271%`;
+- parent request median: `692.670355 ms`;
+- parallel-value request median: `601.6822599999999 ms`;
+- request latency reduction: `13.135843672709224%`;
+- request throughput gain: `15.1222831465897%`;
+- all four candidate generation medians were below all four parent medians;
+- minimum parent minus maximum candidate generation separation: `86.597579 ms`;
+- complete greedy trajectory: identical;
+- environment fingerprint: compatible;
+- tracked worktree: clean.
+
+This is a credible end-to-end improvement relative to the observed ABBA
+variation. The plan is therefore **promoted for `MinLatency`** in the sovereignty
+roadmap.
 
 ## Explicit plan boundary
 
-The next-stage integration uses a separate `F32AttentionPlan` v1 axis. Existing
-constructors retain baseline serial attention. Only the new all-execution-plan
-constructors can opt into `r2_parallel_value_candidate()`.
+`F32AttentionPlan` v1 remains a separate execution-policy axis. Existing
+constructors retain baseline serial attention. Callers must explicitly select
+the 64-thread parallel-value plan; this promotion does not silently change the
+global runtime default.
 
-This isolated sweep justifies an end-to-end gate; it does **not** justify
-promotion by itself. MinLatency promotion still requires fingerprint-compatible
-ABBA evidence with an unchanged greedy trajectory and a credible margin relative
-to end-to-end variation.
+The existing constructor name `r2_parallel_value_candidate()` is retained for
+API/schema compatibility. Its name does not override the evidence-backed
+promotion state recorded by the roadmap and this document.
+
+No memory saving is claimed. The launch count is unchanged; the improvement is
+from intra-block parallelism on the physically qualified `head_dim=64` path.

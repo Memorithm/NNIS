@@ -15,3 +15,4 @@ serde_json = { workspace = true }
 safetensors = "0.5"
 hf-hub = { version = "0.4", features = ["rustls-tls", "tokio"] }
 tokio = { version = "1", features = ["rt", "macros"] }
+sha2 = { workspace = true }

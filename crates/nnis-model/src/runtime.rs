@@ -1054,7 +1054,7 @@ impl<'model> InferenceSession<'model> {
     }
 }
 
-fn build_rope_cache(config: &ModelConfig) -> Result<(Vec<f32>, Vec<f32>)> {
+pub(crate) fn build_rope_cache(config: &ModelConfig) -> Result<(Vec<f32>, Vec<f32>)> {
     let half = config.head_dim() / 2;
     let elements = config
         .max_position_embeddings

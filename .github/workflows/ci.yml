@@ -17,6 +17,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate external reference evidence
+        run: >-
+          python3 tools/validate_external_reference_evidence.py --self-test
+          evidence/r1_tensorrt_edge_llm_v0_10_0_smollm2_thor.json
+
+      - name: Validate NNIS F16 campaign evidence
+        run: >-
+          python3 tools/validate_nnis_f16_campaign_evidence.py --self-test
+          evidence/r1_nnis_f16_smollm2_thor.json
+
+      - name: Validate direct Edge vs NNIS F16 evidence
+        run: >-
+          python3 tools/validate_r1_direct_edge_vs_nnis_f16.py --self-test
+          evidence/r1_direct_edge_vs_nnis_f16_smollm2_thor.json
+
+      - name: Validate fused MLP promotion evidence
+        run: >-
+          python3 tools/validate_f16_fused_mlp_promotion_evidence.py --self-test
+          evidence/r3_f16_fused_mlp_smollm2_thor.json
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 

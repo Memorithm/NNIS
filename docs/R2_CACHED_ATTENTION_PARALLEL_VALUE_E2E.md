@@ -23,8 +23,8 @@ B, candidate:
 - fusion: identical baseline;
 - attention: parallel-value cached decode with 64 threads/query-head.
 
-The default runtime remains A unless a caller explicitly supplies the candidate
-attention plan.
+The default runtime remains A unless a caller explicitly supplies the
+parallel-value attention plan.
 
 ## Physical prerequisites
 
@@ -39,9 +39,9 @@ Run on the same physical Thor regime used for qualifying R2 evidence:
 - no competing CUDA workload;
 - same MAXN/fixed-clock regime across all A/B runs.
 
-The candidate has already passed isolated bitwise-equality gates at KV rows
-`1, 2, 4, 8, 16, 24, 35` and was faster at every tested length. This is only the
-entry condition for end-to-end measurement.
+The candidate already passed isolated bitwise-equality gates at KV rows
+`1, 2, 4, 8, 16, 24, 35` and was faster at every tested length. This was only
+the entry condition for end-to-end measurement.
 
 ## ABBA driver
 
@@ -90,3 +90,34 @@ A positive aggregate median alone is not sufficient. The summary reports both
 
 No memory saving is claimed by this kernel substitution. The launch count is
 unchanged; this candidate changes intra-block parallelism only.
+
+## Physical result — 2026-08-31
+
+The gate completed on exact head
+`befc70790485385bce81b33eb4956fc7de3984f9` with run context
+`r2-attention-e2e-20260831T204137Z` on NVIDIA Jetson AGX Thor in the fixed MAXN
+regime.
+
+Across two complete A/B/B/A rounds:
+
+| Metric | Parent A | Parallel-value B |
+| --- | ---: | ---: |
+| Generation median across ABBA | `688.191749 ms` | `597.418587 ms` |
+| Request median across ABBA | `692.670355 ms` | `601.6822599999999 ms` |
+
+Derived evidence:
+
+- generation latency reduction: `13.190097401182288%`;
+- generation throughput gain: `15.19423131038271%`;
+- request latency reduction: `13.135843672709224%`;
+- request throughput gain: `15.1222831465897%`;
+- all four candidate generation medians were below all four parent medians;
+- minimum parent minus maximum candidate generation separation: `86.597579 ms`;
+- complete greedy trajectory: identical;
+- fingerprint compatibility: passed;
+- tracked worktree: clean.
+
+The result is large relative to the observed ABBA variation and satisfies the
+roadmap's `MinLatency` rule. `parallel_value64` is therefore recorded as a
+**promoted explicit plan**. The serial attention path remains the default and
+correctness oracle; no memory improvement is claimed.

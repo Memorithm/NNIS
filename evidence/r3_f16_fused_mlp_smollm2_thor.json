@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "nnis_f16_smollm2_thor_min_latency_promotion_evidence",
+  "qualification": "scoped_min_latency_plan_qualified_for_pinned_smollm2_135m_on_nvidia_thor",
+  "runtime_commit": "4101b8924f1e5400a7871259b9c1b732ae3c77bb",
+  "tooling_commit": "8d0720244a10624d3a75709700f9686e408ae2b8",
+  "candidate_plan": "nk_transposed_fused_mlp_candidate",
+  "parent_plan": "nk_transposed_fused_groups_candidate",
+  "hardware": {
+    "gpu_name": "NVIDIA Thor",
+    "compute_capability": "11.0",
+    "multiprocessor_count": 20
+  },
+  "model": {
+    "source_repo": "HuggingFaceTB/SmolLM2-135M",
+    "source_revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
+    "source_model_sha256": "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1",
+    "hidden_size": 576,
+    "intermediate_size": 1536,
+    "layers": 30
+  },
+  "metric": {
+    "name": "generation_stage_gpu",
+    "generated_tokens": 32,
+    "generation_forward_runs": 31,
+    "warmups_per_report": 2,
+    "iterations_per_report": 5,
+    "rounds_per_campaign": 8,
+    "minimum_median_paired_improvement": 0.03
+  },
+  "runs": [
+    {
+      "name": "KA13",
+      "run_context_id": "ka13-fused-mlp-e2e-abba-thor-20260902T135026Z",
+      "rounds": 8,
+      "candidate_round_wins": 8,
+      "parent_round_wins": 0,
+      "ties": 0,
+      "median_fused_generation_gpu_ms": 237.52739310264587,
+      "median_fused_mlp_generation_gpu_ms": 218.83888053894043,
+      "median_paired_relative_improvement": 0.07689380922830358,
+      "mean_paired_relative_improvement": 0.0783718850778209,
+      "min_paired_relative_improvement": 0.05013859156747926,
+      "max_paired_relative_improvement": 0.1036766996786688,
+      "pairs": [
+        {"round": 0, "order": "fused_then_fused_mlp", "fused_median_ms": 239.35676860809326, "fused_mlp_median_ms": 220.05212926864624, "paired_relative_improvement": 0.0806521555739046},
+        {"round": 1, "order": "fused_mlp_then_fused", "fused_median_ms": 238.97491216659546, "fused_mlp_median_ms": 214.1987819671631, "paired_relative_improvement": 0.1036766996786688},
+        {"round": 2, "order": "fused_then_fused_mlp", "fused_median_ms": 235.49567937850952, "fused_mlp_median_ms": 223.68825769424438, "paired_relative_improvement": 0.05013859156747926},
+        {"round": 3, "order": "fused_mlp_then_fused", "fused_median_ms": 238.4047989845276, "fused_mlp_median_ms": 215.86214399337769, "paired_relative_improvement": 0.09455621316000823},
+        {"round": 4, "order": "fused_then_fused_mlp", "fused_median_ms": 237.13129663467407, "fused_mlp_median_ms": 220.0052785873413, "paired_relative_improvement": 0.07222166913596906},
+        {"round": 5, "order": "fused_mlp_then_fused", "fused_median_ms": 237.92348957061768, "fused_mlp_median_ms": 218.5408959388733, "paired_relative_improvement": 0.08146565800091575},
+        {"round": 6, "order": "fused_then_fused_mlp", "fused_median_ms": 235.91734266281128, "fused_mlp_median_ms": 219.13686513900757, "paired_relative_improvement": 0.07112863062291899},
+        {"round": 7, "order": "fused_mlp_then_fused", "fused_median_ms": 234.8763508796692, "fused_mlp_median_ms": 217.69856023788452, "paired_relative_improvement": 0.07313546288270256}
+      ]
+    },
+    {
+      "name": "KA14",
+      "run_context_id": "ka14-fused-mlp-e2e-abba-thor-20260902T140643Z",
+      "rounds": 8,
+      "candidate_round_wins": 8,
+      "parent_round_wins": 0,
+      "ties": 0,
+      "median_fused_generation_gpu_ms": 237.00433492660522,
+      "median_fused_mlp_generation_gpu_ms": 218.09374356269836,
+      "median_paired_relative_improvement": 0.07846419374260727,
+      "mean_paired_relative_improvement": 0.07971066472366228,
+      "min_paired_relative_improvement": 0.050357020875372034,
+      "max_paired_relative_improvement": 0.11949790166638688,
+      "pairs": [
+        {"round": 0, "order": "fused_then_fused_mlp", "fused_median_ms": 232.57801580429077, "fused_mlp_median_ms": 220.8660798072815, "paired_relative_improvement": 0.050357020875372034},
+        {"round": 1, "order": "fused_mlp_then_fused", "fused_median_ms": 236.90124559402466, "fused_mlp_median_ms": 217.351327419281, "paired_relative_improvement": 0.08252349254526992},
+        {"round": 2, "order": "fused_then_fused_mlp", "fused_median_ms": 241.3694076538086, "fused_mlp_median_ms": 212.52626991271973, "paired_relative_improvement": 0.11949790166638688},
+        {"round": 3, "order": "fused_mlp_then_fused", "fused_median_ms": 237.11945629119873, "fused_mlp_median_ms": 214.79587125778198, "paired_relative_improvement": 0.0941448895952337},
+        {"round": 4, "order": "fused_then_fused_mlp", "fused_median_ms": 232.77241563796997, "fused_mlp_median_ms": 218.83615970611572, "paired_relative_improvement": 0.05987073637423281},
+        {"round": 5, "order": "fused_mlp_then_fused", "fused_median_ms": 236.066752910614, "fused_mlp_median_ms": 219.53574419021606, "paired_relative_improvement": 0.07002683993648766},
+        {"round": 6, "order": "fused_then_fused_mlp", "fused_median_ms": 237.1074242591858, "fused_mlp_median_ms": 219.4654712677002, "paired_relative_improvement": 0.07440489493994462},
+        {"round": 7, "order": "fused_mlp_then_fused", "fused_median_ms": 237.91606426239014, "fused_mlp_median_ms": 217.2507839202881, "paired_relative_improvement": 0.08685954185637067}
+      ]
+    }
+  ],
+  "consensus": {
+    "independent_run_count": 2,
+    "all_pairs_positive_in_all_runs": true,
+    "semantic_gate_passed_in_all_runs": true,
+    "environment_compatible_across_runs": true,
+    "median_paired_relative_improvement_across_runs": 0.07767900148545542,
+    "minimum_run_median_paired_relative_improvement": 0.07689380922830358,
+    "promotion_state": "eligible_for_scoped_explicit_min_latency_plan"
+  },
+  "claim_boundary": {
+    "generic_default_changed": false,
+    "cross_device_portability_claimed": false,
+    "other_model_speedup_claimed": false,
+    "attention_staged_promoted": false,
+    "raw_report_validation": "Each campaign was recomputed from raw per-report GPU samples by tools/run_f16_fused_mlp_e2e_abba.py before this summary was published."
+  }
+}
