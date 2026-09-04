@@ -148,7 +148,7 @@ def tensor_entry(name: str, tensor: torch.Tensor, file_name: str) -> dict:
     }
 
 
-def convert_weights(checkpoint: Path, output: Path) -> None:
+def convert_weights(checkpoint: Path, output: Path, tokenizer_sha256: str) -> None:
     config = json.loads((checkpoint / "config.json").read_text())
     check_source_config(config)
     source = load_file(str(checkpoint / "model.safetensors"), device="cpu")
@@ -232,6 +232,7 @@ def convert_weights(checkpoint: Path, output: Path) -> None:
         "source_model_sha256": MODEL_SHA256,
         "source_weight_dtype": "bfloat16",
         "execution_weight_dtype": "f32",
+        "tokenizer_sha256": tokenizer_sha256,
         "tied_lm_head_materialized": True,
         "converter": Path(__file__).name,
         "transformers_version": transformers.__version__,
@@ -244,6 +245,7 @@ def reference_logits(
     output: Path,
     prompt: str,
     decode_steps: int,
+    tokenizer_sha256: str,
 ) -> None:
     tokenizer = AutoTokenizer.from_pretrained(checkpoint, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(
@@ -276,6 +278,7 @@ def reference_logits(
         "transformers_version": transformers.__version__,
         "source_weight_dtype": "bfloat16",
         "execution_weight_dtype": "f32",
+        "tokenizer_sha256": tokenizer_sha256,
         "prompt": prompt,
         "input_ids": input_ids[0].tolist(),
         "decode_steps": decode_steps,
@@ -327,13 +330,17 @@ def main() -> None:
     args.output.mkdir(parents=True, exist_ok=True)
     tokenizer_file = args.output / "tokenizer.json"
     shutil.copy2(checkpoint / "tokenizer.json", tokenizer_file)
+    tokenizer_digest = sha256(tokenizer_file)
     model_dir = args.output / "model"
     reference_dir = args.output / "reference"
-    convert_weights(checkpoint, model_dir)
+    convert_weights(checkpoint, model_dir, tokenizer_digest)
     gc.collect()
-    reference_logits(checkpoint, reference_dir, args.prompt, args.decode_steps)
+    reference_logits(
+        checkpoint, reference_dir, args.prompt, args.decode_steps, tokenizer_digest
+    )
     print(f"checkpoint={REPO_ID}@{REVISION}")
     print(f"transformers={transformers.__version__}")
+    print(f"tokenizer_sha256={tokenizer_digest}")
     print(f"model_dir={model_dir}")
     print(f"tokenizer_file={tokenizer_file}")
     print(f"reference_dir={reference_dir}")
