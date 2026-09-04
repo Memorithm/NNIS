@@ -1,14 +1,18 @@
 use nnis_model::{GenerationConfig, Model};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const SOURCE_REPO: &str = "HuggingFaceTB/SmolLM2-135M";
 const SOURCE_REVISION: &str = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2";
 const SOURCE_MODEL_SHA256: &str =
     "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1";
+const CHECKPOINT_SPEC_NAME: &str = "smollm2-135m-bf16";
+const CHECKPOINT_SPEC_VERSION: u32 = 1;
+const NNML1_PARITY_RECORD_KIND: &str = "nnis-nnml1-reference-parity-record-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LogitPolicy {
@@ -42,6 +46,7 @@ struct ReferenceManifest {
     source_repo: String,
     source_revision: String,
     source_model_sha256: String,
+    tokenizer_sha256: String,
     transformers_version: String,
     source_weight_dtype: String,
     execution_weight_dtype: String,
@@ -60,9 +65,10 @@ struct Arguments {
     atol: f32,
     rtol: f32,
     logit_policy: LogitPolicy,
+    evidence_json: Option<PathBuf>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize)]
 struct ErrorMetrics {
     max_abs: f32,
     max_rel: f32,
@@ -70,6 +76,55 @@ struct ErrorMetrics {
     worst_index: usize,
     failures: usize,
     non_finite: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SemanticEvidence {
+    case_count: usize,
+    observations: usize,
+    exact_greedy_observations: usize,
+    exact_greedy_all: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct LogitEvidence {
+    atol: f32,
+    rtol: f32,
+    stages: usize,
+    failures: usize,
+    non_finite: usize,
+    max_abs: f32,
+    max_rms: f64,
+    strict_tolerance_asserted: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct SourceEvidence {
+    kind: &'static str,
+    artifact: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ParityRecord {
+    schema_version: u32,
+    kind: &'static str,
+    checkpoint_spec_name: &'static str,
+    checkpoint_spec_version: u32,
+    source_repo: String,
+    source_revision: String,
+    source_model_sha256: String,
+    tokenizer_sha256: String,
+    reference_runtime: &'static str,
+    reference_runtime_version: String,
+    execution_git_commit: String,
+    execution_git_dirty: bool,
+    execution_backend: &'static str,
+    parity_level: &'static str,
+    semantic: SemanticEvidence,
+    logits: Option<LogitEvidence>,
+    source_evidence: SourceEvidence,
+    promotion_authorized: bool,
+    claim_boundary: &'static str,
 }
 
 fn parse_arguments() -> std::result::Result<Arguments, String> {
@@ -81,6 +136,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     let mut atol = 1.0e-4_f32;
     let mut rtol = 1.0e-3_f32;
     let mut logit_policy = LogitPolicy::Strict;
+    let mut evidence_json = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--model" => {
@@ -114,9 +170,14 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                         .ok_or("--logit-policy requires strict or report")?,
                 )?;
             }
+            "--evidence-json" => {
+                evidence_json = Some(PathBuf::from(
+                    args.next().ok_or("--evidence-json requires a path")?,
+                ));
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32] [--logit-policy strict|report]"
+                    "usage: compare_smollm2_135m --model DIR --reference DIR [--atol F32] [--rtol F32] [--logit-policy strict|report] [--evidence-json PATH]"
                         .to_string(),
                 );
             }
@@ -132,6 +193,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
         atol,
         rtol,
         logit_policy,
+        evidence_json,
     })
 }
 
@@ -168,6 +230,16 @@ fn read_reference_manifest(directory: &Path) -> Result<ReferenceManifest> {
             manifest.execution_weight_dtype,
             manifest.dtype
         )));
+    }
+    if manifest.tokenizer_sha256.len() != 64
+        || !manifest
+            .tokenizer_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(NnisError::invalid_input(
+            "reference tokenizer_sha256 is not a lowercase 64-hex digest",
+        ));
     }
     if manifest.logit_files.len() != manifest.decode_steps + 1 {
         return Err(NnisError::invalid_input(format!(
@@ -266,7 +338,7 @@ fn report_and_require(
     atol: f32,
     rtol: f32,
     logit_policy: LogitPolicy,
-) -> Result<()> {
+) -> Result<ErrorMetrics> {
     let metrics = compare(actual, expected, atol, rtol);
     println!(
         "{label}: max_abs={:.8e} max_rel={:.8e} rms={:.8e} worst_index={} failures={}",
@@ -290,7 +362,7 @@ fn report_and_require(
             metrics.failures
         );
     }
-    Ok(())
+    Ok(metrics)
 }
 
 fn require_greedy(step: usize, logits: &[f32], expected: u32) -> Result<()> {
@@ -323,6 +395,123 @@ fn validate_model_shape(model: &Model) -> Result<()> {
     Ok(())
 }
 
+fn git_output(arguments: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(arguments)
+        .output()
+        .map_err(|error| NnisError::io("run git for evidence identity", error))?;
+    if !output.status.success() {
+        return Err(NnisError::invalid_input(format!(
+            "git command failed while binding evidence identity: {:?}",
+            arguments
+        )));
+    }
+    String::from_utf8(output.stdout)
+        .map(|value| value.trim().to_string())
+        .map_err(|error| NnisError::invalid_input(format!("git output was not UTF-8: {error}")))
+}
+
+fn repository_identity() -> Result<(String, bool)> {
+    let head = git_output(&["rev-parse", "HEAD"])?;
+    if head.len() != 40
+        || !head
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(NnisError::invalid_input(format!(
+            "git HEAD is not a lowercase 40-hex commit: {head:?}"
+        )));
+    }
+    let status = git_output(&["status", "--porcelain", "--untracked-files=no"])?;
+    Ok((head, !status.is_empty()))
+}
+
+fn write_parity_evidence(
+    path: &Path,
+    arguments: &Arguments,
+    reference: &ReferenceManifest,
+    stage_metrics: &[ErrorMetrics],
+) -> Result<()> {
+    let (git_commit, dirty) = repository_identity()?;
+    if dirty {
+        return Err(NnisError::invalid_input(
+            "tracked worktree is dirty; refusing to emit qualifying parity evidence",
+        ));
+    }
+    let failures = stage_metrics.iter().map(|metrics| metrics.failures).sum();
+    let non_finite = stage_metrics.iter().map(|metrics| metrics.non_finite).sum();
+    let max_abs = stage_metrics
+        .iter()
+        .map(|metrics| metrics.max_abs)
+        .fold(0.0_f32, f32::max);
+    let max_rms = stage_metrics
+        .iter()
+        .map(|metrics| metrics.rms)
+        .fold(0.0_f64, f64::max);
+    let strict = arguments.logit_policy == LogitPolicy::Strict;
+    let record = ParityRecord {
+        schema_version: 1,
+        kind: NNML1_PARITY_RECORD_KIND,
+        checkpoint_spec_name: CHECKPOINT_SPEC_NAME,
+        checkpoint_spec_version: CHECKPOINT_SPEC_VERSION,
+        source_repo: reference.source_repo.clone(),
+        source_revision: reference.source_revision.clone(),
+        source_model_sha256: reference.source_model_sha256.clone(),
+        tokenizer_sha256: reference.tokenizer_sha256.clone(),
+        reference_runtime: "transformers",
+        reference_runtime_version: reference.transformers_version.clone(),
+        execution_git_commit: git_commit,
+        execution_git_dirty: false,
+        execution_backend: "nnis-model-cuda",
+        parity_level: if strict {
+            "logit_and_generation"
+        } else {
+            "generation_trajectory"
+        },
+        semantic: SemanticEvidence {
+            case_count: 1,
+            observations: 1,
+            exact_greedy_observations: 1,
+            exact_greedy_all: true,
+        },
+        logits: if strict {
+            Some(LogitEvidence {
+                atol: arguments.atol,
+                rtol: arguments.rtol,
+                stages: stage_metrics.len(),
+                failures,
+                non_finite,
+                max_abs,
+                max_rms,
+                strict_tolerance_asserted: true,
+            })
+        } else {
+            None
+        },
+        source_evidence: SourceEvidence {
+            kind: "smollm2-direct-logit-comparison-v1",
+            artifact: arguments
+                .reference_dir
+                .join("reference.json")
+                .display()
+                .to_string(),
+        },
+        promotion_authorized: false,
+        claim_boundary: "exact-checkpoint reference parity evidence only; this record does not establish general model-family support, serving performance, or automatic runtime promotion",
+    };
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| NnisError::io("create parity evidence directory", error))?;
+        }
+    }
+    let mut json = serde_json::to_string_pretty(&record)
+        .map_err(|error| NnisError::invalid_input(format!("serialize parity evidence: {error}")))?;
+    json.push('\n');
+    fs::write(path, json).map_err(|error| NnisError::io("write parity evidence", error))?;
+    Ok(())
+}
+
 fn run(arguments: Arguments) -> Result<()> {
     let reference = read_reference_manifest(&arguments.reference_dir)?;
     let device = Device::first()?;
@@ -343,19 +532,20 @@ fn run(arguments: Arguments) -> Result<()> {
     println!("atol={} rtol={}", arguments.atol, arguments.rtol);
     println!("logit_policy={}", arguments.logit_policy.as_str());
 
+    let mut stage_metrics = Vec::with_capacity(reference.decode_steps + 1);
     let mut actual_logits = session.prefill(&reference.input_ids)?;
     let expected_prefill = read_f32_le(
         &arguments.reference_dir.join(&reference.logit_files[0]),
         vocab,
     )?;
-    report_and_require(
+    stage_metrics.push(report_and_require(
         "prefill",
         &actual_logits,
         &expected_prefill,
         arguments.atol,
         arguments.rtol,
         arguments.logit_policy,
-    )?;
+    )?);
 
     for step in 0..reference.decode_steps {
         let greedy = reference.greedy_ids[step];
@@ -367,14 +557,14 @@ fn run(arguments: Arguments) -> Result<()> {
                 .join(&reference.logit_files[step + 1]),
             vocab,
         )?;
-        report_and_require(
+        stage_metrics.push(report_and_require(
             &format!("decode[{step}]"),
             &actual_logits,
             &expected,
             arguments.atol,
             arguments.rtol,
             arguments.logit_policy,
-        )?;
+        )?);
     }
 
     let generated = model.new_session()?.generate(
@@ -388,6 +578,10 @@ fn run(arguments: Arguments) -> Result<()> {
         )));
     }
     println!("greedy_ids={generated:?}");
+    if let Some(path) = arguments.evidence_json.as_deref() {
+        write_parity_evidence(path, &arguments, &reference, &stage_metrics)?;
+        println!("parity_evidence={}", path.display());
+    }
     match arguments.logit_policy {
         LogitPolicy::Strict => println!("SmolLM2 strict reference comparison passed"),
         LogitPolicy::Report => {

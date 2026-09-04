@@ -375,10 +375,18 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("paths", nargs="*", type=Path)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--compose", type=Path)
     args = parser.parse_args()
     if args.self_test:
         self_test()
         print("NNML1 multi-model parity evidence self-test passed")
+    if args.compose is not None:
+        records = [_load_json(path) for path in args.paths]
+        suite = build_suite(records)
+        args.compose.parent.mkdir(parents=True, exist_ok=True)
+        args.compose.write_text(json.dumps(suite, indent=2) + "\n", encoding="utf-8")
+        print(f"composed={args.compose}")
+        return
     for path in args.paths:
         document = _load_json(path)
         if document.get("kind") == RECORD_KIND:
