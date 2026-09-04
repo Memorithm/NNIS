@@ -15,8 +15,25 @@ import gc
 import hashlib
 import json
 import math
+import os
 import shutil
 from pathlib import Path
+
+from tokenizer_reference_identity import build_identity
+from validate_tinyllama_reference_artifact import (
+    CHECKPOINT_SPEC_NAME,
+    CHECKPOINT_SPEC_VERSION,
+    IDENTITY_FILENAME,
+    REFERENCE_ENV,
+    REFERENCE_EXECUTION_POLICY,
+    REFERENCE_ORACLE_SEMANTICS,
+    REFERENCE_RUNTIME,
+    SUITE_KIND,
+    validate_fixture,
+)
+
+for _name, _value in REFERENCE_ENV.items():
+    os.environ[_name] = _value
 
 import torch
 import transformers
@@ -31,6 +48,19 @@ TRANSFORMERS_VERSION = "4.43.3"
 TARGET_PROMPT_TOKENS = (8, 32, 128, 512, 1024)
 STANDARD_DECODE_STEPS = 32
 DEEP_DECODE_STEPS = 128
+def configure_reference_runtime() -> None:
+    torch.manual_seed(0)
+    torch.use_deterministic_algorithms(True)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    if not torch.are_deterministic_algorithms_enabled():
+        raise RuntimeError("trusted reference requires deterministic torch algorithms")
+    if torch.get_num_threads() != 1 or torch.get_num_interop_threads() != 1:
+        raise RuntimeError(
+            "trusted reference requires exactly one intra-op and one inter-op CPU thread"
+        )
+
+
 PROMPT_FAMILIES = {
     "prose": (
         "Native inference runtimes should preserve numerical semantics while making "
@@ -354,7 +384,7 @@ def build_reference_suite(
 
     suite = {
         "schema_version": 1,
-        "kind": "nnis-trained-llama-reference-suite-v1",
+        "kind": SUITE_KIND,
         "source_repo": REPO_ID,
         "source_revision": REVISION,
         "source_model_sha256": MODEL_SHA256,
@@ -363,13 +393,14 @@ def build_reference_suite(
         "tokenizer_sha256": tokenizer_sha256,
         "transformers_version": transformers.__version__,
         "expected_config": converted_config,
+        "reference_execution_policy": dict(REFERENCE_EXECUTION_POLICY),
         "case_policy": {
             "families": list(PROMPT_FAMILIES),
             "prompt_token_lengths": list(TARGET_PROMPT_TOKENS),
             "standard_decode_steps": STANDARD_DECODE_STEPS,
             "deep_decode_prompt_tokens": 32,
             "deep_decode_steps": DEEP_DECODE_STEPS,
-            "oracle": "Transformers CPU F32 greedy generation from the exact pinned checkpoint widened to F32",
+            "oracle": REFERENCE_ORACLE_SEMANTICS,
         },
         "cases": cases,
     }
@@ -379,6 +410,7 @@ def build_reference_suite(
 
 
 def main() -> None:
+    configure_reference_runtime()
     parser = argparse.ArgumentParser(
         description="Build the pinned trained TinyLlama fixture and massive greedy oracle suite."
     )
@@ -398,16 +430,34 @@ def main() -> None:
     tokenizer_file = args.output / "tokenizer.json"
     shutil.copy2(checkpoint / "tokenizer.json", tokenizer_file)
     tokenizer_digest = sha256(tokenizer_file)
+    identity = build_identity(
+        checkpoint_spec_name=CHECKPOINT_SPEC_NAME,
+        checkpoint_spec_version=CHECKPOINT_SPEC_VERSION,
+        source_repo=REPO_ID,
+        source_revision=REVISION,
+        source_model_sha256=MODEL_SHA256,
+        tokenizer_path=tokenizer_file,
+        reference_kind=SUITE_KIND,
+        reference_runtime=REFERENCE_RUNTIME,
+        reference_runtime_version=TRANSFORMERS_VERSION,
+        source_weight_dtype="bfloat16",
+        execution_weight_dtype="f32",
+        oracle_semantics=REFERENCE_ORACLE_SEMANTICS,
+    )
+    identity_file = args.output / IDENTITY_FILENAME
+    identity_file.write_text(json.dumps(identity, indent=2) + "\n", encoding="utf-8")
 
     model_dir = args.output / "model"
     suite_file = args.output / "reference_suite.json"
     converted_config = convert_weights(checkpoint, model_dir, tokenizer_digest)
     gc.collect()
     build_reference_suite(checkpoint, suite_file, converted_config, tokenizer_digest)
+    validate_fixture(args.output)
 
     print(f"checkpoint={REPO_ID}@{REVISION}")
     print(f"model_sha256={MODEL_SHA256}")
     print(f"tokenizer_sha256={tokenizer_digest}")
+    print(f"identity_file={identity_file}")
     print(f"transformers={transformers.__version__}")
     print(f"model_dir={model_dir}")
     print(f"suite_file={suite_file}")

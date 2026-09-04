@@ -43,7 +43,13 @@ jobs:
       - name: Validate tokenizer/reference identity contract
         run: |
           python3 tools/tokenizer_reference_identity.py --self-test
-          python3 -m py_compile tools/tokenizer_reference_identity.py tools/smollm2_135m_fixture.py tools/run_tinyllama_massive_campaign.py
+          python3 tools/validate_tinyllama_reference_artifact.py --self-test
+          python3 -m py_compile \
+            tools/tokenizer_reference_identity.py \
+            tools/validate_tinyllama_reference_artifact.py \
+            tools/smollm2_135m_fixture.py \
+            tools/tinyllama_1p1b_chat_fixture.py \
+            tools/run_tinyllama_massive_campaign.py
 
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
