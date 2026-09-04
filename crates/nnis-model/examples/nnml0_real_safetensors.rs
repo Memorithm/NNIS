@@ -1,7 +1,6 @@
 use nnis_model::{
-    load_model_from_safetensors, Activation, DecoderAttentionTopology,
-    DecoderExecutionCapabilities, DecoderMlpSemantics, DecoderRopeSemantics, ModelConfig,
-    SafetensorsLoadConfig, WeightDType,
+    load_model_from_safetensors, DecoderExecutionCapabilities, ModelConfig, SafetensorsLoadConfig,
+    SMOLLM2_135M_BF16,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::Serialize;
@@ -13,10 +12,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SOURCE_REPO: &str = "HuggingFaceTB/SmolLM2-135M";
-const SOURCE_REVISION: &str = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2";
-const SOURCE_MODEL_SHA256: &str =
-    "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1";
+const SOURCE_REPO: &str = SMOLLM2_135M_BF16.source_repo;
+const SOURCE_REVISION: &str = SMOLLM2_135M_BF16.source_revision;
+const SOURCE_MODEL_SHA256: &str = SMOLLM2_135M_BF16.source_model_sha256;
 const EVIDENCE_KIND: &str = "nnis-nnml0-real-safetensors";
 const EVIDENCE_SCHEMA_VERSION: u32 = 2;
 
@@ -148,39 +146,7 @@ fn validate_pinned_source(model_dir: &Path) -> Result<()> {
 }
 
 fn validate_pinned_config(config: &ModelConfig) -> Result<DecoderExecutionCapabilities> {
-    if config.vocab_size != 49_152
-        || config.eos_token_id != Some(0)
-        || config.hidden_size != 576
-        || config.intermediate_size != 1_536
-        || config.num_hidden_layers != 30
-        || config.num_attention_heads != 9
-        || config.num_key_value_heads != 3
-        || config.max_position_embeddings != 8_192
-        || config.rms_norm_eps.to_bits() != 1.0e-5_f32.to_bits()
-        || config.rope_theta.to_bits() != 100_000.0_f32.to_bits()
-        || config.activation != Activation::Silu
-        || config.weight_dtype != WeightDType::Bf16
-        || config.head_dim() != 64
-    {
-        return Err(NnisError::invalid_input(format!(
-            "loaded model config does not match pinned SmolLM2-135M: {config:?}"
-        )));
-    }
-
-    let capabilities = config.decoder_capabilities()?;
-    if capabilities.attention_topology != DecoderAttentionTopology::GroupedQuery
-        || capabilities.rope_semantics != DecoderRopeSemantics::LlamaRotateHalfUnscaled
-        || capabilities.mlp_semantics != DecoderMlpSemantics::SwiGluSilu
-        || capabilities.weight_dtype != WeightDType::Bf16
-        || capabilities.num_attention_heads != 9
-        || capabilities.num_key_value_heads != 3
-        || capabilities.head_dim != 64
-    {
-        return Err(NnisError::invalid_input(format!(
-            "loaded model decoder capability profile does not match pinned SmolLM2-135M execution contract: {capabilities:?}"
-        )));
-    }
-    Ok(capabilities)
+    SMOLLM2_135M_BF16.validate_config(config)
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String> {
