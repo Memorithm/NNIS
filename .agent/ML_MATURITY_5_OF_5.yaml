@@ -23,7 +23,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: cae7e23d3136faa8cb60aa9b46e03a8b46966f94
+  main_head: d0a9e5c7e8b1d66d5d3c2cf14b34f708f09ee2af
   NNML0:
     status: software_contract_complete_physical_gate_open
     merged:
@@ -48,11 +48,12 @@ current_progress:
       roadmap wording was verified. Do not add a nominal interoperability
       dependency until a versioned compatible contract exists.
   NNML1:
-    status: active_sampling_streaming_and_session_batch_contract_merged
+    status: active_sampling_streaming_batch_and_capability_contracts_merged
     merged:
       - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
       - pr_105_sampled_token_streaming_with_continuation_ready_state
       - pr_106_independent_sampled_multi_session_batch_contract
+      - pr_107_versioned_decoder_execution_capability_profile
     verified_software_capabilities:
       - versioned_host_visible_sampling_policy
       - NNIS_owned_SplitMix64_seeded_reproducibility
@@ -64,15 +65,19 @@ current_progress:
       - independent_per_session_CUDA_stream_KV_workspace_position_and_sampling_state
       - deterministic_batch_index_execution_and_exact_request_count_preflight
       - item_local_failure_domain_without_claiming_atomic_GPU_batch_execution
+      - versioned_MHA_GQA_MQA_execution_topology_identity
+      - explicit_Llama_rotate_half_unscaled_RoPE_identity
+      - explicit_SwiGLU_SiLU_MLP_execution_identity
     explicit_boundary: >-
-      Sampled generation, sampled streaming and the multi-session batch contract
-      still execute through host-visible per-session sampling. The batch contract
-      is deterministic host orchestration, not fused or concurrent GPU batching.
-      These are NNML1 correctness/API results, not NNML2 device-residency or
-      serving-performance claims.
+      The decoder capability profile describes semantics of already-valid configs;
+      it is not a model-family admission or parity claim. Sampled generation,
+      sampled streaming and the multi-session batch contract still execute through
+      host-visible per-session sampling. The batch contract is deterministic host
+      orchestration, not fused or concurrent GPU batching.
     next:
-      - broaden_versioned_decoder_capability_checks_for_real_model_families
-      - obtain_multiple_real_model_family_reference_parity_and_generation_smoke_evidence
+      - strengthen_real_model_qualification_using_exact_capability_and_checkpoint_identity
+      - obtain_multiple_real_model_reference_parity_and_generation_smoke_evidence
+      - add_new_model_family_admission_only_after_exact_semantic_audit
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
     status: not_started_as_production_claim
