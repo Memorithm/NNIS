@@ -71,6 +71,17 @@ jobs:
               "activation": "silu",
               "weight_dtype": "f32",
           }
+          expected_reference_execution_policy = {
+              "torch_deterministic_algorithms": True,
+              "torch_manual_seed": 0,
+              "torch_num_threads": 1,
+              "torch_num_interop_threads": 1,
+              "mkl_cbwr": "COMPATIBLE",
+              "mkl_dynamic": False,
+              "omp_dynamic": False,
+              "mkl_num_threads": 1,
+              "omp_num_threads": 1,
+          }
           assert model["format"] == "nnis-model"
           assert model["version"] == 1
           assert model["config"] == expected_config
@@ -109,6 +120,7 @@ jobs:
           assert reference["execution_weight_dtype"] == "f32"
           assert reference["tokenizer_sha256"] == tokenizer_sha256
           assert reference["tokenizer_sha256"] == provenance["tokenizer_sha256"]
+          assert reference["reference_execution_policy"] == expected_reference_execution_policy
           assert reference["prompt"] == "Gravity is"
           assert reference["decode_steps"] == 2
           assert reference["input_ids"] == [22007, 6463, 314]
@@ -119,10 +131,13 @@ jobs:
               "decode_01_logits.f32le",
           ]
 
+          # These fingerprints were reproduced bit-for-bit with the declared
+          # deterministic CPU policy on four independent GitHub-hosted runners
+          # in eastus, westus, westus2 and westus3 before being promoted here.
           expected_hashes = {
               "prefill_logits.f32le": "e374835ec84324552e72bedcf4554cf7baf9505f4c7489a4c32255b785549ef6",
-              "decode_00_logits.f32le": "759e014bdc6272e6a93f257da8291fdd1cab4ac5c83c3f0ec3d8aaa92ed9a1ef",
-              "decode_01_logits.f32le": "a905fc88c522c96b11976a611a786e7741bab59aa78157133237c2e2f7cd9792",
+              "decode_00_logits.f32le": "201e5b63990e1b42e65cc1e28f43fedaf8d5ced09ee8032d19b87d4f8ef68ad8",
+              "decode_01_logits.f32le": "3787392822f67ee16a2aafc147fb42164003679307818fcf9643a9373ea8cd81",
           }
           for filename, expected_hash in expected_hashes.items():
               path = root / "reference" / filename
@@ -133,6 +148,7 @@ jobs:
           print("input_ids=", reference["input_ids"])
           print("greedy_ids=", reference["greedy_ids"])
           print("tokenizer_sha256=", tokenizer_sha256)
+          print("reference_execution_policy=", reference["reference_execution_policy"])
           print("converted_tensor_count=", len(model["tensors"]))
           print("SmolLM2 trained reference validation passed")
           PY
