@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_agent_current_execution_status
 status: active
-last_updated: "2026-09-03"
+last_updated: "2026-09-04"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -22,6 +22,8 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
+  main_head: 2115a1530a76e35000b5a407fc592aeab79ef913
+
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
     pull_request: 98
@@ -47,19 +49,21 @@ main_repository_state:
     note: KA17_parallel_score_is_intentionally_excluded_outside_its_SmolLM2_geometry
 
   nnml0_safetensors_loader:
-    status: repaired_ci_qualified_real_checkpoint_gate_pending
+    status: capability_bound_software_contract_merged_physical_gate_pending
     original_pull_request: 100
     repair_pull_request: 101
-    repair_exact_head: 1c7b9786ba1d30381f899e2fa890652027f05dbf
-    repair_merge_commit: a21aa8619ec94179d7ba14e3839046b733c3e349
+    qualification_pull_requests: [102, 103, 108]
+    evidence_schema_version: 2
+    capability_contract_version: 1
+    latest_merge_commit: 2115a1530a76e35000b5a407fc592aeab79ef913
     rust_msrv: "1.77"
-    exact_head_ci:
+    latest_exact_head_ci:
+      exact_head: 712bbef3e24527cc757b5d7f00a3048f7fc315c2
       rust_1_77: pass
       rustfmt: pass
       cargo_check: pass
       clippy_minus_D_warnings: pass
       workspace_tests: pass
-      benchmark_harness: pass
     repaired_contract:
       - config_json_is_authoritative_for_model_geometry
       - unsupported_architecture_and_dtype_fail_closed
@@ -70,22 +74,31 @@ main_repository_state:
       - shard_parent_traversal_rejected
       - unused_hf_hub_and_tokio_runtime_dependencies_removed
       - Rust_1_77_qualified_dependency_lock_restored
+      - physical_evidence_is_bound_to_versioned_decoder_execution_capabilities
+      - schema_v2_rejects_attention_RoPE_MLP_dtype_and_canonical_capability_drift
     nnml0_exit_criterion_complete: false
-    blocker: real_checkpoint_load_has_not_yet_been_executed_through_the_repaired_loader
+    blocker: >-
+      real_checkpoint_load_has_not_yet_been_executed_on_the_exact_promoted_main
+      through_the_schema_v2_capability_bound_qualification_path
 
 current_execution_order:
   - id: P0_REAL_CHECKPOINT
-    status: next
-    action: validate_then_load_a_pinned_real_SmolLM2_checkpoint_through_the_repaired_Safetensors_path
+    status: next_physical_gate
+    action: >-
+      run_the_pinned_SmolLM2_checkpoint_on_exact_main_2115a153_and_generate_then_validate_schema_v2_capability_bound_evidence
     claim_boundary: structural_or_load_success_is_not_model_quality_or_performance_evidence
+  - id: P0_MULTI_MODEL_QUALIFICATION_SOFTWARE
+    status: active_parallel_software_work
+    action: >-
+      generalize_exact_real_model_qualification_manifests_and_prepare_multiple_model_reference_parity_without_claiming_new_family_support
   - id: P1_COMBINED_F16
-    status: blocked_on_P0_and_Thor_execution
+    status: blocked_on_Thor_execution
     action: run_two_independent_ABBA_campaigns_for_fused_mlp_plus_parallel_score_on_Thor
   - id: P1_REPROFILE
     status: blocked_on_P1_COMBINED_F16
     action: reprofile_the_winning_exact_plan_and_select_the_new_measured_bottleneck
   - id: P1_P2_TINYLLAMA
-    status: ready_after_combined_campaign
+    status: physical_harness_ready
     action: execute_the_pinned_massive_TinyLlama_campaign_without_cross_model_KA17_extrapolation
   - id: LONG_RUN_RESEARCH
     status: blocked_until_new_profile_exists
@@ -98,3 +111,4 @@ invariants:
   - no_cross_model_KA17_promotion
   - exact_head_required_CI_must_be_green_before_promotion_or_merge
   - preserve_Rust_1_77_MSRV
+  - no_new_model_family_support_claim_without_exact_semantic_admission_audit
