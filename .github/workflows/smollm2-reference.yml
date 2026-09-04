@@ -54,6 +54,8 @@ jobs:
           model = json.loads((root / "model" / "model.json").read_text())
           provenance = json.loads((root / "model" / "provenance.json").read_text())
           reference = json.loads((root / "reference" / "reference.json").read_text())
+          tokenizer_path = root / "tokenizer.json"
+          tokenizer_sha256 = hashlib.sha256(tokenizer_path.read_bytes()).hexdigest()
 
           expected_config = {
               "vocab_size": 49152,
@@ -94,6 +96,7 @@ jobs:
           assert provenance["source_model_sha256"] == "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1"
           assert provenance["source_weight_dtype"] == "bfloat16"
           assert provenance["execution_weight_dtype"] == "f32"
+          assert provenance["tokenizer_sha256"] == tokenizer_sha256
           assert provenance["tied_lm_head_materialized"] is True
           assert provenance["transformers_version"] == "4.40.1"
 
@@ -104,6 +107,8 @@ jobs:
           assert reference["transformers_version"] == "4.40.1"
           assert reference["source_weight_dtype"] == "bfloat16"
           assert reference["execution_weight_dtype"] == "f32"
+          assert reference["tokenizer_sha256"] == tokenizer_sha256
+          assert reference["tokenizer_sha256"] == provenance["tokenizer_sha256"]
           assert reference["prompt"] == "Gravity is"
           assert reference["decode_steps"] == 2
           assert reference["input_ids"] == [22007, 6463, 314]
@@ -127,6 +132,7 @@ jobs:
 
           print("input_ids=", reference["input_ids"])
           print("greedy_ids=", reference["greedy_ids"])
+          print("tokenizer_sha256=", tokenizer_sha256)
           print("converted_tensor_count=", len(model["tensors"]))
           print("SmolLM2 trained reference validation passed")
           PY
