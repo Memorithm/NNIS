@@ -1,0 +1,92 @@
+name: Diagnose SmolLM2 CPU reproducibility
+
+on:
+  push:
+    branches:
+      - feat/nnml1-tokenizer-reference-identity-v1
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: CPU reproducibility sample ${{ matrix.sample }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3, 4]
+    env:
+      MKL_CBWR: COMPATIBLE
+      MKL_DYNAMIC: "FALSE"
+      OMP_DYNAMIC: "FALSE"
+      MKL_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install CPU reference environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.0
+          python -m pip install \
+            transformers==4.40.1 \
+            safetensors==0.4.5 \
+            huggingface_hub==0.24.7
+
+      - name: Generate deterministic candidate
+        run: |
+          python - <<'PY'
+          import runpy
+          import sys
+          import torch
+
+          torch.manual_seed(0)
+          torch.use_deterministic_algorithms(True)
+          torch.set_num_threads(1)
+          torch.set_num_interop_threads(1)
+          print("torch_num_threads=", torch.get_num_threads())
+          print("torch_num_interop_threads=", torch.get_num_interop_threads())
+          sys.argv = [
+              "tools/smollm2_135m_fixture.py",
+              "--output", "/tmp/smollm2-135m",
+              "--prompt", "Gravity is",
+              "--decode-steps", "2",
+          ]
+          runpy.run_path("tools/smollm2_135m_fixture.py", run_name="__main__")
+          PY
+
+      - name: Report numerical fingerprints
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import math
+          import struct
+          from pathlib import Path
+
+          root = Path("/tmp/smollm2-135m")
+          reference = json.loads((root / "reference" / "reference.json").read_text())
+          print("tokenizer_sha256=", hashlib.sha256((root / "tokenizer.json").read_bytes()).hexdigest())
+          print("input_ids=", reference["input_ids"])
+          print("greedy_ids=", reference["greedy_ids"])
+          for filename in reference["logit_files"]:
+              data = (root / "reference" / filename).read_bytes()
+              values = struct.unpack(f"<{len(data) // 4}f", data)
+              ranked = sorted(range(len(values)), key=values.__getitem__, reverse=True)[:10]
+              l2 = math.sqrt(sum(value * value for value in values))
+              print(filename)
+              print("  sha256=", hashlib.sha256(data).hexdigest())
+              print("  min=", min(values))
+              print("  max=", max(values))
+              print("  mean=", sum(values) / len(values))
+              print("  l2=", l2)
+              print("  top10=", [(index, values[index]) for index in ranked])
+          PY
