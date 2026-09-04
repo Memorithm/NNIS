@@ -1,7 +1,7 @@
 schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
-last_updated: "2026-09-01"
+last_updated: "2026-09-04"
 repository: Memorithm/NVIDIA-Native-Inference-Stack
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
@@ -22,6 +22,73 @@ score_policy:
     - claiming_KV_compression_from_nominal_index_width_without_all_overheads
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
+current_progress:
+  main_head: ed7acbc332f421767b0897f224868603e4ce7925
+  NNML0:
+    status: software_contract_complete_physical_gate_open
+    merged:
+      - pr_100_initial_safetensors_loader
+      - pr_101_fail_closed_loader_repair_and_Rust_1_77_restore
+      - pr_102_pinned_real_safetensors_qualification_surface
+      - pr_103_exact_head_machine_readable_physical_evidence_contract
+    verified_software_capabilities:
+      - Hugging_Face_config_driven_supported_Llama_geometry
+      - local_Safetensors_F32_BF16_loading_without_Python_runtime
+      - sharded_index_loading_with_path_and_duplicate_validation
+      - GQA_KV_geometry_and_HF_out_in_to_NNIS_in_out_transpose
+      - tied_LM_head_materialization
+      - unsupported_architecture_dtype_and_feature_fail_closed
+    open_gate: >-
+      Run the exact promoted main commit on the real CUDA target with the pinned
+      SmolLM2 checkpoint, generate schema-v1 evidence, and validate it against
+      that same commit. No physical NNML0 completion is claimed until this exists.
+    scirust_boundary: >-
+      The audited SciRust compute/tensor-runtime surfaces require Rust 1.89 while
+      NNIS preserves Rust 1.77, and no canonical public Model trait matching the
+      roadmap wording was verified. Do not add a nominal interoperability
+      dependency until a versioned compatible contract exists.
+  NNML1:
+    status: active_sampling_and_streaming_merged
+    merged:
+      - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
+      - pr_105_sampled_token_streaming_with_continuation_ready_state
+    verified_software_capabilities:
+      - versioned_host_visible_sampling_policy
+      - NNIS_owned_SplitMix64_seeded_reproducibility
+      - strategy_neutral_generation_envelope
+      - token_by_token_callback_delivery
+      - graceful_stream_stop_after_emitted_token_execution
+      - EOS_delivery_before_stream_termination
+      - continuation_ready_KV_and_session_position_after_stream_stop
+    explicit_boundary: >-
+      Sampled generation and sampled streaming still materialize full vocabulary
+      logits on the host and return the selected token to CUDA. This is NNML1
+      correctness/API work, not an NNML2 device-residency or serving-performance
+      claim.
+    next:
+      - define_batched_session_contract_without_weakening_per_session_state_ownership
+      - broaden_versioned_decoder_capability_checks_for_real_model_families
+      - obtain_multiple_real_model_family_reference_parity_and_generation_smoke_evidence
+  NNML2:
+    status: not_started_as_production_claim
+    blockers:
+      - sampled_paths_have_full_logit_D2H_and_selected_token_H2D_roundtrips
+      - no_qualified_concurrent_stream_or_batching_contract_yet
+      - peak_and_steady_state_VRAM_evidence_not_yet_complete
+  performance_composition:
+    fused_mlp_plus_parallel_score:
+      status: harness_merged_physical_gate_open
+      harness_pr: 98
+      rule: >-
+        Separately qualified components do not authorize a combined selector.
+        Require fresh fingerprint-compatible physical end-to-end evidence before
+        promotion.
+    tinyllama_massive_campaign:
+      status: harness_merged_physical_execution_not_claimed
+      harness_pr: 99
+      rule: >-
+        Do not infer general Llama-family support or promote candidates until the
+        committed real-model campaign produces reviewable physical evidence.
 priority_program:
   - id: NNML0
     name: Shared model and tensor interoperability
