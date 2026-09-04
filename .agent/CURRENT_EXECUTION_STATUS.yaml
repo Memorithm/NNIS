@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 259b22b8b45c8d79c60b191c7ed0fcc12916a763
+  main_head: d616afaf2117950be568f7b0dc506d27e9f1fb0c
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -37,17 +37,23 @@ main_repository_state:
     next: run_fingerprint_compatible_physical_ABBA_on_Thor_before_any_combined_selector_promotion
 
   tinyllama_massive_f16_campaign:
-    status: merged_harness_exact_checkpoint_spec_registered_physical_evidence_pending
+    status: merged_harness_persisted_reference_artifact_contract_physical_evidence_pending
     pull_request: 99
     exact_checkpoint_spec_pull_request: 109
+    tokenizer_reference_identity_pull_request: 110
+    reference_artifact_pull_request: 111
     merge_commit: 775f7f4e61d0714e0c725c74a3f87b553a6b4032
     model: TinyLlama/TinyLlama-1.1B-Chat-v1.0
     pinned_revision: d9128824c0c80111be21424e68086f52413fb413
     planned_generation_requests: 11520
     planned_generated_tokens: 552960
+    persisted_reference_identity_required: true
+    deterministic_CPU_reference_policy_declared: true
     physical_campaign_complete: false
     promotion_authorized: false
-    note: KA17_parallel_score_is_intentionally_excluded_outside_its_SmolLM2_geometry
+    note: >-
+      KA17_parallel_score_is_intentionally_excluded_outside_its_SmolLM2_geometry;
+      persisted_artifact_identity_and_CPU_reference_policy_are_not_GPU_parity_or_qualification
 
   nnml0_safetensors_loader:
     status: shared_exact_checkpoint_software_contract_merged_physical_gate_pending
@@ -57,7 +63,8 @@ main_repository_state:
     evidence_schema_version: 2
     capability_contract_version: 1
     exact_checkpoint_spec_version: 1
-    latest_merge_commit: 259b22b8b45c8d79c60b191c7ed0fcc12916a763
+    latest_contract_merge_commit: 259b22b8b45c8d79c60b191c7ed0fcc12916a763
+    current_main_head_requiring_physical_execution: d616afaf2117950be568f7b0dc506d27e9f1fb0c
     rust_msrv: "1.77"
     latest_exact_head_ci:
       exact_head: d12134217f33782b1b3542a0f9f5e68028f24ac7
@@ -82,7 +89,7 @@ main_repository_state:
       - SmolLM2_source_revision_SHA_config_and_capabilities_are_owned_by_shared_exact_checkpoint_spec
     nnml0_exit_criterion_complete: false
     blocker: >-
-      real_checkpoint_load_has_not_yet_been_executed_on_the_exact_promoted_main
+      real_checkpoint_load_has_not_yet_been_executed_on_the_exact_current_main
       through_the_schema_v2_capability_bound_qualification_path
 
   exact_checkpoint_specs:
@@ -96,20 +103,52 @@ main_repository_state:
     claim_boundary: >-
       registration_is_not_tokenizer_parity_reference_parity_GPU_qualification_performance_or_model_family_support
 
+  tokenizer_reference_identity:
+    status: merged_versioned_artifact_identity_contract
+    pull_request: 110
+    merge_commit: 91bd7997425ebe4c79e1360c8a8dc9467cbebd69
+    contract_version: 1
+    verified_software_properties:
+      - actual_tokenizer_bytes_are_SHA256_bound_to_checkpoint_and_reference_identity
+      - suite_and_provenance_linked_fields_fail_closed_on_drift
+      - SmolLM2_CPU_reference_uses_explicit_deterministic_execution_policy
+      - SmolLM2_reference_fingerprints_reproduced_under_the_declared_policy_before_promotion
+    claim_boundary: >-
+      artifact_identity_and_CPU_oracle_reproducibility_are_not_CUDA_parity_performance_or_model_family_support
+
+  tinyllama_reference_artifact:
+    status: merged_fail_closed_persisted_artifact_contract
+    pull_request: 111
+    merge_commit: d616afaf2117950be568f7b0dc506d27e9f1fb0c
+    validator: tools/validate_tinyllama_reference_artifact.py
+    identity_file: tokenizer_reference_identity.json
+    expected_reference_cases: 18
+    verified_software_properties:
+      - validator_is_standard_library_only
+      - exact_checkpoint_revision_model_SHA_tokenizer_SHA_and_reference_runtime_are_bound
+      - exact_model_config_case_policy_and_reference_execution_policy_are_validated
+      - tokenizer_and_reference_policy_tamper_negative_self_tests_pass_in_CI
+      - campaign_launcher_rejects_missing_or_incoherent_persisted_identity
+    physical_reference_parity_complete: false
+    physical_GPU_qualification_complete: false
+    claim_boundary: >-
+      the_persisted_reference_artifact_contract_does_not_claim_Transformers_NNIS_logit_parity_Thor_correctness_or_performance
+
 current_execution_order:
   - id: P0_REAL_CHECKPOINT
     status: next_physical_gate
     action: >-
-      run_the_pinned_SmolLM2_checkpoint_on_exact_main_259b22b8_and_generate_then_validate_schema_v2_capability_bound_evidence
+      run_the_pinned_SmolLM2_checkpoint_on_exact_main_d616afaf_and_generate_then_validate_schema_v2_capability_bound_evidence
     claim_boundary: structural_or_load_success_is_not_model_quality_or_performance_evidence
   - id: P0_TOKENIZER_REFERENCE_IDENTITY
-    status: next_parallel_software_work
+    status: completed_software_contract
+    completed_pull_requests: [110, 111]
     action: >-
-      add_a_versioned_tokenizer_and_reference_identity_contract_using_only_hashes_and_versions_already_verified_or_computed_by_committed_fixtures
+      versioned_tokenizer_reference_identity_and_TinyLlama_persisted_reference_artifact_contract_are_merged
   - id: P0_MULTI_MODEL_PARITY
-    status: follows_tokenizer_reference_identity
+    status: next_parallel_software_and_evidence_work
     action: >-
-      prepare_multiple_exact_checkpoint_reference_parity_and_generation_smoke_evidence_without_claiming_new_family_support
+      prepare_versioned_exact_checkpoint_reference_parity_and_generation_smoke_evidence_for_multiple_real_models_without_claiming_new_family_support
   - id: P1_COMBINED_F16
     status: blocked_on_Thor_execution
     action: run_two_independent_ABBA_campaigns_for_fused_mlp_plus_parallel_score_on_Thor
@@ -117,7 +156,7 @@ current_execution_order:
     status: blocked_on_P1_COMBINED_F16
     action: reprofile_the_winning_exact_plan_and_select_the_new_measured_bottleneck
   - id: P1_P2_TINYLLAMA
-    status: physical_harness_ready
+    status: physical_harness_and_reference_artifact_contract_ready
     action: execute_the_pinned_massive_TinyLlama_campaign_without_cross_model_KA17_extrapolation
   - id: LONG_RUN_RESEARCH
     status: blocked_until_new_profile_exists
@@ -132,3 +171,5 @@ invariants:
   - preserve_Rust_1_77_MSRV
   - no_new_model_family_support_claim_without_exact_semantic_admission_audit
   - exact_checkpoint_registration_does_not_imply_tokenizer_reference_or_physical_qualification
+  - persisted_tokenizer_reference_identity_does_not_imply_Transformers_NNIS_parity
+  - deterministic_CPU_reference_policy_does_not_imply_GPU_determinism_or_GPU_qualification
