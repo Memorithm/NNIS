@@ -28,6 +28,7 @@ mod runtime;
 mod runtime_kernels;
 mod safetensors_loader;
 mod sampling;
+mod session_batch;
 mod streaming;
 mod weighted_rmsnorm_candidate;
 mod weights;
@@ -84,6 +85,7 @@ pub use safetensors_loader::{
     load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata,
 };
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
+pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
 pub use streaming::GenerationStreamControl;
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
