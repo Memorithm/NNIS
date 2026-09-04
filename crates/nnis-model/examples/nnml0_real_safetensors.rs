@@ -1,6 +1,7 @@
 use nnis_model::{
-    load_model_from_safetensors, Activation, DecoderAttentionTopology, DecoderExecutionCapabilities,
-    DecoderMlpSemantics, DecoderRopeSemantics, ModelConfig, SafetensorsLoadConfig, WeightDType,
+    load_model_from_safetensors, Activation, DecoderAttentionTopology,
+    DecoderExecutionCapabilities, DecoderMlpSemantics, DecoderRopeSemantics, ModelConfig,
+    SafetensorsLoadConfig, WeightDType,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::Serialize;
