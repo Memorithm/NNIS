@@ -21,11 +21,19 @@ import subprocess
 import sys
 from typing import Any
 
+from tokenizer_reference_identity import IdentityError, build_identity, validate_documents
+
 BENCHMARK_KIND = "trained-llama-f16-massive-abba-v1"
 SUITE_KIND = "nnis-trained-llama-reference-suite-v1"
 SOURCE_REPO = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 SOURCE_REVISION = "d9128824c0c80111be21424e68086f52413fb413"
 SOURCE_MODEL_SHA256 = "6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933"
+CHECKPOINT_SPEC_NAME = "tinyllama-1.1b-chat-v1.0-bf16"
+CHECKPOINT_SPEC_VERSION = 1
+REFERENCE_TRANSFORMERS_VERSION = "4.43.3"
+REFERENCE_ORACLE_SEMANTICS = (
+    "Transformers CPU F32 greedy generation from the exact pinned checkpoint widened to F32"
+)
 DEFAULT_CANDIDATES = "transposed,fused,fused_mlp,staged,fused_mlp_staged"
 
 
@@ -96,7 +104,22 @@ def validate_existing_fixture(fixture: Path) -> bool:
     try:
         suite = json.loads(suite_path.read_text(encoding="utf-8"))
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        identity = build_identity(
+            checkpoint_spec_name=CHECKPOINT_SPEC_NAME,
+            checkpoint_spec_version=CHECKPOINT_SPEC_VERSION,
+            source_repo=SOURCE_REPO,
+            source_revision=SOURCE_REVISION,
+            source_model_sha256=SOURCE_MODEL_SHA256,
+            tokenizer_path=tokenizer_path,
+            reference_kind=SUITE_KIND,
+            reference_runtime="transformers",
+            reference_runtime_version=REFERENCE_TRANSFORMERS_VERSION,
+            source_weight_dtype="bfloat16",
+            execution_weight_dtype="f32",
+            oracle_semantics=REFERENCE_ORACLE_SEMANTICS,
+        )
+        validate_documents(identity, {"suite": suite, "provenance": provenance})
+    except (OSError, json.JSONDecodeError, IdentityError):
         return False
     return (
         suite.get("schema_version") == 1

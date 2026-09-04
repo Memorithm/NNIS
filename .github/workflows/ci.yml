@@ -40,6 +40,11 @@ jobs:
       - name: Validate NNML0 real-checkpoint evidence contract
         run: python3 tools/validate_nnml0_real_safetensors_evidence.py --self-test
 
+      - name: Validate tokenizer/reference identity contract
+        run: |
+          python3 tools/tokenizer_reference_identity.py --self-test
+          python3 -m py_compile tools/tokenizer_reference_identity.py tools/smollm2_135m_fixture.py tools/run_tinyllama_massive_campaign.py
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
