@@ -1,0 +1,37 @@
+name: Branch rustfmt
+
+on:
+  push:
+    branches:
+      - feat/nnml1-exact-checkpoint-specs-v1
+
+permissions:
+  contents: write
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/nnml1-exact-checkpoint-specs-v1
+          fetch-depth: 0
+
+      - name: Install rustfmt
+        run: rustup component add rustfmt
+
+      - name: Format workspace
+        run: cargo fmt --all
+
+      - name: Commit formatting when needed
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/nnis-model/src/exact_checkpoint_spec.rs crates/nnis-model/src/lib.rs crates/nnis-model/examples/nnml0_real_safetensors.rs
+          git commit -m "style(nnml1): apply rustfmt to exact checkpoint specs"
+          git push origin HEAD:feat/nnml1-exact-checkpoint-specs-v1
