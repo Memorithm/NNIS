@@ -23,14 +23,15 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: d0a9e5c7e8b1d66d5d3c2cf14b34f708f09ee2af
+  main_head: 2115a1530a76e35000b5a407fc592aeab79ef913
   NNML0:
-    status: software_contract_complete_physical_gate_open
+    status: software_contract_capability_bound_physical_gate_open
     merged:
       - pr_100_initial_safetensors_loader
       - pr_101_fail_closed_loader_repair_and_Rust_1_77_restore
       - pr_102_pinned_real_safetensors_qualification_surface
       - pr_103_exact_head_machine_readable_physical_evidence_contract
+      - pr_108_capability_bound_real_checkpoint_evidence_v2
     verified_software_capabilities:
       - Hugging_Face_config_driven_supported_Llama_geometry
       - local_Safetensors_F32_BF16_loading_without_Python_runtime
@@ -38,10 +39,13 @@ current_progress:
       - GQA_KV_geometry_and_HF_out_in_to_NNIS_in_out_transpose
       - tied_LM_head_materialization
       - unsupported_architecture_dtype_and_feature_fail_closed
+      - real_checkpoint_evidence_bound_to_versioned_decoder_execution_capabilities
+      - schema_v2_rejects_attention_RoPE_MLP_dtype_or_canonical_capability_drift
     open_gate: >-
       Run the exact promoted main commit on the real CUDA target with the pinned
-      SmolLM2 checkpoint, generate schema-v1 evidence, and validate it against
-      that same commit. No physical NNML0 completion is claimed until this exists.
+      SmolLM2 checkpoint, generate schema-v2 capability-bound evidence, and
+      validate it against that same commit. No physical NNML0 completion is
+      claimed until this exists.
     scirust_boundary: >-
       The audited SciRust compute/tensor-runtime surfaces require Rust 1.89 while
       NNIS preserves Rust 1.77, and no canonical public Model trait matching the
@@ -68,6 +72,7 @@ current_progress:
       - versioned_MHA_GQA_MQA_execution_topology_identity
       - explicit_Llama_rotate_half_unscaled_RoPE_identity
       - explicit_SwiGLU_SiLU_MLP_execution_identity
+      - SmolLM2_real_checkpoint_qualification_contract_bound_to_exact_capability_identity
     explicit_boundary: >-
       The decoder capability profile describes semantics of already-valid configs;
       it is not a model-family admission or parity claim. Sampled generation,
@@ -75,8 +80,8 @@ current_progress:
       host-visible per-session sampling. The batch contract is deterministic host
       orchestration, not fused or concurrent GPU batching.
     next:
-      - strengthen_real_model_qualification_using_exact_capability_and_checkpoint_identity
       - obtain_multiple_real_model_reference_parity_and_generation_smoke_evidence
+      - generalize_exact_real_model_qualification_manifests_without_claiming_family_support
       - add_new_model_family_admission_only_after_exact_semantic_audit
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
