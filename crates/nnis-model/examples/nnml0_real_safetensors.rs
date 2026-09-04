@@ -1,5 +1,7 @@
 use nnis_model::{
-    load_model_from_safetensors, Activation, ModelConfig, SafetensorsLoadConfig, WeightDType,
+    load_model_from_safetensors, Activation, DecoderAttentionTopology,
+    DecoderExecutionCapabilities, DecoderMlpSemantics, DecoderRopeSemantics, ModelConfig,
+    SafetensorsLoadConfig, WeightDType,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::Serialize;
@@ -16,7 +18,7 @@ const SOURCE_REVISION: &str = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2";
 const SOURCE_MODEL_SHA256: &str =
     "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1";
 const EVIDENCE_KIND: &str = "nnis-nnml0-real-safetensors";
-const EVIDENCE_SCHEMA_VERSION: u32 = 1;
+const EVIDENCE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug)]
 struct Arguments {
@@ -60,6 +62,12 @@ struct ModelEvidence {
 }
 
 #[derive(Debug, Serialize)]
+struct DecoderCapabilityEvidence {
+    profile: DecoderExecutionCapabilities,
+    canonical_record: String,
+}
+
+#[derive(Debug, Serialize)]
 struct QualificationEvidence {
     schema_version: u32,
     kind: &'static str,
@@ -72,6 +80,7 @@ struct QualificationEvidence {
     source: SourceEvidence,
     device: DeviceEvidence,
     model: ModelEvidence,
+    decoder_capabilities: DecoderCapabilityEvidence,
 }
 
 fn parse_arguments() -> std::result::Result<Arguments, String> {
@@ -138,7 +147,7 @@ fn validate_pinned_source(model_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_pinned_config(config: &ModelConfig) -> Result<()> {
+fn validate_pinned_config(config: &ModelConfig) -> Result<DecoderExecutionCapabilities> {
     if config.vocab_size != 49_152
         || config.eos_token_id != Some(0)
         || config.hidden_size != 576
@@ -157,7 +166,21 @@ fn validate_pinned_config(config: &ModelConfig) -> Result<()> {
             "loaded model config does not match pinned SmolLM2-135M: {config:?}"
         )));
     }
-    Ok(())
+
+    let capabilities = config.decoder_capabilities()?;
+    if capabilities.attention_topology != DecoderAttentionTopology::GroupedQuery
+        || capabilities.rope_semantics != DecoderRopeSemantics::LlamaRotateHalfUnscaled
+        || capabilities.mlp_semantics != DecoderMlpSemantics::SwiGluSilu
+        || capabilities.weight_dtype != WeightDType::Bf16
+        || capabilities.num_attention_heads != 9
+        || capabilities.num_key_value_heads != 3
+        || capabilities.head_dim != 64
+    {
+        return Err(NnisError::invalid_input(format!(
+            "loaded model decoder capability profile does not match pinned SmolLM2-135M execution contract: {capabilities:?}"
+        )));
+    }
+    Ok(capabilities)
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String> {
@@ -231,8 +254,9 @@ fn run(arguments: Arguments) -> Result<()> {
     let (model_config, weights) = load_model_from_safetensors(&context, &stream, &load_config)?;
     stream.synchronize()?;
 
-    validate_pinned_config(&model_config)?;
+    let decoder_capabilities = validate_pinned_config(&model_config)?;
     weights.validate(&model_config)?;
+    let canonical_capability_record = decoder_capabilities.canonical_record();
 
     let evidence = QualificationEvidence {
         schema_version: EVIDENCE_SCHEMA_VERSION,
@@ -275,6 +299,10 @@ fn run(arguments: Arguments) -> Result<()> {
             head_dim: model_config.head_dim(),
             key_value_width: model_config.key_value_width()?,
         },
+        decoder_capabilities: DecoderCapabilityEvidence {
+            profile: decoder_capabilities,
+            canonical_record: canonical_capability_record,
+        },
     };
 
     if let Some(path) = arguments.evidence_path.as_deref() {
@@ -289,6 +317,10 @@ fn run(arguments: Arguments) -> Result<()> {
     println!("layers={}", model_config.num_hidden_layers);
     println!("hidden_size={}", model_config.hidden_size);
     println!("kv_width={}", model_config.key_value_width()?);
+    println!(
+        "decoder_capability_contract_version={}",
+        evidence.decoder_capabilities.profile.contract_version
+    );
     println!("NNML0_REAL_SAFETENSORS_LOAD_OK");
     Ok(())
 }

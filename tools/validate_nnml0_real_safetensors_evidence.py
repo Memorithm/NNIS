@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 KIND = "nnis-nnml0-real-safetensors"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SOURCE_REPO = "HuggingFaceTB/SmolLM2-135M"
 SOURCE_REVISION = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
 SOURCE_MODEL_SHA256 = "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1"
@@ -29,6 +29,7 @@ TOP_LEVEL_KEYS = {
     "source",
     "device",
     "model",
+    "decoder_capabilities",
 }
 SOURCE_KEYS = {"repo", "revision", "model_sha256"}
 DEVICE_KEYS = {
@@ -55,6 +56,17 @@ MODEL_KEYS = {
     "head_dim",
     "key_value_width",
 }
+CAPABILITY_KEYS = {"profile", "canonical_record"}
+CAPABILITY_PROFILE_KEYS = {
+    "contract_version",
+    "attention_topology",
+    "rope_semantics",
+    "mlp_semantics",
+    "weight_dtype",
+    "num_attention_heads",
+    "num_key_value_heads",
+    "head_dim",
+}
 EXPECTED_MODEL = {
     "vocab_size": 49152,
     "eos_token_id": 0,
@@ -69,6 +81,26 @@ EXPECTED_MODEL = {
     "head_dim": 64,
     "key_value_width": 192,
 }
+EXPECTED_CAPABILITY_PROFILE = {
+    "contract_version": 1,
+    "attention_topology": "grouped_query",
+    "rope_semantics": "llama_rotate_half_unscaled",
+    "mlp_semantics": "swiglu_silu",
+    "weight_dtype": "bf16",
+    "num_attention_heads": 9,
+    "num_key_value_heads": 3,
+    "head_dim": 64,
+}
+EXPECTED_CAPABILITY_RECORD = (
+    "NNIS-DECODER-CAPABILITY-V1\n"
+    "attention=grouped_query\n"
+    "rope=llama_rotate_half_unscaled\n"
+    "mlp=swiglu_silu\n"
+    "weight_dtype=bf16\n"
+    "q_heads=9\n"
+    "kv_heads=3\n"
+    "head_dim=64\n"
+)
 
 
 class EvidenceError(ValueError):
@@ -171,10 +203,47 @@ def validate_evidence(document: object, expected_commit: str) -> None:
     if not math.isfinite(float(rope_theta)) or float(rope_theta) != 100000.0:
         raise EvidenceError(f"unexpected model.rope_theta {rope_theta!r}")
 
+    capabilities = require_dict(
+        root["decoder_capabilities"], "decoder_capabilities", CAPABILITY_KEYS
+    )
+    profile = require_dict(
+        capabilities["profile"],
+        "decoder_capabilities.profile",
+        CAPABILITY_PROFILE_KEYS,
+    )
+    for key, expected in EXPECTED_CAPABILITY_PROFILE.items():
+        actual = profile[key]
+        if isinstance(expected, int):
+            actual = require_int(
+                actual, f"decoder_capabilities.profile.{key}", minimum=0
+            )
+        elif isinstance(expected, str):
+            actual = require_nonempty_string(
+                actual, f"decoder_capabilities.profile.{key}"
+            )
+        if actual != expected:
+            raise EvidenceError(
+                f"decoder_capabilities.profile.{key} mismatch: got {actual!r}, expected {expected!r}"
+            )
+    canonical_record = require_nonempty_string(
+        capabilities["canonical_record"], "decoder_capabilities.canonical_record"
+    )
+    if canonical_record != EXPECTED_CAPABILITY_RECORD:
+        raise EvidenceError("decoder capability canonical record mismatch")
+
+    if profile["num_attention_heads"] != model["num_attention_heads"]:
+        raise EvidenceError("decoder capability Q-head count disagrees with model evidence")
+    if profile["num_key_value_heads"] != model["num_key_value_heads"]:
+        raise EvidenceError("decoder capability KV-head count disagrees with model evidence")
+    if profile["head_dim"] != model["head_dim"]:
+        raise EvidenceError("decoder capability head_dim disagrees with model evidence")
+    if profile["weight_dtype"] != model["weight_dtype"]:
+        raise EvidenceError("decoder capability weight dtype disagrees with model evidence")
+
 
 def synthetic_good_evidence() -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "kind": KIND,
         "result": "pass",
         "unix_timestamp_seconds": 1788459000,
@@ -200,6 +269,10 @@ def synthetic_good_evidence() -> dict:
             "rms_norm_eps": 9.999999747378752e-06,
             "rope_theta": 100000.0,
         },
+        "decoder_capabilities": {
+            "profile": dict(EXPECTED_CAPABILITY_PROFILE),
+            "canonical_record": EXPECTED_CAPABILITY_RECORD,
+        },
     }
 
 
@@ -208,7 +281,7 @@ def negative_self_tests() -> None:
     validate_evidence(good, expected_commit="a" * 40)
 
     mutations: list[tuple[str, object]] = [
-        ("schema", lambda d: d.__setitem__("schema_version", 2)),
+        ("schema", lambda d: d.__setitem__("schema_version", 1)),
         ("schema_bool", lambda d: d.__setitem__("schema_version", True)),
         ("kind", lambda d: d.__setitem__("kind", "other")),
         ("result", lambda d: d.__setitem__("result", "fail")),
@@ -225,6 +298,36 @@ def negative_self_tests() -> None:
         ("layers_bool", lambda d: d["model"].__setitem__("num_hidden_layers", True)),
         ("kv_width", lambda d: d["model"].__setitem__("key_value_width", 576)),
         ("eps", lambda d: d["model"].__setitem__("rms_norm_eps", float("nan"))),
+        (
+            "capability_version",
+            lambda d: d["decoder_capabilities"]["profile"].__setitem__(
+                "contract_version", 2
+            ),
+        ),
+        (
+            "attention_topology",
+            lambda d: d["decoder_capabilities"]["profile"].__setitem__(
+                "attention_topology", "multi_head"
+            ),
+        ),
+        (
+            "rope_semantics",
+            lambda d: d["decoder_capabilities"]["profile"].__setitem__(
+                "rope_semantics", "other"
+            ),
+        ),
+        (
+            "capability_record",
+            lambda d: d["decoder_capabilities"].__setitem__(
+                "canonical_record", EXPECTED_CAPABILITY_RECORD + "drift=true\n"
+            ),
+        ),
+        (
+            "capability_model_disagreement",
+            lambda d: d["decoder_capabilities"]["profile"].__setitem__(
+                "num_attention_heads", 3
+            ),
+        ),
         ("extra_key", lambda d: d.__setitem__("unexpected", True)),
     ]
     for name, mutate in mutations:
