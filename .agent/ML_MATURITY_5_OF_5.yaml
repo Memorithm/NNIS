@@ -23,7 +23,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: e9746bbaed449a9373790d902adf76afd2369cf8
+  main_head: aed87db46b71e6726c6b528624a0d641e933e2e9
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -54,7 +54,7 @@ current_progress:
       roadmap wording was verified. Do not add a nominal interoperability
       dependency until a versioned compatible contract exists.
   NNML1:
-    status: active_multi_model_parity_software_contract_merged_physical_records_pending
+    status: active_multi_model_parity_software_contract_and_physical_bundle_merged_records_pending
     merged:
       - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
       - pr_105_sampled_token_streaming_with_continuation_ready_state
@@ -64,6 +64,7 @@ current_progress:
       - pr_110_versioned_tokenizer_reference_identity_and_deterministic_SmolLM2_CPU_oracle
       - pr_111_persisted_TinyLlama_reference_artifact_identity_and_validator
       - pr_112_versioned_same_head_multi_checkpoint_parity_evidence_contract
+      - pr_113_same_head_P0_physical_qualification_bundle
     verified_software_capabilities:
       - versioned_host_visible_sampling_policy
       - NNIS_owned_SplitMix64_seeded_reproducibility
@@ -92,6 +93,8 @@ current_progress:
       - TinyLlama_massive_campaign_can_emit_generation_trajectory_record_only_after_full_successful_exact_greedy_consensus
       - SmolLM2_direct_comparator_can_emit_strict_logit_and_generation_record_on_a_clean_exact_Git_head
       - synthetic_contract_self_tests_are_explicitly_not_physical_model_parity_evidence
+      - P0_physical_bundle_enforces_clean_promoted_main_and_single_visible_GPU_selection
+      - P0_physical_bundle_preserves_separate_pinned_reference_environments_and_hashes_source_evidence_artifacts
     explicit_boundary: >-
       The decoder capability, exact checkpoint, tokenizer/reference identity,
       persisted reference-artifact and parity-evidence profiles describe audited
@@ -103,6 +106,7 @@ current_progress:
       per-session sampling. TinyLlama remains physically unqualified until its real
       campaign is executed on the target path.
     next:
+      - execute_merged_P0_physical_bundle_on_exact_main_aed87db4
       - collect_same_head_real_SmolLM2_logit_and_generation_record_on_supported_CUDA_path
       - collect_same_head_real_TinyLlama_generation_trajectory_record_from_the_massive_campaign
       - compose_and_validate_the_two_checkpoint_suite_without_model_family_admission_claim
@@ -129,6 +133,7 @@ current_progress:
       tokenizer_reference_identity_pr: 110
       reference_artifact_pr: 111
       parity_evidence_pr: 112
+      p0_physical_bundle_pr: 113
       rule: >-
         Persisted checkpoint/tokenizer/reference identity and the parity record
         producer do not establish Transformers-to-NNIS parity or general Llama-family

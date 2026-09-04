@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: e9746bbaed449a9373790d902adf76afd2369cf8
+  main_head: aed87db46b71e6726c6b528624a0d641e933e2e9
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -137,9 +137,12 @@ main_repository_state:
       the_persisted_reference_artifact_contract_does_not_claim_Transformers_NNIS_logit_parity_Thor_correctness_or_performance
 
   multi_model_parity_evidence:
-    status: merged_software_contract_physical_records_pending
+    status: merged_software_contract_physical_bundle_ready_records_pending
     pull_request: 112
     merge_commit: e9746bbaed449a9373790d902adf76afd2369cf8
+    physical_bundle_pull_request: 113
+    physical_bundle_merge_commit: aed87db46b71e6726c6b528624a0d641e933e2e9
+    physical_bundle_launcher: tools/run_p0_physical_qualification_bundle.py
     validator: tools/validate_nnml1_multi_model_parity_evidence.py
     record_kind: nnis-nnml1-reference-parity-record-v1
     suite_kind: nnis-nnml1-multi-model-parity-suite-v1
@@ -160,14 +163,18 @@ main_repository_state:
       - suite_rejects_mixed_Git_heads_and_duplicate_checkpoint_only_composition
       - TinyLlama_generation_record_requires_full_successful_exact_greedy_ABBA_observation_matrix
       - synthetic_self_tests_are_not_physical_parity_evidence
+      - P0_bundle_requires_clean_HEAD_equal_fetched_origin_main_and_external_work_cache_paths
+      - P0_bundle_preserves_distinct_pinned_SmolLM2_and_TinyLlama_reference_environments
+      - P0_bundle_uses_one_first_visible_GPU_for_all_constituent_physical_gates
+      - P0_bundle_manifest_hashes_parity_records_and_their_reference_consensus_source_artifacts
     claim_boundary: >-
       the_contract_and_producers_prepare_checkpoint_level_evidence_only; they_do_not_establish_new_CUDA_parity_results_general_model_family_support_or_performance
 
 current_execution_order:
   - id: P0_REAL_CHECKPOINT
-    status: next_physical_gate
+    status: physical_bundle_ready
     action: >-
-      run_the_pinned_SmolLM2_checkpoint_on_exact_main_e9746bba_and_generate_then_validate_schema_v2_capability_bound_evidence
+      run_the_merged_P0_physical_bundle_on_exact_main_aed87db4_to_generate_and_validate_NNML0_plus_same_head_SmolLM2_and_TinyLlama_checkpoint_evidence
     claim_boundary: structural_or_load_success_is_not_model_quality_or_performance_evidence
   - id: P0_TOKENIZER_REFERENCE_IDENTITY
     status: completed_software_contract
@@ -175,10 +182,10 @@ current_execution_order:
     action: >-
       versioned_tokenizer_reference_identity_and_TinyLlama_persisted_reference_artifact_contract_are_merged
   - id: P0_MULTI_MODEL_PARITY
-    status: software_contract_completed_physical_records_pending
-    completed_pull_requests: [112]
+    status: physical_bundle_ready_records_pending
+    completed_pull_requests: [112, 113]
     action: >-
-      execute_SmolLM2_and_TinyLlama_real_reference_comparisons_on_the_same_exact_main_head_then_compose_and_validate_the_checkpoint_level_suite
+      execute_the_merged_P0_physical_bundle_on_the_same_exact_main_head_then_review_the_generated_SmolLM2_and_TinyLlama_records_and_composed_checkpoint_level_suite
     claim_boundary: >-
       two_checkpoint_records_do_not_satisfy_the_multiple_real_model_families_exit_criterion_without_separate_family_admission_audits
   - id: P1_COMBINED_F16
@@ -188,8 +195,8 @@ current_execution_order:
     status: blocked_on_P1_COMBINED_F16
     action: reprofile_the_winning_exact_plan_and_select_the_new_measured_bottleneck
   - id: P1_P2_TINYLLAMA
-    status: physical_harness_reference_artifact_and_generation_parity_producer_ready
-    action: execute_the_pinned_massive_TinyLlama_campaign_without_cross_model_KA17_extrapolation
+    status: physical_bundle_ready_generation_parity_pending
+    action: execute_the_pinned_massive_TinyLlama_campaign_through_the_same_head_P0_bundle_without_cross_model_KA17_extrapolation
   - id: LONG_RUN_RESEARCH
     status: blocked_until_new_profile_exists
     action: generate_the_new_long_run_agent_protocol_from_current_measured_bottlenecks
