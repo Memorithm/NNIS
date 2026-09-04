@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -66,18 +65,16 @@ def parse_args() -> argparse.Namespace:
             "physical parity qualification on the fetched origin/main commit."
         )
     )
-    parser.add_argument("--work-dir", type=Path, required=True)
+    parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument(
         "--smollm2-python",
         type=Path,
-        required=True,
         help="Python executable with the exact SmolLM2 reference environment",
     )
     parser.add_argument(
         "--tinyllama-python",
         type=Path,
-        required=True,
         help="Python executable with the exact TinyLlama reference environment",
     )
     parser.add_argument("--device", type=non_negative_int, default=0)
@@ -273,6 +270,10 @@ def validate_json_kind(path: Path, expected_kind: str, expected_head: str) -> di
 
 
 def run_bundle(args: argparse.Namespace) -> Path:
+    if args.work_dir is None or args.smollm2_python is None or args.tinyllama_python is None:
+        raise QualificationError(
+            "--work-dir, --smollm2-python and --tinyllama-python are required for a physical run"
+        )
     for command in ["git", "cargo", "curl", "sha256sum", "bash"]:
         require_command(command)
 
