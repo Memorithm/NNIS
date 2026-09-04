@@ -40,13 +40,15 @@ jobs:
       - name: Validate NNML0 real-checkpoint evidence contract
         run: python3 tools/validate_nnml0_real_safetensors_evidence.py --self-test
 
-      - name: Validate tokenizer/reference identity contract
+      - name: Validate NNML1 identity and parity contracts
         run: |
           python3 tools/tokenizer_reference_identity.py --self-test
           python3 tools/validate_tinyllama_reference_artifact.py --self-test
+          python3 tools/validate_nnml1_multi_model_parity_evidence.py --self-test
           python3 -m py_compile \
             tools/tokenizer_reference_identity.py \
             tools/validate_tinyllama_reference_artifact.py \
+            tools/validate_nnml1_multi_model_parity_evidence.py \
             tools/smollm2_135m_fixture.py \
             tools/tinyllama_1p1b_chat_fixture.py \
             tools/run_tinyllama_massive_campaign.py

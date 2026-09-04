@@ -21,8 +21,15 @@ import subprocess
 import sys
 from typing import Any
 
+from validate_nnml1_multi_model_parity_evidence import (
+    GENERATION_TRAJECTORY,
+    build_record,
+)
 from validate_tinyllama_reference_artifact import (
     ArtifactError,
+    CHECKPOINT_SPEC_NAME,
+    REFERENCE_RUNTIME,
+    REFERENCE_TRANSFORMERS_VERSION,
     SOURCE_MODEL_SHA256,
     SOURCE_REPO,
     SOURCE_REVISION,
@@ -189,6 +196,75 @@ def validate_campaign(
     return run_context
 
 
+def collect_semantic_validation(campaigns: list[dict[str, Any]]) -> dict[str, Any]:
+    expected_observations = 0
+    observations = 0
+    successful_observations = 0
+    exact_greedy_observations = 0
+    for report in campaigns:
+        candidates = report.get("candidates")
+        rounds_per_candidate = report.get("rounds_per_candidate")
+        case_count = report.get("case_count")
+        if (
+            not isinstance(candidates, list)
+            or not candidates
+            or isinstance(rounds_per_candidate, bool)
+            or not isinstance(rounds_per_candidate, int)
+            or rounds_per_candidate <= 0
+            or isinstance(case_count, bool)
+            or not isinstance(case_count, int)
+            or case_count <= 0
+        ):
+            raise RuntimeError("campaign semantic dimensions are invalid")
+        expected_observations += len(candidates) * rounds_per_candidate * 4 * case_count
+        candidate_reports = report.get("candidate_reports")
+        if not isinstance(candidate_reports, list) or len(candidate_reports) != len(candidates):
+            raise RuntimeError("campaign candidate_reports do not cover candidates")
+        for candidate_report in candidate_reports:
+            rounds = candidate_report.get("rounds")
+            if not isinstance(rounds, list) or len(rounds) != rounds_per_candidate:
+                raise RuntimeError("campaign rounds do not match rounds_per_candidate")
+            for round_report in rounds:
+                blocks = round_report.get("blocks")
+                if not isinstance(blocks, list) or len(blocks) != 4:
+                    raise RuntimeError("campaign ABBA round must contain exactly four blocks")
+                for block in blocks:
+                    cases = block.get("cases")
+                    if not isinstance(cases, list) or len(cases) != case_count:
+                        raise RuntimeError("campaign block does not cover every reference case")
+                    for case in cases:
+                        if not isinstance(case, dict):
+                            raise RuntimeError("campaign case measurement must be an object")
+                        observations += 1
+                        if case.get("success") is True:
+                            successful_observations += 1
+                        generated_ids = case.get("generated_ids")
+                        decode_steps = case.get("decode_steps")
+                        exact = (
+                            case.get("success") is True
+                            and case.get("exact_oracle_greedy") is True
+                            and isinstance(generated_ids, list)
+                            and isinstance(decode_steps, int)
+                            and not isinstance(decode_steps, bool)
+                            and len(generated_ids) == decode_steps
+                        )
+                        if exact:
+                            exact_greedy_observations += 1
+    all_exact = (
+        observations > 0
+        and observations == expected_observations
+        and successful_observations == observations
+        and exact_greedy_observations == observations
+    )
+    return {
+        "expected_observations": expected_observations,
+        "observations": observations,
+        "successful_observations": successful_observations,
+        "exact_greedy_observations": exact_greedy_observations,
+        "all_exact_oracle_greedy": all_exact,
+    }
+
+
 def campaign_path(run_dir: Path, repeat: int) -> Path:
     return run_dir / f"campaign_{repeat:02d}.json"
 
@@ -313,6 +389,7 @@ def build_consensus(
     environment_compatible = all(environment == environments[0] for environment in environments[1:])
     exact_git_commit_equal = all(report["metadata"]["git_commit"] == head for report in campaigns)
     all_campaigns_complete = all(report.get("campaign_complete") is True for report in campaigns)
+    semantic_validation = collect_semantic_validation(campaigns)
 
     cells = collect_case_observations(campaigns)
     case_summaries = []
@@ -347,6 +424,7 @@ def build_consensus(
         and environment_compatible
         and exact_git_commit_equal
         and all_campaigns_complete
+        and semantic_validation["all_exact_oracle_greedy"]
     )
     return {
         "schema_version": 1,
@@ -360,6 +438,7 @@ def build_consensus(
         "environment_compatible_across_distinct_campaigns": environment_compatible,
         "exact_git_commit_equal": exact_git_commit_equal,
         "all_campaigns_complete": all_campaigns_complete,
+        "semantic_validation": semantic_validation,
         "consensus_valid": consensus_valid,
         "promotion_authorized": False,
         "claim_boundary": (
@@ -421,6 +500,7 @@ def main() -> None:
     work_dir = args.work_dir.resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     fixture = ensure_fixture(root, work_dir, args.cache_dir, args.force_fixture)
+    fixture_identity = validate_fixture(fixture)
     binary = build_benchmark(root)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -460,10 +540,35 @@ def main() -> None:
     summary_path = run_dir / "SUMMARY.md"
     write_markdown_summary(consensus, summary_path)
 
+    parity_path: Path | None = None
+    if consensus["consensus_valid"]:
+        semantic = consensus["semantic_validation"]
+        parity_record = build_record(
+            checkpoint_spec_name=CHECKPOINT_SPEC_NAME,
+            source_repo=SOURCE_REPO,
+            source_revision=SOURCE_REVISION,
+            source_model_sha256=SOURCE_MODEL_SHA256,
+            tokenizer_sha256=fixture_identity["tokenizer_sha256"],
+            reference_runtime=REFERENCE_RUNTIME,
+            reference_runtime_version=REFERENCE_TRANSFORMERS_VERSION,
+            execution_git_commit=head,
+            execution_backend="nnis-f16-cuda-massive-abba",
+            parity_level=GENERATION_TRAJECTORY,
+            case_count=fixture_identity["case_count"],
+            observations=semantic["observations"],
+            exact_greedy_observations=semantic["exact_greedy_observations"],
+            source_evidence_kind="nnis-tinyllama-trained-massive-f16-consensus-v1",
+            source_evidence_artifact=consensus_path.name,
+        )
+        parity_path = run_dir / "parity_record.json"
+        parity_path.write_text(json.dumps(parity_record, indent=2) + "\n", encoding="utf-8")
+
     print(f"fixture={fixture}")
     print(f"run_dir={run_dir}")
     print(f"consensus={consensus_path}")
     print(f"summary={summary_path}")
+    if parity_path is not None:
+        print(f"parity_record={parity_path}")
     print(f"campaigns_completed={len(campaigns)}/{args.repeats}")
     print(f"consensus_valid={str(consensus['consensus_valid']).lower()}")
     if not consensus["consensus_valid"]:
