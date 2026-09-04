@@ -1,6 +1,7 @@
 use nnis_model::{
     Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig, GenerationStreamControl,
-    MatrixWeight, Model, ModelConfig, ModelWeights, SamplingConfig, VectorWeight, WeightDType,
+    MatrixWeight, Model, ModelConfig, ModelWeights, SampledBatchRequest, SamplingConfig,
+    VectorWeight, WeightDType,
 };
 use nnis_rt::{gpu_context, Context, DeviceBuffer, Stream};
 use std::sync::Arc;
@@ -187,4 +188,70 @@ fn sampled_streaming_reports_eos_before_terminating_on_gpu() {
     assert_eq!(streamed, vec![2]);
     assert_eq!(generated, streamed);
     assert_eq!(session.position(), 3);
+}
+
+#[test]
+fn sampled_session_batch_preserves_independent_reproducible_state_on_gpu() {
+    let Some(context) = gpu_context() else {
+        eprintln!("skipped: no CUDA device");
+        return;
+    };
+    let construction_stream = Stream::new(&context).unwrap();
+    let model = equal_logit_model(&context, &construction_stream);
+    let mut batch = model.new_sampled_session_batch(2).unwrap();
+
+    let requests = vec![
+        SampledBatchRequest::new(
+            vec![1, 2],
+            GenerationConfig::fixed(3),
+            SamplingConfig::seeded(42),
+        ),
+        SampledBatchRequest::new(
+            vec![1, 2],
+            GenerationConfig::fixed(3),
+            SamplingConfig::seeded(42),
+        ),
+    ];
+    let outcomes = batch.generate_sampled(&requests).unwrap();
+
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(outcomes[0].as_ref().unwrap(), &vec![2, 0, 1]);
+    assert_eq!(outcomes[1].as_ref().unwrap(), &vec![2, 0, 1]);
+    assert_eq!(batch.positions(), vec![5, 5]);
+}
+
+#[test]
+fn sampled_session_batch_shape_mismatch_is_atomic_and_item_failure_is_isolated_on_gpu() {
+    let Some(context) = gpu_context() else {
+        eprintln!("skipped: no CUDA device");
+        return;
+    };
+    let construction_stream = Stream::new(&context).unwrap();
+    let model = equal_logit_model(&context, &construction_stream);
+    let mut batch = model.new_sampled_session_batch(2).unwrap();
+
+    let short = vec![SampledBatchRequest::new(
+        vec![1, 2],
+        GenerationConfig::fixed(1),
+        SamplingConfig::seeded(42),
+    )];
+    assert!(batch.generate_sampled(&short).is_err());
+    assert_eq!(batch.positions(), vec![0, 0]);
+
+    let requests = vec![
+        SampledBatchRequest::new(
+            vec![1, 2],
+            GenerationConfig::fixed(2),
+            SamplingConfig::seeded(42).with_top_k(0),
+        ),
+        SampledBatchRequest::new(
+            vec![1, 2],
+            GenerationConfig::fixed(2),
+            SamplingConfig::seeded(42),
+        ),
+    ];
+    let outcomes = batch.generate_sampled(&requests).unwrap();
+    assert!(outcomes[0].is_err());
+    assert_eq!(outcomes[1].as_ref().unwrap(), &vec![2, 0]);
+    assert_eq!(batch.positions()[1], 4);
 }
