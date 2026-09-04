@@ -1,0 +1,69 @@
+name: Branch P0 device coherence
+
+on:
+  push:
+    branches:
+      - feat/p0-physical-qualification-bundle-v1
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/p0-physical-qualification-bundle-v1
+          fetch-depth: 0
+
+      - name: Enforce one visible GPU across all gates
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/run_p0_physical_qualification_bundle.py')
+          text = path.read_text(encoding='utf-8')
+          old_arg = '    parser.add_argument("--device", type=non_negative_int, default=0)\n'
+          if old_arg in text:
+              text = text.replace(old_arg, '', 1)
+              text = text.replace(
+                  '        "--device",\n        str(args.device),\n',
+                  '        "--device",\n        "0",\n',
+                  1,
+              )
+              text = text.replace(
+                  '        "device_ordinal_requested_for_tinyllama": args.device,\n',
+                  '        "visible_device_ordinal": 0,\n        "device_selection_policy": "first_visible_device_for_all_physical_gates",\n',
+                  1,
+              )
+              path.write_text(text, encoding='utf-8')
+
+          docs_path = Path('docs/P0_PHYSICAL_QUALIFICATION_BUNDLE_V1.md')
+          docs = docs_path.read_text(encoding='utf-8')
+          marker = 'Architecture-specific NVIDIA/PyTorch installations may require their supported package source instead. Do not bypass the launcher\'s version checks merely to make an environment run.\n'
+          addition = marker + '\n## GPU selection coherence\n\nThe NNML0 and SmolLM2 qualification binaries currently select `Device::first()`. The bundle therefore forces TinyLlama to visible ordinal `0` as well, so all three physical gates target the same first visible CUDA device. On a multi-GPU host, select the intended physical GPU uniformly with `CUDA_VISIBLE_DEVICES` before invoking the bundle; do not mix per-command ordinals.\n'
+          if '## GPU selection coherence' not in docs:
+              if docs.count(marker) != 1:
+                  raise SystemExit('documentation insertion marker mismatch')
+              docs = docs.replace(marker, addition, 1)
+              docs_path.write_text(docs, encoding='utf-8')
+          PY
+
+      - name: Validate launcher
+        run: |
+          python3 tools/run_p0_physical_qualification_bundle.py --self-test
+          python3 -m py_compile tools/run_p0_physical_qualification_bundle.py
+
+      - name: Commit device-coherent bundle
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/run_p0_physical_qualification_bundle.py docs/P0_PHYSICAL_QUALIFICATION_BUNDLE_V1.md
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "fix(qualification): enforce coherent visible GPU selection"
+          git push origin HEAD:feat/p0-physical-qualification-bundle-v1
