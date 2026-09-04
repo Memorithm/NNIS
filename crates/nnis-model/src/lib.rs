@@ -9,6 +9,7 @@ mod cached_attention_candidate;
 mod config;
 mod da_luc_evidence;
 mod da_luc_plan;
+mod decoder_capabilities;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
@@ -49,6 +50,10 @@ pub use da_luc_plan::{
     NnisDalucResidualSemantics, NnisDalucRowOrder, NnisDalucStorageTopology,
     NnisDalucValueRepresentation, NnisDalucViewLayout, NnisDalucZeroPointStorage,
     NnisKvExecutionPolicy, NNIS_DA_LUC_PLAN_VERSION, SUPPORTED_FLAT_DA_LUC_VIEW_SCHEMA_VERSION,
+};
+pub use decoder_capabilities::{
+    DecoderAttentionTopology, DecoderExecutionCapabilities, DecoderMlpSemantics,
+    DecoderRopeSemantics, NNIS_DECODER_CAPABILITY_VERSION,
 };
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16ParallelScorePolicy, F16_ATTENTION_PLAN_VERSION,
