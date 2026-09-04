@@ -1,6 +1,6 @@
 use nnis_model::{
-    Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig, MatrixWeight, Model,
-    ModelConfig, ModelWeights, SamplingConfig, VectorWeight, WeightDType,
+    Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig, GenerationStreamControl,
+    MatrixWeight, Model, ModelConfig, ModelWeights, SamplingConfig, VectorWeight, WeightDType,
 };
 use nnis_rt::{gpu_context, Context, DeviceBuffer, Stream};
 use std::sync::Arc;
@@ -122,5 +122,69 @@ fn sampled_generation_observes_requested_eos_on_gpu() {
         )
         .unwrap();
     assert_eq!(generated, vec![2]);
+    assert_eq!(session.position(), 3);
+}
+
+#[test]
+fn sampled_streaming_delivers_tokens_and_stops_continuation_ready_on_gpu() {
+    let Some(context) = gpu_context() else {
+        eprintln!("skipped: no CUDA device");
+        return;
+    };
+    let construction_stream = Stream::new(&context).unwrap();
+    let model = equal_logit_model(&context, &construction_stream);
+    let mut session = model.new_session().unwrap();
+    let mut streamed = Vec::new();
+
+    let generated = session
+        .generate_sampled_streaming(
+            &[1, 2],
+            GenerationConfig::fixed(4),
+            SamplingConfig::seeded(42),
+            |token| {
+                streamed.push(token);
+                if streamed.len() == 2 {
+                    GenerationStreamControl::Stop
+                } else {
+                    GenerationStreamControl::Continue
+                }
+            },
+        )
+        .unwrap();
+
+    assert_eq!(streamed, vec![2, 0]);
+    assert_eq!(generated, streamed);
+    assert_eq!(session.position(), 4);
+
+    let continuation_logits = session.decode_one(1).unwrap();
+    assert_eq!(continuation_logits.len(), 4);
+    assert_eq!(session.position(), 5);
+}
+
+#[test]
+fn sampled_streaming_reports_eos_before_terminating_on_gpu() {
+    let Some(context) = gpu_context() else {
+        eprintln!("skipped: no CUDA device");
+        return;
+    };
+    let construction_stream = Stream::new(&context).unwrap();
+    let model = equal_logit_model(&context, &construction_stream);
+    let mut session = model.new_session().unwrap();
+    let mut streamed = Vec::new();
+
+    let generated = session
+        .generate_sampled_streaming(
+            &[1, 2],
+            GenerationConfig::until_eos(4, 2),
+            SamplingConfig::seeded(42),
+            |token| {
+                streamed.push(token);
+                GenerationStreamControl::Continue
+            },
+        )
+        .unwrap();
+
+    assert_eq!(streamed, vec![2]);
+    assert_eq!(generated, streamed);
     assert_eq!(session.position(), 3);
 }
