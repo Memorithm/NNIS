@@ -140,10 +140,10 @@ def require_clean_repository(root: Path) -> None:
         )
 
 
-def require_work_dir_outside_repository(root: Path, work_dir: Path) -> None:
-    if work_dir == root or work_dir.is_relative_to(root):
+def require_path_outside_repository(root: Path, path: Path, label: str) -> None:
+    if path == root or path.is_relative_to(root):
         raise QualificationError(
-            f"--work-dir must be outside the repository so evidence does not dirty the checkout: {work_dir}"
+            f"{label} must be outside the repository so qualification data does not dirty the checkout: {path}"
         )
 
 
@@ -279,11 +279,12 @@ def run_bundle(args: argparse.Namespace) -> Path:
 
     root = repository_root()
     work_dir = args.work_dir.expanduser().resolve()
-    require_work_dir_outside_repository(root, work_dir)
+    require_path_outside_repository(root, work_dir, "--work-dir")
     head = resolve_exact_main(root, args.expected_head)
     work_dir.mkdir(parents=True, exist_ok=True)
     cache_dir = args.cache_dir.expanduser().resolve() if args.cache_dir else None
     if cache_dir is not None:
+        require_path_outside_repository(root, cache_dir, "--cache-dir")
         cache_dir.mkdir(parents=True, exist_ok=True)
 
     smollm2_python = args.smollm2_python.expanduser().absolute()
@@ -299,9 +300,11 @@ def run_bundle(args: argparse.Namespace) -> Path:
     nnml0_evidence = work_dir / "nnml0-real-safetensors-evidence.json"
     smollm2_fixture = work_dir / "smollm2-fixture"
     smollm2_parity = work_dir / "smollm2-parity-record.json"
+    smollm2_reference_manifest = smollm2_fixture / "reference" / "reference.json"
     tinyllama_work = work_dir / "tinyllama"
     tinyllama_run_dir = tinyllama_work / f"runs-{head[:12]}"
     tinyllama_parity = tinyllama_run_dir / "parity_record.json"
+    tinyllama_consensus = tinyllama_run_dir / "consensus.json"
     parity_suite = work_dir / "nnml1-multi-model-parity-suite.json"
     bundle_manifest = work_dir / "P0_PHYSICAL_QUALIFICATION.json"
 
@@ -457,7 +460,9 @@ def run_bundle(args: argparse.Namespace) -> Path:
         },
         "artifacts": {
             "nnml0_real_safetensors": artifact_entry(nnml0_evidence),
+            "smollm2_reference_manifest": artifact_entry(smollm2_reference_manifest),
             "smollm2_parity_record": artifact_entry(smollm2_parity),
+            "tinyllama_consensus": artifact_entry(tinyllama_consensus),
             "tinyllama_parity_record": artifact_entry(tinyllama_parity),
             "nnml1_multi_model_parity_suite": artifact_entry(parity_suite),
         },
@@ -522,13 +527,19 @@ def self_test() -> None:
         root = Path(temporary) / "repo"
         root.mkdir()
         outside = Path(temporary) / "evidence"
-        require_work_dir_outside_repository(root, outside)
+        require_path_outside_repository(root, outside, "--work-dir")
         try:
-            require_work_dir_outside_repository(root, root / "evidence")
+            require_path_outside_repository(root, root / "evidence", "--work-dir")
         except QualificationError:
             pass
         else:
             raise AssertionError("work directory inside repository unexpectedly passed")
+        try:
+            require_path_outside_repository(root, root / "cache", "--cache-dir")
+        except QualificationError:
+            pass
+        else:
+            raise AssertionError("cache directory inside repository unexpectedly passed")
         artifact = outside / "artifact.json"
         outside.mkdir()
         artifact.write_text('{"ok":true}\n', encoding="utf-8")

@@ -48,7 +48,7 @@ Architecture-specific NVIDIA/PyTorch installations may require their supported p
 
 ## Physical run
 
-The evidence directory must be outside the repository. From a clean checkout of promoted `main`:
+The evidence directory and optional cache directory must both be outside the repository. From a clean checkout of promoted `main`:
 
 ```bash
 git fetch origin main
@@ -76,7 +76,7 @@ For a successful run, the bundle directory contains at least:
 - `nnml1-multi-model-parity-suite.json`
 - `P0_PHYSICAL_QUALIFICATION.json`
 
-The bundle manifest records SHA-256 digests for these evidence artifacts. The individual validators remain authoritative for their semantics.
+The bundle manifest records SHA-256 digests for these evidence artifacts and for the SmolLM2 `reference.json` and TinyLlama `consensus.json` source-evidence files. The individual validators remain authoritative for their semantics.
 
 ## Claim boundary
 
