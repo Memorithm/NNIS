@@ -75,7 +75,10 @@ impl<'model> SampledSessionBatch<'model> {
 
     /// Current decoder position of every session, in stable batch-index order.
     pub fn positions(&self) -> Vec<usize> {
-        self.sessions.iter().map(InferenceSession::position).collect()
+        self.sessions
+            .iter()
+            .map(InferenceSession::position)
+            .collect()
     }
 
     /// Execute one sampled request per session in deterministic index order.
@@ -102,11 +105,7 @@ impl<'model> SampledSessionBatch<'model> {
             .iter_mut()
             .zip(requests)
             .map(|(session, request)| {
-                session.generate_sampled(
-                    &request.input_ids,
-                    request.generation,
-                    request.sampling,
-                )
+                session.generate_sampled(&request.input_ids, request.generation, request.sampling)
             })
             .collect())
     }
