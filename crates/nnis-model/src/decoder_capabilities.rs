@@ -144,15 +144,24 @@ mod tests {
     #[test]
     fn classifies_mha_gqa_and_mqa_without_changing_geometry() {
         assert_eq!(
-            config(4, 4).decoder_capabilities().unwrap().attention_topology,
+            config(4, 4)
+                .decoder_capabilities()
+                .unwrap()
+                .attention_topology,
             DecoderAttentionTopology::MultiHead
         );
         assert_eq!(
-            config(4, 2).decoder_capabilities().unwrap().attention_topology,
+            config(4, 2)
+                .decoder_capabilities()
+                .unwrap()
+                .attention_topology,
             DecoderAttentionTopology::GroupedQuery
         );
         assert_eq!(
-            config(4, 1).decoder_capabilities().unwrap().attention_topology,
+            config(4, 1)
+                .decoder_capabilities()
+                .unwrap()
+                .attention_topology,
             DecoderAttentionTopology::MultiQuery
         );
     }
