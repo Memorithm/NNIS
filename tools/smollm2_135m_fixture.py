@@ -18,8 +18,22 @@ import gc
 import hashlib
 import json
 import math
+import os
 import shutil
 from pathlib import Path
+
+# The trusted CPU oracle is a reproducibility fixture, not a performance path.
+# Configure its math runtime before importing torch so hosted runners with
+# different CPU models use the same oneMKL branch and a fixed thread count.
+_DETERMINISTIC_ENV = {
+    "MKL_CBWR": "COMPATIBLE",
+    "MKL_DYNAMIC": "FALSE",
+    "OMP_DYNAMIC": "FALSE",
+    "MKL_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+}
+for _name, _value in _DETERMINISTIC_ENV.items():
+    os.environ[_name] = _value
 
 import torch
 import transformers
@@ -33,6 +47,30 @@ MODEL_SHA256 = "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
 TRANSFORMERS_VERSION = "4.40.1"
 DEFAULT_PROMPT = "Gravity is"
 DEFAULT_DECODE_STEPS = 2
+REFERENCE_EXECUTION_POLICY = {
+    "torch_deterministic_algorithms": True,
+    "torch_manual_seed": 0,
+    "torch_num_threads": 1,
+    "torch_num_interop_threads": 1,
+    "mkl_cbwr": "COMPATIBLE",
+    "mkl_dynamic": False,
+    "omp_dynamic": False,
+    "mkl_num_threads": 1,
+    "omp_num_threads": 1,
+}
+
+
+def configure_reference_runtime() -> None:
+    torch.manual_seed(0)
+    torch.use_deterministic_algorithms(True)
+    torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
+    if not torch.are_deterministic_algorithms_enabled():
+        raise RuntimeError("trusted reference requires deterministic torch algorithms")
+    if torch.get_num_threads() != 1 or torch.get_num_interop_threads() != 1:
+        raise RuntimeError(
+            "trusted reference requires exactly one intra-op and one inter-op CPU thread"
+        )
 
 
 def sha256(path: Path) -> str:
@@ -279,6 +317,7 @@ def reference_logits(
         "source_weight_dtype": "bfloat16",
         "execution_weight_dtype": "f32",
         "tokenizer_sha256": tokenizer_sha256,
+        "reference_execution_policy": dict(REFERENCE_EXECUTION_POLICY),
         "prompt": prompt,
         "input_ids": input_ids[0].tolist(),
         "decode_steps": decode_steps,
@@ -312,6 +351,7 @@ def reference_logits(
 
 
 def main() -> None:
+    configure_reference_runtime()
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--cache-dir", type=Path)
