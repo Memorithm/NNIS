@@ -46,6 +46,10 @@ python3 -m venv /tmp/nnis-tinyllama-ref
 
 Architecture-specific NVIDIA/PyTorch installations may require their supported package source instead. Do not bypass the launcher's version checks merely to make an environment run.
 
+## GPU selection coherence
+
+The NNML0 and SmolLM2 qualification binaries currently select `Device::first()`. The bundle therefore forces TinyLlama to visible ordinal `0` as well, so all three physical gates target the same first visible CUDA device. On a multi-GPU host, select the intended physical GPU uniformly with `CUDA_VISIBLE_DEVICES` before invoking the bundle; do not mix per-command ordinals.
+
 ## Physical run
 
 The evidence directory and optional cache directory must both be outside the repository. From a clean checkout of promoted `main`:

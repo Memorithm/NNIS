@@ -77,7 +77,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Python executable with the exact TinyLlama reference environment",
     )
-    parser.add_argument("--device", type=non_negative_int, default=0)
     parser.add_argument("--tinyllama-repeats", type=positive_int, default=2)
     parser.add_argument("--tinyllama-rounds", type=positive_int, default=4)
     parser.add_argument("--tinyllama-warmups", type=positive_int, default=1)
@@ -382,7 +381,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "--work-dir",
         str(tinyllama_work),
         "--device",
-        str(args.device),
+        "0",
         "--repeats",
         str(args.tinyllama_repeats),
         "--rounds",
@@ -447,7 +446,8 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "nnis_git_commit": head,
         "nnis_git_dirty": False,
         "origin_main_commit": head,
-        "device_ordinal_requested_for_tinyllama": args.device,
+        "visible_device_ordinal": 0,
+        "device_selection_policy": "first_visible_device_for_all_physical_gates",
         "python_environments": {
             "smollm2": {
                 "executable": str(smollm2_python),
