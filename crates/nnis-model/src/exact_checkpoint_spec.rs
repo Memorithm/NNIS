@@ -215,7 +215,10 @@ mod tests {
             capabilities.attention_topology,
             DecoderAttentionTopology::GroupedQuery
         );
-        assert_eq!(capabilities.canonical_record(), SMOLLM2_135M_CAPABILITY_RECORD);
+        assert_eq!(
+            capabilities.canonical_record(),
+            SMOLLM2_135M_CAPABILITY_RECORD
+        );
 
         let mut drifted = config;
         drifted.rope_theta = 10_000.0;
