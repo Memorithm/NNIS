@@ -21,19 +21,15 @@ import subprocess
 import sys
 from typing import Any
 
-from tokenizer_reference_identity import IdentityError, build_identity, validate_documents
+from validate_tinyllama_reference_artifact import (
+    ArtifactError,
+    SOURCE_MODEL_SHA256,
+    SOURCE_REPO,
+    SOURCE_REVISION,
+    validate_fixture,
+)
 
 BENCHMARK_KIND = "trained-llama-f16-massive-abba-v1"
-SUITE_KIND = "nnis-trained-llama-reference-suite-v1"
-SOURCE_REPO = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-SOURCE_REVISION = "d9128824c0c80111be21424e68086f52413fb413"
-SOURCE_MODEL_SHA256 = "6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933"
-CHECKPOINT_SPEC_NAME = "tinyllama-1.1b-chat-v1.0-bf16"
-CHECKPOINT_SPEC_VERSION = 1
-REFERENCE_TRANSFORMERS_VERSION = "4.43.3"
-REFERENCE_ORACLE_SEMANTICS = (
-    "Transformers CPU F32 greedy generation from the exact pinned checkpoint widened to F32"
-)
 DEFAULT_CANDIDATES = "transposed,fused,fused_mlp,staged,fused_mlp_staged"
 
 
@@ -95,45 +91,11 @@ def repository_identity(root: Path) -> tuple[str, bool]:
 
 
 def validate_existing_fixture(fixture: Path) -> bool:
-    suite_path = fixture / "reference_suite.json"
-    provenance_path = fixture / "model" / "provenance.json"
-    model_path = fixture / "model" / "model.json"
-    tokenizer_path = fixture / "tokenizer.json"
-    if not all(path.is_file() for path in (suite_path, provenance_path, model_path, tokenizer_path)):
-        return False
     try:
-        suite = json.loads(suite_path.read_text(encoding="utf-8"))
-        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-        identity = build_identity(
-            checkpoint_spec_name=CHECKPOINT_SPEC_NAME,
-            checkpoint_spec_version=CHECKPOINT_SPEC_VERSION,
-            source_repo=SOURCE_REPO,
-            source_revision=SOURCE_REVISION,
-            source_model_sha256=SOURCE_MODEL_SHA256,
-            tokenizer_path=tokenizer_path,
-            reference_kind=SUITE_KIND,
-            reference_runtime="transformers",
-            reference_runtime_version=REFERENCE_TRANSFORMERS_VERSION,
-            source_weight_dtype="bfloat16",
-            execution_weight_dtype="f32",
-            oracle_semantics=REFERENCE_ORACLE_SEMANTICS,
-        )
-        validate_documents(identity, {"suite": suite, "provenance": provenance})
-    except (OSError, json.JSONDecodeError, IdentityError):
+        validate_fixture(fixture)
+    except ArtifactError:
         return False
-    return (
-        suite.get("schema_version") == 1
-        and suite.get("kind") == SUITE_KIND
-        and suite.get("source_repo") == SOURCE_REPO
-        and suite.get("source_revision") == SOURCE_REVISION
-        and suite.get("source_model_sha256") == SOURCE_MODEL_SHA256
-        and isinstance(suite.get("cases"), list)
-        and len(suite["cases"]) == 18
-        and provenance.get("source_repo") == SOURCE_REPO
-        and provenance.get("source_revision") == SOURCE_REVISION
-        and provenance.get("source_model_sha256") == SOURCE_MODEL_SHA256
-        and provenance.get("tokenizer_sha256") == suite.get("tokenizer_sha256")
-    )
+    return True
 
 
 def ensure_fixture(root: Path, work_dir: Path, cache_dir: Path | None, force: bool) -> Path:
