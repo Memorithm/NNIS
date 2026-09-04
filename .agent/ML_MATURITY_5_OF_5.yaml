@@ -23,7 +23,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: d616afaf2117950be568f7b0dc506d27e9f1fb0c
+  main_head: e9746bbaed449a9373790d902adf76afd2369cf8
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -54,7 +54,7 @@ current_progress:
       roadmap wording was verified. Do not add a nominal interoperability
       dependency until a versioned compatible contract exists.
   NNML1:
-    status: active_exact_checkpoint_tokenizer_reference_artifact_contracts_merged_parity_gates_open
+    status: active_multi_model_parity_software_contract_merged_physical_records_pending
     merged:
       - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
       - pr_105_sampled_token_streaming_with_continuation_ready_state
@@ -63,6 +63,7 @@ current_progress:
       - pr_109_versioned_exact_decoder_checkpoint_specs
       - pr_110_versioned_tokenizer_reference_identity_and_deterministic_SmolLM2_CPU_oracle
       - pr_111_persisted_TinyLlama_reference_artifact_identity_and_validator
+      - pr_112_versioned_same_head_multi_checkpoint_parity_evidence_contract
     verified_software_capabilities:
       - versioned_host_visible_sampling_policy
       - NNIS_owned_SplitMix64_seeded_reproducibility
@@ -85,17 +86,26 @@ current_progress:
       - TinyLlama_reference_artifact_persists_tokenizer_reference_identity
       - TinyLlama_artifact_validator_checks_exact_config_case_policy_token_ranges_position_bounds_and_reference_policy
       - TinyLlama_campaign_launcher_fails_closed_on_missing_or_incoherent_persisted_reference_identity
+      - versioned_parity_records_distinguish_generation_trajectory_from_logit_and_generation
+      - strict_logit_parity_records_require_zero_tolerance_failures_and_zero_non_finite_logits
+      - same_head_multi_checkpoint_suite_rejects_mixed_Git_commits_and_duplicate_checkpoint_only_composition
+      - TinyLlama_massive_campaign_can_emit_generation_trajectory_record_only_after_full_successful_exact_greedy_consensus
+      - SmolLM2_direct_comparator_can_emit_strict_logit_and_generation_record_on_a_clean_exact_Git_head
+      - synthetic_contract_self_tests_are_explicitly_not_physical_model_parity_evidence
     explicit_boundary: >-
-      The decoder capability, exact checkpoint, tokenizer/reference identity and
-      persisted reference-artifact profiles describe audited semantics and artifact
-      identity; they are not model-family admission, Transformers-to-NNIS parity,
-      CUDA correctness, or performance claims. Sampled generation, sampled streaming
+      The decoder capability, exact checkpoint, tokenizer/reference identity,
+      persisted reference-artifact and parity-evidence profiles describe audited
+      semantics, artifact identity and evidence structure. They are not model-family
+      admission, new CUDA parity results, or performance claims. The two currently
+      registered parity checkpoints are checkpoint-level identities rather than two
+      independently admitted model families. Sampled generation, sampled streaming
       and the multi-session batch contract still execute through host-visible
-      per-session sampling. The batch contract is deterministic host orchestration,
-      not fused or concurrent GPU batching. TinyLlama remains physically unqualified.
+      per-session sampling. TinyLlama remains physically unqualified until its real
+      campaign is executed on the target path.
     next:
-      - prepare_versioned_multiple_exact_checkpoint_reference_parity_and_generation_smoke_evidence
-      - obtain_real_model_reference_parity_and_generation_smoke_evidence_on_supported_execution_paths
+      - collect_same_head_real_SmolLM2_logit_and_generation_record_on_supported_CUDA_path
+      - collect_same_head_real_TinyLlama_generation_trajectory_record_from_the_massive_campaign
+      - compose_and_validate_the_two_checkpoint_suite_without_model_family_admission_claim
       - add_new_model_family_admission_only_after_exact_semantic_audit
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
@@ -113,16 +123,17 @@ current_progress:
         Require fresh fingerprint-compatible physical end-to-end evidence before
         promotion.
     tinyllama_massive_campaign:
-      status: harness_merged_persisted_reference_artifact_ready_physical_execution_not_claimed
+      status: harness_reference_artifact_and_generation_parity_producer_ready_physical_execution_not_claimed
       harness_pr: 99
       exact_checkpoint_spec_pr: 109
       tokenizer_reference_identity_pr: 110
       reference_artifact_pr: 111
+      parity_evidence_pr: 112
       rule: >-
-        Persisted checkpoint/tokenizer/reference identity does not establish
-        Transformers-to-NNIS parity or general Llama-family support. Do not promote
-        candidates until the committed real-model campaign produces reviewable
-        physical evidence.
+        Persisted checkpoint/tokenizer/reference identity and the parity record
+        producer do not establish Transformers-to-NNIS parity or general Llama-family
+        support. Do not promote candidates until the committed real-model campaign
+        produces reviewable physical evidence.
 priority_program:
   - id: NNML0
     name: Shared model and tensor interoperability
