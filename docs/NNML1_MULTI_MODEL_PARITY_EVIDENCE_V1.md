@@ -19,7 +19,7 @@ Version 1 recognizes only the exact checkpoint identities already registered by 
 - `smollm2-135m-bf16`
 - `tinyllama-1.1b-chat-v1.0-bf16`
 
-Adding another checkpoint requires an explicit versioned checkpoint/specification audit. Passing these two checkpoints does not by itself establish general Llama-family support.
+Adding another checkpoint requires an explicit versioned checkpoint/specification audit. Passing these two checkpoints does not by itself establish general Llama-family support. The suite is checkpoint-level composition, not a claim that multiple model families have been admitted.
 
 ## TinyLlama producer
 
@@ -76,4 +76,4 @@ The CI self-test uses synthetic records only to exercise the schema and negative
 
 ## Claim boundary
 
-This contract prepares and validates evidence production. It does not itself prove SmolLM2 or TinyLlama parity on a new hardware run, does not qualify Jetson Thor for TinyLlama, does not establish serving performance, and does not authorize a default runtime or model-family promotion.
+This contract prepares and validates evidence production. It does not itself prove SmolLM2 or TinyLlama parity on a new hardware run, does not qualify Jetson Thor for TinyLlama, does not establish serving performance, and does not authorize a default runtime, model-family admission, or model-family promotion.
