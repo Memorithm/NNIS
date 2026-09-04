@@ -2,7 +2,7 @@ schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
 last_updated: "2026-09-04"
-repository: Memorithm/NVIDIA-Native-Inference-Stack
+repository: Memorithm/NNIS
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
   remaining a specialized inference runtime rather than absorbing SciRust's
@@ -23,7 +23,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 259b22b8b45c8d79c60b191c7ed0fcc12916a763
+  main_head: d616afaf2117950be568f7b0dc506d27e9f1fb0c
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -44,7 +44,7 @@ current_progress:
       - schema_v2_rejects_attention_RoPE_MLP_dtype_or_canonical_capability_drift
       - SmolLM2_source_config_and_capability_identity_shared_through_versioned_exact_checkpoint_spec
     open_gate: >-
-      Run the exact promoted main commit on the real CUDA target with the pinned
+      Run the exact current main commit on the real CUDA target with the pinned
       SmolLM2 checkpoint, generate schema-v2 capability-bound evidence, and
       validate it against that same commit. No physical NNML0 completion is
       claimed until this exists.
@@ -54,13 +54,15 @@ current_progress:
       roadmap wording was verified. Do not add a nominal interoperability
       dependency until a versioned compatible contract exists.
   NNML1:
-    status: active_sampling_streaming_batch_capability_and_exact_checkpoint_contracts_merged
+    status: active_exact_checkpoint_tokenizer_reference_artifact_contracts_merged_parity_gates_open
     merged:
       - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
       - pr_105_sampled_token_streaming_with_continuation_ready_state
       - pr_106_independent_sampled_multi_session_batch_contract
       - pr_107_versioned_decoder_execution_capability_profile
       - pr_109_versioned_exact_decoder_checkpoint_specs
+      - pr_110_versioned_tokenizer_reference_identity_and_deterministic_SmolLM2_CPU_oracle
+      - pr_111_persisted_TinyLlama_reference_artifact_identity_and_validator
     verified_software_capabilities:
       - versioned_host_visible_sampling_policy
       - NNIS_owned_SplitMix64_seeded_reproducibility
@@ -77,18 +79,23 @@ current_progress:
       - explicit_SwiGLU_SiLU_MLP_execution_identity
       - SmolLM2_real_checkpoint_qualification_contract_bound_to_exact_capability_identity
       - shared_versioned_exact_checkpoint_source_config_and_capability_identity
-      - TinyLlama_existing_campaign_checkpoint_registered_without_support_or_physical_qualification_claim
+      - actual_tokenizer_bytes_bound_to_checkpoint_and_reference_runtime_identity
+      - SmolLM2_CPU_reference_policy_explicitly_controls_deterministic_algorithms_threads_and_oneMKL_branch
+      - SmolLM2_reference_fingerprints_reproduced_under_the_declared_CPU_policy_before_commitment
+      - TinyLlama_reference_artifact_persists_tokenizer_reference_identity
+      - TinyLlama_artifact_validator_checks_exact_config_case_policy_token_ranges_position_bounds_and_reference_policy
+      - TinyLlama_campaign_launcher_fails_closed_on_missing_or_incoherent_persisted_reference_identity
     explicit_boundary: >-
-      The decoder capability and exact checkpoint profiles describe semantics and
-      identity of already-audited configurations; they are not model-family admission
-      or parity claims. Sampled generation, sampled streaming and the multi-session
-      batch contract still execute through host-visible per-session sampling. The
-      batch contract is deterministic host orchestration, not fused or concurrent GPU
-      batching. TinyLlama remains physically unqualified despite having an exact
-      checkpoint spec.
+      The decoder capability, exact checkpoint, tokenizer/reference identity and
+      persisted reference-artifact profiles describe audited semantics and artifact
+      identity; they are not model-family admission, Transformers-to-NNIS parity,
+      CUDA correctness, or performance claims. Sampled generation, sampled streaming
+      and the multi-session batch contract still execute through host-visible
+      per-session sampling. The batch contract is deterministic host orchestration,
+      not fused or concurrent GPU batching. TinyLlama remains physically unqualified.
     next:
-      - add_versioned_tokenizer_and_reference_identity_without_inventing_unverified_hashes
-      - obtain_multiple_real_model_reference_parity_and_generation_smoke_evidence
+      - prepare_versioned_multiple_exact_checkpoint_reference_parity_and_generation_smoke_evidence
+      - obtain_real_model_reference_parity_and_generation_smoke_evidence_on_supported_execution_paths
       - add_new_model_family_admission_only_after_exact_semantic_audit
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
@@ -106,12 +113,16 @@ current_progress:
         Require fresh fingerprint-compatible physical end-to-end evidence before
         promotion.
     tinyllama_massive_campaign:
-      status: harness_merged_exact_checkpoint_identity_registered_physical_execution_not_claimed
+      status: harness_merged_persisted_reference_artifact_ready_physical_execution_not_claimed
       harness_pr: 99
       exact_checkpoint_spec_pr: 109
+      tokenizer_reference_identity_pr: 110
+      reference_artifact_pr: 111
       rule: >-
-        Do not infer general Llama-family support or promote candidates until the
-        committed real-model campaign produces reviewable physical evidence.
+        Persisted checkpoint/tokenizer/reference identity does not establish
+        Transformers-to-NNIS parity or general Llama-family support. Do not promote
+        candidates until the committed real-model campaign produces reviewable
+        physical evidence.
 priority_program:
   - id: NNML0
     name: Shared model and tensor interoperability
