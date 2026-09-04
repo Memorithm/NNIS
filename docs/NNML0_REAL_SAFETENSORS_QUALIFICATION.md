@@ -14,8 +14,8 @@ support.
 - expected persisted weight dtype: BF16
 
 The qualification executable rejects source hash drift, architecture/config
-drift, unsupported dtype, dirty NNIS worktrees, malformed tensor geometry, and
-CUDA upload failures.
+drift, unsupported dtype, dirty NNIS worktrees, malformed tensor geometry, CUDA
+upload failures, and decoder-capability drift.
 
 ## Physical run
 
@@ -52,11 +52,26 @@ python3 tools/validate_nnml0_real_safetensors_evidence.py \
   --expected-commit "$(git rev-parse HEAD)"
 ```
 
-The validator is fail-closed. It requires schema version 1, a clean 40-hex NNIS
-commit identity, the frozen source identity, a concrete CUDA UUID and device
-geometry, BF16 SmolLM2-135M model geometry, and `result = "pass"`. Unknown
-fields and altered contract values are rejected. CI runs negative self-tests of
-the validator independently of physical GPU evidence.
+The validator is fail-closed. Schema version 2 requires:
+
+- a clean 40-hex NNIS commit identity;
+- the frozen source repository, revision, and model SHA-256;
+- a concrete CUDA UUID and device geometry;
+- exact BF16 SmolLM2-135M model geometry;
+- decoder capability contract v1 bound to `grouped_query`,
+  `llama_rotate_half_unscaled`, and `swiglu_silu`;
+- exact Q/KV head counts, head dimension, and dtype agreement between the model
+  evidence and decoder-capability evidence;
+- the exact deterministic decoder-capability canonical record;
+- `result = "pass"`.
+
+Unknown fields and altered contract values are rejected. CI runs negative
+self-tests of the validator independently of physical GPU evidence.
+
+Schema v1 evidence is intentionally no longer sufficient for the current gate:
+the physical qualification has not yet been closed, so NNIS binds the first
+accepted promoted evidence to the stronger versioned execution-semantic
+contract rather than grandfathering a weaker record.
 
 ## Promotion boundary
 
