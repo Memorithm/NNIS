@@ -211,7 +211,7 @@ def validate_python_probe(
 
 
 def probe_python(executable: Path, expected: dict[str, str], label: str) -> dict[str, str]:
-    executable = executable.expanduser().resolve()
+    executable = executable.expanduser().absolute()
     if not executable.is_file():
         raise QualificationError(f"{label} Python executable does not exist: {executable}")
     raw = run_capture([str(executable), "-c", _probe_script()])
@@ -286,8 +286,8 @@ def run_bundle(args: argparse.Namespace) -> Path:
     if cache_dir is not None:
         cache_dir.mkdir(parents=True, exist_ok=True)
 
-    smollm2_python = args.smollm2_python.expanduser().resolve()
-    tinyllama_python = args.tinyllama_python.expanduser().resolve()
+    smollm2_python = args.smollm2_python.expanduser().absolute()
+    tinyllama_python = args.tinyllama_python.expanduser().absolute()
     smollm2_probe = probe_python(smollm2_python, SMOLLM2_ENV, "SmolLM2")
     tinyllama_probe = probe_python(tinyllama_python, TINYLLAMA_ENV, "TinyLlama")
     if smollm2_python == tinyllama_python:
