@@ -1,0 +1,62 @@
+schema_version: 1
+kind: nnis_cross_repository_evidence_process_record
+status: qualified_software_process_boundary
+recorded_at: "2026-09-05"
+repository: Memorithm/NNIS
+subject: NNML1_parity_validation_Hub_SciRust_Verify_handoff
+nnis:
+  contract: nnis.nnml1.parity-validation@1.0.0
+  input_media_type: application/vnd.nnis.nnml1.parity-evidence.v1+json
+  output_media_type: application/vnd.nnis.nnml1.parity-validation.v1+json
+  pull_request: 114
+  final_exact_head: c74b6b04c45e320c86cdd973b31f49f43c720681
+  merge_commit: 0ae4b0d4659c8de9b8a8322ed6ab7f8e110b53f2
+  required_CI: CI_334_success_on_final_exact_head_including_Rust_1_77
+  behavior:
+    - delegates_semantic_validation_to_existing_NNIS_owned_parity_validator
+    - SHA_256_binds_exact_input_bytes
+    - emits_deterministic_validation_envelope
+    - promotion_authorized_false_by_construction
+    - serving_performance_verified_false_by_construction
+    - general_model_family_support_verified_false_by_construction
+scirust_verify:
+  process: scirust-verify-nnis-parity
+  contract: scirust-verify.nnis-parity-dossier@1.0.0
+  pull_request: 33
+  final_exact_head: a120c54ed05b058d9347691d0036eaaaa831df41
+  merge_commit: 593692aea76b90e50899e733344ffa4cf61ba380
+  required_CI: CI_110_success_on_final_exact_head_including_dogfood
+  scope: exact_byte_binding_and_validation_envelope_only
+  behavior:
+    - independently_hashes_exact_original_parity_evidence_bytes
+    - requires_NNIS_validation_source_sha256_and_kind_to_match
+    - preserves_NNIS_checkpoint_parity_reference_and_backend_fields_as_source_observations
+    - seals_exact_validation_result_as_content_addressed_dossier_attachment
+    - does_not_reimplement_NNIS_parity_or_promotion_semantics
+hub:
+  capabilities:
+    - inference.nnis.parity_validate@1.0.0
+    - inference.nnis.parity_verify@1.0.0
+  pull_request: 37
+  final_exact_head: 9e95e7d6a141b3f06bfc9effac51007bdfe9b1c2
+  merge_commit: 0e484d9f9903fe0f0fcb7111e0191dfb14d958b4
+  required_CI: CI_102_success_on_final_exact_head
+  ownership: orchestration_immutable_artifact_flow_and_execution_provenance_only
+claim_boundary:
+  creates_new_physical_CUDA_or_model_evidence: false
+  establishes_strict_logit_equivalence: false
+  establishes_model_quality: false
+  establishes_serving_performance: false
+  establishes_general_model_family_support: false
+  establishes_cross_host_portability: false
+  establishes_Jetson_or_ARM64_support: false
+  authorizes_runtime_or_model_family_promotion: false
+  completes_NNML1_physical_parity_suite: false
+relationship_to_PR116:
+  smollm2_semantic_trajectory_evidence_is_separate: true
+  pr116_merge_commit: 9c14f476c34103c2eba5b273880bd09bed47d21a
+  rule: >-
+    The process handoff can transport and bind qualified NNIS evidence, including
+    future evidence produced under the PR #116 semantic policy, but it does not
+    create or strengthen that physical evidence. Exact greedy trajectory remains
+    semantic evidence and is not strict cross-backend numerical equivalence.
