@@ -11,6 +11,7 @@ mod da_luc_evidence;
 mod da_luc_plan;
 mod decoder_capabilities;
 mod exact_checkpoint_spec;
+mod execution_transition;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
@@ -59,6 +60,10 @@ pub use decoder_capabilities::{
 pub use exact_checkpoint_spec::{
     ExactDecoderCheckpointSpec, NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION, SMOLLM2_135M_BF16,
     TINYLLAMA_1P1B_CHAT_BF16,
+};
+pub use execution_transition::{
+    F16ExecutionTransitionMode, F16ExecutionTransitionRequirementsV1,
+    NNIS_F16_EXECUTION_TRANSITION_REQUIREMENTS_VERSION,
 };
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16ParallelScorePolicy, F16_ATTENTION_PLAN_VERSION,
