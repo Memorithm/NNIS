@@ -97,9 +97,7 @@ mod tests {
     #[test]
     fn every_current_f16_execution_layout_requires_model_rebuild() {
         let plans = [
-            F16ReferenceExecutionPlan::reference(
-                F16ReferencePlan::edge_llm_v0_10_0_alignment(),
-            ),
+            F16ReferenceExecutionPlan::reference(F16ReferencePlan::edge_llm_v0_10_0_alignment()),
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate(),
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_groups_candidate(),
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_fused_mlp_candidate(),
