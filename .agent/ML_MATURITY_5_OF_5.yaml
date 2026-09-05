@@ -1,12 +1,12 @@
 schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
-last_updated: "2026-09-04"
+last_updated: "2026-09-05"
 repository: Memorithm/NNIS
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
   remaining a specialized inference runtime rather than absorbing SciRust's
-  general training, tensor, data, or orchestration ownership.
+  general training, tensor, data, verification or orchestration ownership.
 score_policy:
   five_of_five_requires:
     - real_model_end_to_end_execution
@@ -19,11 +19,13 @@ score_policy:
     - treating_random_tiny_fixtures_as_model_quality_evidence
     - treating_kernel_microbenchmarks_as_serving_performance
     - claiming_general_model_support_from_one_llama_like_fixture
+    - claiming_strict_cross_backend_logit_equivalence_from_unvalidated_default_tolerances
+    - claiming_general_model_family_support_from_checkpoint_level_parity_records
     - claiming_KV_compression_from_nominal_index_width_without_all_overheads
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: aed87db46b71e6726c6b528624a0d641e933e2e9
+  main_head: 9c14f476c34103c2eba5b273880bd09bed47d21a
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -44,17 +46,16 @@ current_progress:
       - schema_v2_rejects_attention_RoPE_MLP_dtype_or_canonical_capability_drift
       - SmolLM2_source_config_and_capability_identity_shared_through_versioned_exact_checkpoint_spec
     open_gate: >-
-      Run the exact current main commit on the real CUDA target with the pinned
-      SmolLM2 checkpoint, generate schema-v2 capability-bound evidence, and
-      validate it against that same commit. No physical NNML0 completion is
-      claimed until this exists.
+      P0 bundle v2 must run on the real CUDA target at the exact qualified head and
+      preserve capability-bound NNML0 evidence. No universal NNML0 or model-family
+      completion is inferred from one pinned SmolLM2 checkpoint.
     scirust_boundary: >-
       The audited SciRust compute/tensor-runtime surfaces require Rust 1.89 while
       NNIS preserves Rust 1.77, and no canonical public Model trait matching the
       roadmap wording was verified. Do not add a nominal interoperability
       dependency until a versioned compatible contract exists.
   NNML1:
-    status: active_multi_model_parity_software_contract_and_physical_bundle_merged_records_pending
+    status: active_multi_model_parity_software_contract_semantic_SmolLM2_evidence_and_physical_bundle_gate_open
     merged:
       - pr_104_reproducible_seeded_temperature_top_k_top_p_sampling
       - pr_105_sampled_token_streaming_with_continuation_ready_state
@@ -65,6 +66,8 @@ current_progress:
       - pr_111_persisted_TinyLlama_reference_artifact_identity_and_validator
       - pr_112_versioned_same_head_multi_checkpoint_parity_evidence_contract
       - pr_113_same_head_P0_physical_qualification_bundle
+      - pr_114_deterministic_Hub_parity_validation_process_contract
+      - pr_116_SmolLM2_generation_trajectory_evidence_policy_v2
     verified_software_capabilities:
       - versioned_host_visible_sampling_policy
       - NNIS_owned_SplitMix64_seeded_reproducibility
@@ -88,28 +91,71 @@ current_progress:
       - TinyLlama_artifact_validator_checks_exact_config_case_policy_token_ranges_position_bounds_and_reference_policy
       - TinyLlama_campaign_launcher_fails_closed_on_missing_or_incoherent_persisted_reference_identity
       - versioned_parity_records_distinguish_generation_trajectory_from_logit_and_generation
-      - strict_logit_parity_records_require_zero_tolerance_failures_and_zero_non_finite_logits
       - same_head_multi_checkpoint_suite_rejects_mixed_Git_commits_and_duplicate_checkpoint_only_composition
       - TinyLlama_massive_campaign_can_emit_generation_trajectory_record_only_after_full_successful_exact_greedy_consensus
-      - SmolLM2_direct_comparator_can_emit_strict_logit_and_generation_record_on_a_clean_exact_Git_head
+      - deterministic_parity_validation_process_reuses_the_NNIS_owned_validator_and_SHA_256_binds_exact_source_bytes
+      - parity_validation_process_keeps_promotion_serving_performance_and_general_model_family_support_false_by_construction
+      - Hub_can_orchestrate_parity_validation_and_SciRust_Verify_as_separate_versioned_components_without_owning_NNIS_semantics
+      - SciRust_Verify_can_bind_exact_source_bytes_to_the_validation_result_without_reimplementing_NNIS_parity_semantics
+      - SmolLM2_physical_diagnosis_preserves_exact_weight_identity_for_tested_tensors_and_localizes_first_numeric_divergence_to_f32_accumulation_order
+      - canonical_Gravity_is_and_adversarial_Hello_each_preserve_exact_32_token_greedy_trajectory_under_the_diagnosed_cross_backend_arithmetic_difference
+      - P0_bundle_v2_preserves_logit_error_reports_as_hashed_artifacts_while_not_asserting_numeric_equivalence
       - synthetic_contract_self_tests_are_explicitly_not_physical_model_parity_evidence
       - P0_physical_bundle_enforces_clean_promoted_main_and_single_visible_GPU_selection
       - P0_physical_bundle_preserves_separate_pinned_reference_environments_and_hashes_source_evidence_artifacts
+    published_process_boundary:
+      contract: nnis.nnml1.parity-validation@1.0.0
+      media_type_input: application/vnd.nnis.nnml1.parity-evidence.v1+json
+      media_type_output: application/vnd.nnis.nnml1.parity-validation.v1+json
+      nnis_pull_request: 114
+      nnis_final_exact_head: c74b6b04c45e320c86cdd973b31f49f43c720681
+      nnis_merge_commit: 0ae4b0d4659c8de9b8a8322ed6ab7f8e110b53f2
+      required_CI: CI_334_success_on_final_exact_head_including_Rust_1_77
+      scirust_verify_pull_request: 33
+      scirust_verify_final_exact_head: a120c54ed05b058d9347691d0036eaaaa831df41
+      scirust_verify_merge_commit: 593692aea76b90e50899e733344ffa4cf61ba380
+      hub_pull_request: 37
+      hub_final_exact_head: 9e95e7d6a141b3f06bfc9effac51007bdfe9b1c2
+      hub_merge_commit: 0e484d9f9903fe0f0fcb7111e0191dfb14d958b4
+      limits:
+        - process_validation_creates_no_new_CUDA_or_model_measurement
+        - SciRust_Verify_exact_byte_binding_does_not_reexecute_NNIS_parity_semantics
+        - Hub_transport_and_orchestration_do_not_authorize_NNIS_promotion
+        - no_general_model_family_serving_performance_Jetson_ARM64_or_cross_host_claim_is_created
+    physical_semantic_diagnosis:
+      pull_request: 116
+      final_exact_head: 0454101ac7e60803109a86ff03b70c8f286784a2
+      merge_commit: 9c14f476c34103c2eba5b273880bd09bed47d21a
+      required_CI: CI_341_success_on_final_exact_head
+      execution_main_commit: 75e4505f32d01ed7072e02432d48570b580377c8
+      hardware: NVIDIA_Jetson_AGX_Thor
+      strict_logit_equivalence_asserted: false
+      qualified_evidence_level_for_current_SmolLM2_P0: generation_trajectory
+      canonical_decode_steps: 32
+      kernels_changed: false
+      weights_changed: false
+      tolerances_changed: false
+      runtime_default_changed: false
+      rule: >-
+        Exact greedy trajectory is valid semantic evidence under the pinned
+        workload, but is explicitly not bitwise or tolerance-based numerical
+        equivalence. Diagnostic logit deltas remain first-class evidence and must
+        not be erased or converted into an invented tolerance claim.
     explicit_boundary: >-
-      The decoder capability, exact checkpoint, tokenizer/reference identity,
-      persisted reference-artifact and parity-evidence profiles describe audited
-      semantics, artifact identity and evidence structure. They are not model-family
-      admission, new CUDA parity results, or performance claims. The two currently
-      registered parity checkpoints are checkpoint-level identities rather than two
-      independently admitted model families. Sampled generation, sampled streaming
-      and the multi-session batch contract still execute through host-visible
-      per-session sampling. TinyLlama remains physically unqualified until its real
-      campaign is executed on the target path.
+      Decoder capabilities, exact checkpoint/tokenizer/reference identity,
+      persisted reference artifacts, parity records and the Hub/Verify process
+      boundary describe audited semantics, evidence identity and orchestration.
+      They are not general model-family admission, serving-performance evidence or
+      promotion authorization. SmolLM2 now has physical exact greedy trajectory
+      evidence under the pinned Thor diagnosis; TinyLlama still requires its real
+      campaign before the two-checkpoint same-head suite can complete. Checkpoint
+      identities are not automatically distinct admitted model families.
     next:
-      - execute_merged_P0_physical_bundle_on_exact_main_aed87db4
-      - collect_same_head_real_SmolLM2_logit_and_generation_record_on_supported_CUDA_path
-      - collect_same_head_real_TinyLlama_generation_trajectory_record_from_the_massive_campaign
-      - compose_and_validate_the_two_checkpoint_suite_without_model_family_admission_claim
+      - execute_P0_bundle_v2_on_exact_current_main_or_a_newer_exact_green_head
+      - require_capability_bound_NNML0_evidence_for_the_same_execution_head
+      - collect_TinyLlama_generation_trajectory_record_from_the_massive_real_campaign
+      - compose_and_validate_the_same_head_two_checkpoint_suite
+      - preserve_SmolLM2_diagnostic_logit_report_without_claiming_strict_numeric_equivalence
       - add_new_model_family_admission_only_after_exact_semantic_audit
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
@@ -127,18 +173,20 @@ current_progress:
         Require fresh fingerprint-compatible physical end-to-end evidence before
         promotion.
     tinyllama_massive_campaign:
-      status: harness_reference_artifact_and_generation_parity_producer_ready_physical_execution_not_claimed
+      status: harness_reference_artifact_generation_parity_producer_and_process_export_ready_physical_execution_not_claimed
       harness_pr: 99
       exact_checkpoint_spec_pr: 109
       tokenizer_reference_identity_pr: 110
       reference_artifact_pr: 111
       parity_evidence_pr: 112
       p0_physical_bundle_pr: 113
+      parity_validation_process_pr: 114
       rule: >-
-        Persisted checkpoint/tokenizer/reference identity and the parity record
-        producer do not establish Transformers-to-NNIS parity or general Llama-family
-        support. Do not promote candidates until the committed real-model campaign
-        produces reviewable physical evidence.
+        Persisted checkpoint/tokenizer/reference identity, parity record producer,
+        deterministic validation process and Hub/Verify handoff do not establish
+        TinyLlama-to-NNIS physical parity or general Llama-family support. Do not
+        promote candidates until the committed real-model campaign produces
+        reviewable physical evidence.
 priority_program:
   - id: NNML0
     name: Shared model and tensor interoperability
@@ -153,6 +201,7 @@ priority_program:
   - id: NNML1
     name: Broader decoder runtime
     priority: P0
+    status: active_physical_SmolLM2_semantic_trajectory_TinyLlama_and_multi_family_gates_open
     goals:
       - generalize_supported_decoder_block_variants_with_explicit_capability_checks
       - support_MHA_GQA_MQA_and_common_rope_variants_as_versioned_capabilities
@@ -200,10 +249,12 @@ priority_program:
   - id: NNML5
     name: Qualification parity suite
     priority: P0
+    status: active_with_versioned_process_export_and_SmolLM2_semantic_physical_evidence
     goals:
       - same_model_same_weights_same_prompts_comparison_against_a_trusted_reference_runtime
       - retain_CUDA_event_kernel_measurements_but_add_end_to_end_serving_measurements
       - export_versioned_evidence_for_SciRust_Verify
+      - preserve_semantic_vs_numerical_evidence_level_explicitly
       - include_relevant_quantized_KV_external_baselines_when_reproducible_and_semantically_comparable
   - id: NNML6
     name: Experimental semantic KV routing
