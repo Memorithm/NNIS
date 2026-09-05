@@ -45,11 +45,13 @@ jobs:
           python3 tools/tokenizer_reference_identity.py --self-test
           python3 tools/validate_tinyllama_reference_artifact.py --self-test
           python3 tools/validate_nnml1_multi_model_parity_evidence.py --self-test
+          python3 tools/nnis_hub_nnml1_parity_validate.py --self-test
           python3 tools/run_p0_physical_qualification_bundle.py --self-test
           python3 -m py_compile \
             tools/tokenizer_reference_identity.py \
             tools/validate_tinyllama_reference_artifact.py \
             tools/validate_nnml1_multi_model_parity_evidence.py \
+            tools/nnis_hub_nnml1_parity_validate.py \
             tools/run_p0_physical_qualification_bundle.py \
             tools/smollm2_135m_fixture.py \
             tools/tinyllama_1p1b_chat_fixture.py \
