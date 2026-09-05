@@ -1,0 +1,96 @@
+schema_version: 1
+kind: nnis_physical_diagnostic_record
+status: verified_physical_diagnosis
+recorded_at: "2026-09-05"
+repository: Memorithm/NNIS
+subject: SmolLM2_135M_P0_cross_backend_numeric_contract
+execution_main_commit: 75e4505f32d01ed7072e02432d48570b580377c8
+hardware:
+  device: NVIDIA_Thor
+  platform: NVIDIA_Jetson_AGX_Thor
+reference:
+  repo: HuggingFaceTB/SmolLM2-135M
+  revision: 93efa2f097d58c2a74874c7e644dbc9b0cee75a2
+  model_sha256: 80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1
+  tokenizer_sha256: 9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c
+  transformers: "4.40.1"
+  torch: "2.4.0"
+  execution_dtype: f32
+findings:
+  nnml0_real_safetensors:
+    result: passed
+    interpretation: >-
+      Real pinned SmolLM2 Safetensors loading and capability-bound NNML0 evidence
+      validated on the exact execution commit. This does not establish NNML1 parity.
+  strict_logit_gate:
+    result: rejected_as_current_cross_backend_qualification_contract
+    supplied_harness_atol: 0.0001
+    supplied_harness_rtol: 0.001
+    reason: >-
+      The comparator itself declares these as harness defaults rather than a
+      validated SmolLM2 tolerance claim. Physical execution produced deterministic
+      failures against the Transformers/oneMKL CPU oracle, so they must not be
+      silently widened or treated as an established cross-backend invariant.
+  root_cause_localization:
+    weight_identity: bit_exact_for_tested_embedding_norm_projection_mlp_and_lm_head_tensors
+    embedding_identity: bit_exact
+    initial_rmsnorm_identity: bit_exact
+    cuda_noise_hypothesis: rejected
+    model_layout_corruption_hypothesis: rejected
+    first_observed_numeric_divergence: layer_0_v_projection
+    ordered_f32_fmaf_vs_transformers:
+      max_abs: 0.00033329054713249207
+      rms: 0.0000741536496207118
+      nonzero_outputs: 192
+      output_elements: 192
+    contiguous_pytorch_linear_vs_transformers: bit_exact
+    interpretation: >-
+      The first observed difference is explained by floating-point accumulation
+      order: NNIS uses deterministic ascending-K f32 fmaf accumulation while the
+      pinned CPU reference uses the PyTorch/oneMKL linear path. This finding does
+      not prove that every later logit delta is caused exclusively by GEMM order,
+      but it establishes a concrete cross-backend arithmetic source before any
+      semantic mismatch.
+  semantic_trajectory:
+    canonical_gravity_is:
+      prompt: "Gravity is"
+      input_ids: [22007, 6463, 314]
+      decode_steps: 32
+      exact_greedy_trajectory: true
+      generated_ids: [260, 3075, 338, 6650, 260, 2591, 284, 260, 8872, 1592, 30, 198, 198, 504, 8872, 314, 253, 8304, 282, 260, 2591, 30, 657, 314, 253, 19284, 1248, 338, 21837, 260, 2591, 30]
+      numeric_equivalence_asserted: false
+    adversarial_one_token_hello:
+      prompt: "Hello"
+      input_ids: [19556]
+      decode_steps: 32
+      exact_greedy_trajectory: true
+      numeric_equivalence_asserted: false
+      note: >-
+        The one-token prefill showed much larger logit drift while retaining the
+        exact 32-token greedy trajectory, further separating semantic trajectory
+        evidence from strict cross-backend numerical identity.
+policy_decision:
+  kernels_changed: false
+  weights_changed: false
+  tolerances_changed: false
+  runtime_default_changed: false
+  strict_logit_and_generation_claim: false
+  qualified_evidence_level_for_current_P0: generation_trajectory
+  diagnostic_logit_metrics_must_be_preserved: true
+  rationale: >-
+    Correctness requires reporting the observed numeric deltas without inventing a
+    tolerance contract. Exact greedy trajectory is valid semantic evidence but is
+    explicitly not numerical equivalence.
+implementation:
+  pull_request: 116
+  merge_commit: 9c14f476c34103c2eba5b273880bd09bed47d21a
+  p0_bundle_kind: nnis-p0-physical-qualification-bundle-v2
+  canonical_smollm2_decode_steps: 32
+  logit_policy: report
+  logit_report_hashed_as_bundle_artifact: true
+next_gate: >-
+  Require exact-head CI green on merge commit 9c14f476c34103c2eba5b273880bd09bed47d21a,
+  then execute P0 bundle v2 on the real Thor target. P0 may only complete if NNML0,
+  the canonical SmolLM2 32-token generation trajectory, the TinyLlama massive
+  generation-trajectory campaign, same-head suite composition, and final manifest
+  generation all pass. No strict logit equivalence claim is authorized.
