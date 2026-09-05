@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 9c14f476c34103c2eba5b273880bd09bed47d21a
+  main_head: b9d2f1e74bb68dfa90ca499a24ce857d15e7fb02
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -160,6 +160,28 @@ current_progress:
       - qualify_concurrent_multi_session_execution_only_with_physical_GPU_evidence
   NNML2:
     status: not_started_as_production_claim
+    merged:
+      - pr_117_versioned_F16_execution_transition_requirements
+    verified_software_capabilities:
+      - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
+      - source_logical_weights_are_required_to_materialize_the_target_resident_layout
+      - active_sessions_are_not_preserved_across_the_declared_rebuild_boundary
+      - KV_state_is_not_preserved_across_the_declared_rebuild_boundary
+      - live_in_place_F16_execution_plan_transition_is_not_authorized
+      - transition_requirements_are_versioned_strict_and_owned_by_nnis_model
+      - ElasticXxx_can_consume_the_negative_transition_capability_through_an_external_adapter_without_a_direct_dependency
+    execution_transition_boundary:
+      contract_version: nnis_model_F16ExecutionTransitionRequirementsV1
+      pull_request: 117
+      exact_head: 1bde4f7ba292bdd498f7ffd8a12c609d200cbe9e
+      merge_commit: b9d2f1e74bb68dfa90ca499a24ce857d15e7fb02
+      required_CI: CI_344_success_on_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: harness_140_success
+      elasticxxx_consumer_pull_request: 75
+      elasticxxx_merge_commit: 2045591663ee797ea4cfa08549ae90fe1fb20c09
+      live_transactional_actuation_claimed: false
+      rebuild_orchestration_claimed: false
+      session_or_KV_migration_claimed: false
     blockers:
       - sampled_paths_have_full_logit_D2H_and_selected_token_H2D_roundtrips
       - no_qualified_concurrent_or_fused_GPU_batch_execution_yet
