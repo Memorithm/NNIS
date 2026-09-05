@@ -43,6 +43,7 @@ impl DecoderRopeSemantics {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DecoderMlpSemantics {
+    #[serde(rename = "swiglu_silu")]
     SwiGluSilu,
 }
 
@@ -175,5 +176,16 @@ mod tests {
         assert!(record.contains("rope=llama_rotate_half_unscaled\n"));
         assert!(record.contains("mlp=swiglu_silu\n"));
         assert!(record.contains("q_heads=4\nkv_heads=1\nhead_dim=16\n"));
+    }
+
+    #[test]
+    fn mlp_semantics_serde_name_matches_canonical_contract() {
+        let encoded = serde_json::to_string(&DecoderMlpSemantics::SwiGluSilu).unwrap();
+        assert_eq!(encoded, "\"swiglu_silu\"");
+        assert_eq!(
+            serde_json::from_str::<DecoderMlpSemantics>("\"swiglu_silu\"").unwrap(),
+            DecoderMlpSemantics::SwiGluSilu
+        );
+        assert!(serde_json::from_str::<DecoderMlpSemantics>("\"swi_glu_silu\"").is_err());
     }
 }
