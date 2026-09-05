@@ -7,6 +7,11 @@ checkout at the fetched origin/main commit, uses separate pinned Python environm
 for the SmolLM2 and TinyLlama reference generators, runs the existing NNML0 physical
 loader gate, produces the two NNML1 parity records, composes the same-head parity
 suite, and writes a manifest containing artifact SHA-256 digests.
+
+SmolLM2 qualification uses the canonical 32-token greedy trajectory. Logit deltas
+against the pinned Transformers/oneMKL CPU oracle are retained as a hashed diagnostic
+log but are not asserted as numerical equivalence because the supplied atol/rtol are
+harness defaults rather than a physically validated cross-backend tolerance contract.
 """
 
 from __future__ import annotations
@@ -22,9 +27,12 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-BUNDLE_KIND = "nnis-p0-physical-qualification-bundle-v1"
-SCHEMA_VERSION = 1
+BUNDLE_KIND = "nnis-p0-physical-qualification-bundle-v2"
+SCHEMA_VERSION = 2
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+SMOLLM2_PROMPT = "Gravity is"
+SMOLLM2_INPUT_IDS = [22_007, 6_463, 314]
+SMOLLM2_DECODE_STEPS = 32
 
 SMOLLM2_ENV = {
     "torch": "2.4.0",
@@ -114,6 +122,27 @@ def run_capture(command: list[str], *, cwd: Path | None = None) -> str:
 def run_stream(command: list[str], *, cwd: Path) -> None:
     print("+ " + " ".join(command), flush=True)
     completed = subprocess.run(command, cwd=str(cwd), check=False)
+    if completed.returncode != 0:
+        raise QualificationError(
+            f"command exited with status {completed.returncode}: {' '.join(command)}"
+        )
+
+
+def run_stream_with_log(command: list[str], *, cwd: Path, log_path: Path) -> None:
+    """Run one diagnostic command while preserving its merged stdout/stderr."""
+    print("+ " + " ".join(command), flush=True)
+    completed = subprocess.run(
+        command,
+        cwd=str(cwd),
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    output = completed.stdout or ""
+    print(output, end="", flush=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text(output, encoding="utf-8")
     if completed.returncode != 0:
         raise QualificationError(
             f"command exited with status {completed.returncode}: {' '.join(command)}"
@@ -268,6 +297,30 @@ def validate_json_kind(path: Path, expected_kind: str, expected_head: str) -> di
     return document
 
 
+def validate_smollm2_reference_contract(path: Path) -> dict[str, Any]:
+    require_nonempty_file(path, "SmolLM2 reference manifest")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise QualificationError(f"invalid SmolLM2 reference manifest JSON: {error}") from error
+    if not isinstance(document, dict):
+        raise QualificationError("SmolLM2 reference manifest must be an object")
+    if document.get("prompt") != SMOLLM2_PROMPT:
+        raise QualificationError(
+            f"SmolLM2 P0 prompt drifted: {document.get('prompt')!r} != {SMOLLM2_PROMPT!r}"
+        )
+    if document.get("input_ids") != SMOLLM2_INPUT_IDS:
+        raise QualificationError(
+            f"SmolLM2 P0 input IDs drifted: {document.get('input_ids')!r} != {SMOLLM2_INPUT_IDS!r}"
+        )
+    if document.get("decode_steps") != SMOLLM2_DECODE_STEPS:
+        raise QualificationError(
+            "SmolLM2 P0 reference must contain exactly "
+            f"{SMOLLM2_DECODE_STEPS} decode steps"
+        )
+    return document
+
+
 def run_bundle(args: argparse.Namespace) -> Path:
     if args.work_dir is None or args.smollm2_python is None or args.tinyllama_python is None:
         raise QualificationError(
@@ -299,6 +352,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
     nnml0_evidence = work_dir / "nnml0-real-safetensors-evidence.json"
     smollm2_fixture = work_dir / "smollm2-fixture"
     smollm2_parity = work_dir / "smollm2-parity-record.json"
+    smollm2_logit_report = work_dir / "smollm2-logit-report.log"
     smollm2_reference_manifest = smollm2_fixture / "reference" / "reference.json"
     tinyllama_work = work_dir / "tinyllama"
     tinyllama_run_dir = tinyllama_work / f"runs-{head[:12]}"
@@ -333,14 +387,21 @@ def run_bundle(args: argparse.Namespace) -> Path:
         str(root / "tools" / "smollm2_135m_fixture.py"),
         "--output",
         str(smollm2_fixture),
+        "--prompt",
+        SMOLLM2_PROMPT,
+        "--decode-steps",
+        str(SMOLLM2_DECODE_STEPS),
     ]
     if cache_dir is not None:
         smollm2_fixture_command.extend(["--cache-dir", str(cache_dir)])
     require_clean_repository(root)
     run_stream(smollm2_fixture_command, cwd=root)
+    validate_smollm2_reference_contract(smollm2_reference_manifest)
     if smollm2_parity.exists():
         smollm2_parity.unlink()
-    run_stream(
+    if smollm2_logit_report.exists():
+        smollm2_logit_report.unlink()
+    run_stream_with_log(
         [
             "cargo",
             "run",
@@ -355,11 +416,12 @@ def run_bundle(args: argparse.Namespace) -> Path:
             "--reference",
             str(smollm2_fixture / "reference"),
             "--logit-policy",
-            "strict",
+            "report",
             "--evidence-json",
             str(smollm2_parity),
         ],
         cwd=root,
+        log_path=smollm2_logit_report,
     )
     run_stream(
         [
@@ -372,8 +434,10 @@ def run_bundle(args: argparse.Namespace) -> Path:
     smollm2_record = validate_json_kind(
         smollm2_parity, "nnis-nnml1-reference-parity-record-v1", head
     )
-    if smollm2_record.get("parity_level") != "logit_and_generation":
-        raise QualificationError("SmolLM2 physical record is not strict logit_and_generation evidence")
+    if smollm2_record.get("parity_level") != "generation_trajectory":
+        raise QualificationError(
+            "SmolLM2 physical record must be exact generation_trajectory evidence"
+        )
 
     tinyllama_command = [
         str(tinyllama_python),
@@ -448,6 +512,14 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "origin_main_commit": head,
         "visible_device_ordinal": 0,
         "device_selection_policy": "first_visible_device_for_all_physical_gates",
+        "smollm2_qualification_contract": {
+            "prompt": SMOLLM2_PROMPT,
+            "input_ids": SMOLLM2_INPUT_IDS,
+            "decode_steps": SMOLLM2_DECODE_STEPS,
+            "parity_level": "generation_trajectory",
+            "numeric_policy": "report_only_not_asserted",
+            "logit_tolerances_physically_validated": False,
+        },
         "python_environments": {
             "smollm2": {
                 "executable": str(smollm2_python),
@@ -462,6 +534,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
             "nnml0_real_safetensors": artifact_entry(nnml0_evidence),
             "smollm2_reference_manifest": artifact_entry(smollm2_reference_manifest),
             "smollm2_parity_record": artifact_entry(smollm2_parity),
+            "smollm2_logit_report": artifact_entry(smollm2_logit_report),
             "tinyllama_consensus": artifact_entry(tinyllama_consensus),
             "tinyllama_parity_record": artifact_entry(tinyllama_parity),
             "nnml1_multi_model_parity_suite": artifact_entry(parity_suite),
@@ -479,7 +552,10 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "promotion_authorized": False,
         "claim_boundary": (
             "P0 physical evidence bundle for exact registered checkpoints and NNML0 loader gate only; "
-            "it does not establish multiple model-family admission, serving performance, or automatic runtime promotion"
+            "SmolLM2 and TinyLlama establish exact greedy generation trajectories, while SmolLM2 "
+            "cross-backend logit deltas are diagnostic and do not assert numerical equivalence; "
+            "the bundle does not establish multiple model-family admission, serving performance, "
+            "or automatic runtime promotion"
         ),
     }
     bundle_manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -487,6 +563,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
     print(f"bundle_manifest={bundle_manifest}")
     print(f"nnml0_evidence={nnml0_evidence}")
     print(f"smollm2_parity_record={smollm2_parity}")
+    print(f"smollm2_logit_report={smollm2_logit_report}")
     print(f"tinyllama_parity_record={tinyllama_parity}")
     print(f"parity_suite={parity_suite}")
     return bundle_manifest
@@ -540,12 +617,43 @@ def self_test() -> None:
             pass
         else:
             raise AssertionError("cache directory inside repository unexpectedly passed")
-        artifact = outside / "artifact.json"
         outside.mkdir()
+        artifact = outside / "artifact.json"
         artifact.write_text('{"ok":true}\n', encoding="utf-8")
         entry = artifact_entry(artifact)
         if entry["bytes"] <= 0 or len(entry["sha256"]) != 64:
             raise AssertionError("artifact digest self-test failed")
+
+        reference = outside / "reference.json"
+        reference.write_text(
+            json.dumps(
+                {
+                    "prompt": SMOLLM2_PROMPT,
+                    "input_ids": SMOLLM2_INPUT_IDS,
+                    "decode_steps": SMOLLM2_DECODE_STEPS,
+                }
+            ),
+            encoding="utf-8",
+        )
+        validate_smollm2_reference_contract(reference)
+        drifted = json.loads(reference.read_text(encoding="utf-8"))
+        drifted["decode_steps"] = SMOLLM2_DECODE_STEPS - 1
+        reference.write_text(json.dumps(drifted), encoding="utf-8")
+        try:
+            validate_smollm2_reference_contract(reference)
+        except QualificationError:
+            pass
+        else:
+            raise AssertionError("drifted SmolLM2 semantic contract unexpectedly passed")
+
+        log = outside / "captured.log"
+        run_stream_with_log(
+            [sys.executable, "-c", "print('semantic-log-capture-ok')"],
+            cwd=root,
+            log_path=log,
+        )
+        if log.read_text(encoding="utf-8").strip() != "semantic-log-capture-ok":
+            raise AssertionError("stream log capture self-test failed")
 
 
 def main() -> None:
