@@ -5,14 +5,16 @@ use nnis_model::{
 };
 use std::env;
 use std::fmt::Write as _;
+use std::fs;
+use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
+use std::process::{self, ExitCode};
 use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
 const CLI_PREFLIGHT_SCHEMA: &str = "nnis.hf-preflight@1";
-const USAGE: &str = "Usage:\n  nnis-hf validate --model DIR [--tokenizer FILE] [--json]\n  nnis-hf generate --model DIR --prompt TEXT [--tokenizer FILE] [--device N] [--max-new-tokens N]\n\n`validate` performs a CPU-only fail-closed preflight of config.json, Safetensors shards, recognized tensor names/shapes/dtypes, decoder graph completeness, and tokenizer IDs. `generate` loads the same local directory on CUDA. No network access is performed.";
+const USAGE: &str = "Usage:\n  nnis-hf validate --model DIR [--tokenizer FILE] [--json] [--output FILE]\n  nnis-hf generate --model DIR --prompt TEXT [--tokenizer FILE] [--device N] [--max-new-tokens N]\n\n`validate` performs a CPU-only fail-closed preflight of config.json, Safetensors shards, recognized tensor names/shapes/dtypes, decoder graph completeness, and tokenizer IDs. `--output FILE` requires `--json` and atomically writes the exact JSON report for artifact-oriented orchestration. `generate` loads the same local directory on CUDA. No network access is performed.";
 const SOUP_F32_HINT: &str = "For a dense Soup artifact, produce an NNIS-executable source with: soup merge --adapter ADAPTER --output DIR --dtype float32. Soup's default float16 merge and 4-bit merged formats are not admitted by the current NNIS direct-HF execution path.";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -20,6 +22,7 @@ struct ValidateArgs {
     model_dir: PathBuf,
     tokenizer_file: PathBuf,
     json: bool,
+    output_file: Option<PathBuf>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,6 +57,7 @@ where
     let mut model_dir = None;
     let mut tokenizer_file = None;
     let mut json = false;
+    let mut output_file = None;
 
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -67,17 +71,24 @@ where
                 )?));
             }
             "--json" => json = true,
+            "--output" => {
+                output_file = Some(PathBuf::from(required_value(&mut arguments, "--output")?));
+            }
             "--help" | "-h" => return Ok(Command::Help),
             other => return Err(format!("unknown validate argument {other:?}\n\n{USAGE}")),
         }
     }
 
+    if output_file.is_some() && !json {
+        return Err("--output requires --json so the persisted artifact has a versioned JSON contract".to_string());
+    }
     let model_dir = model_dir.ok_or_else(|| "missing --model DIR".to_string())?;
     let tokenizer_file = tokenizer_file.unwrap_or_else(|| model_dir.join("tokenizer.json"));
     Ok(Command::Validate(ValidateArgs {
         model_dir,
         tokenizer_file,
         json,
+        output_file,
     }))
 }
 
@@ -300,6 +311,57 @@ fn render_preflight_text(
     output
 }
 
+fn write_report_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create preflight report directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let mut temporary_name = path.as_os_str().to_os_string();
+    temporary_name.push(format!(".tmp-{}", process::id()));
+    let temporary_path = PathBuf::from(temporary_name);
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+            .map_err(|error| {
+                format!(
+                    "failed to create temporary preflight report {}: {error}",
+                    temporary_path.display()
+                )
+            })?;
+        file.write_all(contents.as_bytes()).map_err(|error| {
+            format!(
+                "failed to write temporary preflight report {}: {error}",
+                temporary_path.display()
+            )
+        })?;
+        file.sync_all().map_err(|error| {
+            format!(
+                "failed to sync temporary preflight report {}: {error}",
+                temporary_path.display()
+            )
+        })?;
+        drop(file);
+        fs::rename(&temporary_path, path).map_err(|error| {
+            format!(
+                "failed to atomically publish preflight report {}: {error}",
+                path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    write_result
+}
+
 fn validate(arguments: &ValidateArgs) -> Result<(String, bool), String> {
     let load_config = safetensors_load_config(&arguments.model_dir);
     let report = preflight_hf_safetensors_source(&load_config).map_err(|error| {
@@ -325,6 +387,9 @@ fn validate(arguments: &ValidateArgs) -> Result<(String, bool), String> {
             tokenizer_max_token_id,
         )
     };
+    if let Some(output_file) = arguments.output_file.as_deref() {
+        write_report_atomic(output_file, &output)?;
+    }
     Ok((output, report.direct_f32_execution_ready))
 }
 
@@ -433,6 +498,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
@@ -453,12 +519,13 @@ mod tests {
                 model_dir: PathBuf::from("/models/soup-merged"),
                 tokenizer_file: PathBuf::from("/models/soup-merged/tokenizer.json"),
                 json: false,
+                output_file: None,
             })
         );
     }
 
     #[test]
-    fn validate_accepts_explicit_tokenizer_and_json_without_cuda() {
+    fn validate_accepts_explicit_tokenizer_json_and_output_without_cuda() {
         let parsed = parse_args(strings(&[
             "validate",
             "--model",
@@ -466,6 +533,8 @@ mod tests {
             "--tokenizer",
             "/tokenizer.json",
             "--json",
+            "--output",
+            "/reports/preflight.json",
         ]))
         .unwrap();
         assert_eq!(
@@ -474,8 +543,21 @@ mod tests {
                 model_dir: PathBuf::from("/model"),
                 tokenizer_file: PathBuf::from("/tokenizer.json"),
                 json: true,
+                output_file: Some(PathBuf::from("/reports/preflight.json")),
             })
         );
+    }
+
+    #[test]
+    fn validate_rejects_output_without_json() {
+        assert!(parse_args(strings(&[
+            "validate",
+            "--model",
+            "/model",
+            "--output",
+            "/reports/preflight.json",
+        ]))
+        .is_err());
     }
 
     #[test]
@@ -556,6 +638,22 @@ mod tests {
     #[test]
     fn json_string_escapes_control_and_syntax_characters() {
         assert_eq!(json_string("a\"b\\c\n"), "\"a\\\"b\\\\c\\n\"");
+    }
+
+    #[test]
+    fn atomic_report_write_publishes_exact_bytes() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!("nnis-hf-preflight-{}-{nonce}", process::id()));
+        let path = directory.join("report.json");
+        write_report_atomic(&path, "{\"schema\":\"nnis.hf-preflight@1\"}").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "{\"schema\":\"nnis.hf-preflight@1\"}"
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
