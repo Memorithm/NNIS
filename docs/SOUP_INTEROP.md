@@ -58,7 +58,7 @@ The preflight performs no CUDA device selection, context creation, device alloca
 - `tokenizer.json` parseability and that its maximum token ID fits the model vocabulary;
 - whether the source satisfies the current F32 direct-execution requirement.
 
-For automation, Hub-style orchestration, CI, or other external consumers, request the versioned JSON form:
+For interactive automation or inspection, request the versioned JSON form:
 
 ```bash
 cargo run --locked -p nnis-cli --bin nnis-hf -- \
@@ -66,6 +66,18 @@ cargo run --locked -p nnis-cli --bin nnis-hf -- \
   --model ./merged-nnis \
   --json
 ```
+
+For Hub-style orchestration, CI, or any workflow that must preserve the producer result as an immutable artifact rather than reconstructing it from stdout, add an explicit output path:
+
+```bash
+cargo run --locked -p nnis-cli --bin nnis-hf -- \
+  validate \
+  --model ./merged-nnis \
+  --json \
+  --output ./artifacts/nnis-hf-preflight.json
+```
+
+`--output` is accepted only with `--json`. NNIS creates the parent directory when needed and publishes the report by writing and syncing a temporary file in the destination directory before atomically renaming it to the requested path. The file bytes are the same versioned JSON report emitted on stdout. The output path changes only transport/persistence; it does not change model admission, direct-execution readiness, or any validation semantics.
 
 A structurally valid BF16 source may satisfy the loader-source contract but still reports `direct_f32_execution_ready=false`; `nnis-hf validate` exits unsuccessfully in that case because the current direct `Model` path is not executable with a BF16 base graph. This distinction avoids turning source admission into an implicit runtime-support claim.
 
