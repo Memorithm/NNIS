@@ -3,6 +3,7 @@ use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 
 pub const NNIS_F16_WEIGHT_MATERIALIZATION_MEMORY_EVIDENCE_VERSION: u32 = 1;
+pub const NNIS_F16_WEIGHT_MATERIALIZATION_FAILURE_EVIDENCE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +44,24 @@ pub struct F16WeightMaterializationMemoryEvidenceV1 {
     pub peak_live_temporary_f16_allocation_bytes: u64,
     pub peak_scoped_owned_allocation_bytes: u64,
     pub final_scoped_owned_allocation_bytes: u64,
+    pub events: Vec<F16WeightMaterializationEventV1>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct F16WeightMaterializationFailureEvidenceV1 {
+    pub schema_version: u32,
+    pub execution_plan: F16ReferenceExecutionPlan,
+    pub source_weight_allocations: WeightAllocationSummaryV1,
+    pub failure_operation: Option<String>,
+    pub failure_driver_code: Option<i32>,
+    pub failure_message: String,
+    pub live_f16_allocation_bytes_at_failure_detection: u64,
+    pub live_temporary_f16_allocation_bytes_at_failure_detection: u64,
+    pub scoped_owned_allocation_bytes_at_failure_detection: u64,
+    pub peak_live_f16_allocation_bytes: u64,
+    pub peak_live_temporary_f16_allocation_bytes: u64,
+    pub peak_scoped_owned_allocation_bytes: u64,
     pub events: Vec<F16WeightMaterializationEventV1>,
 }
 
@@ -175,6 +194,50 @@ impl F16WeightMaterializationTracker {
         Ok(())
     }
 
+    pub(crate) fn failure_evidence(
+        self,
+        execution_plan: F16ReferenceExecutionPlan,
+        source_weight_allocations: WeightAllocationSummaryV1,
+        error: &NnisError,
+    ) -> Result<F16WeightMaterializationFailureEvidenceV1> {
+        if source_weight_allocations.owned_device_allocation_bytes
+            != self.source_owned_allocation_bytes
+        {
+            return Err(NnisError::invalid_input(
+                "source weight summary changed during failed F16 materialization accounting",
+            ));
+        }
+        let scoped_owned_allocation_bytes_at_failure_detection = self
+            .source_owned_allocation_bytes
+            .checked_add(self.live_f16_allocation_bytes)
+            .ok_or_else(|| {
+                NnisError::invalid_input(
+                    "failed F16 materialization scoped allocation bytes overflow u64",
+                )
+            })?;
+        let failure_operation = if error.op().is_empty() {
+            None
+        } else {
+            Some(error.op().to_string())
+        };
+        Ok(F16WeightMaterializationFailureEvidenceV1 {
+            schema_version: NNIS_F16_WEIGHT_MATERIALIZATION_FAILURE_EVIDENCE_VERSION,
+            execution_plan,
+            source_weight_allocations,
+            failure_operation,
+            failure_driver_code: error.driver_code(),
+            failure_message: error.to_string(),
+            live_f16_allocation_bytes_at_failure_detection: self.live_f16_allocation_bytes,
+            live_temporary_f16_allocation_bytes_at_failure_detection: self
+                .live_temporary_f16_allocation_bytes,
+            scoped_owned_allocation_bytes_at_failure_detection,
+            peak_live_f16_allocation_bytes: self.peak_live_f16_allocation_bytes,
+            peak_live_temporary_f16_allocation_bytes: self.peak_live_temporary_f16_allocation_bytes,
+            peak_scoped_owned_allocation_bytes: self.peak_scoped_owned_allocation_bytes,
+            events: self.events,
+        })
+    }
+
     pub(crate) fn finish(
         self,
         execution_plan: F16ReferenceExecutionPlan,
@@ -303,6 +366,63 @@ mod tests {
         let mut tracker = F16WeightMaterializationTracker::new(100).unwrap();
         let error = tracker.release_temporary("missing", 1).unwrap_err();
         assert!(error.to_string().contains("release exceeds"));
+    }
+
+    #[test]
+    fn failure_evidence_preserves_pre_cleanup_peak_and_driver_error() {
+        let mut tracker = F16WeightMaterializationTracker::new(100).unwrap();
+        tracker.allocate_resident("prior", 20).unwrap();
+        tracker.allocate_temporary("proj.kn_temporary", 30).unwrap();
+        tracker.allocate_resident("proj", 30).unwrap();
+        let error = NnisError::driver("transpose", 2).with("weight", "proj");
+        let evidence = tracker
+            .failure_evidence(
+                plan(F16ReferenceProjectionLayout::NkTransposedCandidate),
+                summary(100, WeightAllocationDTypeV1::F32),
+                &error,
+            )
+            .unwrap();
+
+        assert_eq!(
+            evidence.schema_version,
+            NNIS_F16_WEIGHT_MATERIALIZATION_FAILURE_EVIDENCE_VERSION
+        );
+        assert_eq!(evidence.failure_operation.as_deref(), Some("transpose"));
+        assert_eq!(evidence.failure_driver_code, Some(2));
+        assert!(evidence.failure_message.contains("weight: proj"));
+        assert_eq!(evidence.live_f16_allocation_bytes_at_failure_detection, 80);
+        assert_eq!(
+            evidence.live_temporary_f16_allocation_bytes_at_failure_detection,
+            30
+        );
+        assert_eq!(
+            evidence.scoped_owned_allocation_bytes_at_failure_detection,
+            180
+        );
+        assert_eq!(evidence.peak_scoped_owned_allocation_bytes, 180);
+        assert_eq!(evidence.events.len(), 3);
+    }
+
+    #[test]
+    fn failure_evidence_before_first_f16_allocation_reports_source_only() {
+        let tracker = F16WeightMaterializationTracker::new(100).unwrap();
+        let error = NnisError::invalid_input("synthetic pre-allocation materialization failure");
+        let evidence = tracker
+            .failure_evidence(
+                plan(F16ReferenceProjectionLayout::KnReference),
+                summary(100, WeightAllocationDTypeV1::F32),
+                &error,
+            )
+            .unwrap();
+        assert_eq!(evidence.failure_operation, None);
+        assert_eq!(evidence.failure_driver_code, None);
+        assert_eq!(evidence.live_f16_allocation_bytes_at_failure_detection, 0);
+        assert_eq!(
+            evidence.scoped_owned_allocation_bytes_at_failure_detection,
+            100
+        );
+        assert_eq!(evidence.peak_scoped_owned_allocation_bytes, 100);
+        assert!(evidence.events.is_empty());
     }
 
     #[test]
