@@ -1,0 +1,39 @@
+name: Apply P0 NVML lifecycle integration temp
+
+on:
+  push:
+    branches:
+      - feat/p0-bundle-nvml-lifecycle
+    paths:
+      - .agent/p0-bundle-nvml-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/p0-bundle-nvml-lifecycle
+      - name: Apply integration
+        run: python3 .github/scripts/apply_p0_nvml_lifecycle.py
+      - name: Validate Python contracts
+        run: |
+          python3 -m py_compile tools/run_p0_physical_qualification_bundle.py
+          python3 -m py_compile tools/validate_smollm2_nvml_lifecycle_memory.py
+          python3 tools/run_p0_physical_qualification_bundle.py --help >/dev/null
+          python3 tools/run_p0_physical_qualification_bundle.py --self-test
+          python3 tools/validate_smollm2_nvml_lifecycle_memory.py --self-test
+      - name: Commit validated integration
+        run: |
+          set -euo pipefail
+          git add tools/run_p0_physical_qualification_bundle.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(qualification): collect NVML lifecycle in P0 bundle"
+          git push origin HEAD:feat/p0-bundle-nvml-lifecycle
