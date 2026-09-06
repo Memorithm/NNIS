@@ -80,7 +80,10 @@ where
     }
 
     if output_file.is_some() && !json {
-        return Err("--output requires --json so the persisted artifact has a versioned JSON contract".to_string());
+        return Err(
+            "--output requires --json so the persisted artifact has a versioned JSON contract"
+                .to_string(),
+        );
     }
     let model_dir = model_dir.ok_or_else(|| "missing --model DIR".to_string())?;
     let tokenizer_file = tokenizer_file.unwrap_or_else(|| model_dir.join("tokenizer.json"));
@@ -312,7 +315,10 @@ fn render_preflight_text(
 }
 
 fn write_report_atomic(path: &Path, contents: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
                 "failed to create preflight report directory {}: {error}",
@@ -646,7 +652,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let directory = env::temp_dir().join(format!("nnis-hf-preflight-{}-{nonce}", process::id()));
+        let directory =
+            env::temp_dir().join(format!("nnis-hf-preflight-{}-{nonce}", process::id()));
         let path = directory.join("report.json");
         write_report_atomic(&path, "{\"schema\":\"nnis.hf-preflight@1\"}").unwrap();
         assert_eq!(
