@@ -25,37 +25,37 @@ jobs:
           text = roadmap.read_text()
           text = text.replace('last_updated: "2026-09-01"', 'last_updated: "2026-09-06"', 1)
           marker = 'reference_products:\n'
-          insert = '''recent_verified_updates:
-  local_HF_SOUP_F32_entrypoint:
-    pull_request: 118
-    exact_head: 1b8d37c2c9373b8cbe75c53996c33f7cb8d2ca80
-    merge_commit: 1bc7b93878b863e4f13a7865191554df5c3d8a7a
-    boundary: >-
-      Adds an explicit local Hugging Face/SOUP Safetensors F32 entrypoint through
-      the existing strict loader. It does not authorize FP16, BNB 4-bit,
-      adapter-native execution, or broader model-family support.
-  weight_allocation_accounting_v1:
-    pull_request: 119
-    exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f
-    merge_commit: 90aca480b2f3f269f087868286e13aa419846654
-    required_CI: CI_353_success_including_Rust_1_77
-    smollm2_harness: harness_145_success
-    guarantees:
-      - exact_live_DeviceBuffer_owned_cuMemAlloc_byte_accounting_for_ModelWeights
-      - physical_aliases_counted_once_without_serializing_raw_device_addresses
-      - pinned_SmolLM2_non_timing_JSON_accounting_harness
-      - Cargo_lock_repaired_for_PR_118_nnis_cli_to_nnis_model_dependency
-    limits:
-      - not_physical_GPU_page_residency
-      - not_process_wide_VRAM
-      - not_CUDA_allocator_overhead
-      - not_KV_session_workspace_kernel_or_module_memory
-      - not_F16_conversion_peak_memory
-      - no_compression_latency_throughput_or_quality_claim
-    next: exact_F16_reference_graph_owned_allocation_accounting_then_conversion_peak_if_lifetimes_are_explicit
-
-reference_products:
-'''
+          insert = (
+              'recent_verified_updates:\n'
+              '  local_HF_SOUP_F32_entrypoint:\n'
+              '    pull_request: 118\n'
+              '    exact_head: 1b8d37c2c9373b8cbe75c53996c33f7cb8d2ca80\n'
+              '    merge_commit: 1bc7b93878b863e4f13a7865191554df5c3d8a7a\n'
+              '    boundary: >-\n'
+              '      Adds an explicit local Hugging Face/SOUP Safetensors F32 entrypoint through\n'
+              '      the existing strict loader. It does not authorize FP16, BNB 4-bit,\n'
+              '      adapter-native execution, or broader model-family support.\n'
+              '  weight_allocation_accounting_v1:\n'
+              '    pull_request: 119\n'
+              '    exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f\n'
+              '    merge_commit: 90aca480b2f3f269f087868286e13aa419846654\n'
+              '    required_CI: CI_353_success_including_Rust_1_77\n'
+              '    smollm2_harness: harness_145_success\n'
+              '    guarantees:\n'
+              '      - exact_live_DeviceBuffer_owned_cuMemAlloc_byte_accounting_for_ModelWeights\n'
+              '      - physical_aliases_counted_once_without_serializing_raw_device_addresses\n'
+              '      - pinned_SmolLM2_non_timing_JSON_accounting_harness\n'
+              '      - Cargo_lock_repaired_for_PR_118_nnis_cli_to_nnis_model_dependency\n'
+              '    limits:\n'
+              '      - not_physical_GPU_page_residency\n'
+              '      - not_process_wide_VRAM\n'
+              '      - not_CUDA_allocator_overhead\n'
+              '      - not_KV_session_workspace_kernel_or_module_memory\n'
+              '      - not_F16_conversion_peak_memory\n'
+              '      - no_compression_latency_throughput_or_quality_claim\n'
+              '    next: exact_F16_reference_graph_owned_allocation_accounting_then_conversion_peak_if_lifetimes_are_explicit\n\n'
+              'reference_products:\n'
+          )
           if 'weight_allocation_accounting_v1:' not in text:
               if marker not in text:
                   raise SystemExit('roadmap insertion point not found')
@@ -74,11 +74,7 @@ reference_products:
           if 'pr_118_local_HF_SOUP_F32_entrypoint' not in text:
               if nnml0_merge not in text:
                   raise SystemExit('NNML0 merged insertion point not found')
-              text = text.replace(
-                  nnml0_merge,
-                  nnml0_merge + '      - pr_118_local_HF_SOUP_F32_entrypoint\n',
-                  1,
-              )
+              text = text.replace(nnml0_merge, nnml0_merge + '      - pr_118_local_HF_SOUP_F32_entrypoint\n', 1)
           nnml0_cap = '      - SmolLM2_source_config_and_capability_identity_shared_through_versioned_exact_checkpoint_spec\n'
           if 'local_HF_SOUP_F32_entrypoint_reuses_strict_Safetensors_loader' not in text:
               if nnml0_cap not in text:
@@ -92,11 +88,7 @@ reference_products:
           if 'pr_119_exact_weight_allocation_accounting_v1' not in text:
               if nnml2_merge not in text:
                   raise SystemExit('NNML2 merged insertion point not found')
-              text = text.replace(
-                  nnml2_merge,
-                  nnml2_merge + '      - pr_119_exact_weight_allocation_accounting_v1\n',
-                  1,
-              )
+              text = text.replace(nnml2_merge, nnml2_merge + '      - pr_119_exact_weight_allocation_accounting_v1\n', 1)
           nnml2_cap = '      - ElasticXxx_can_consume_the_negative_transition_capability_through_an_external_adapter_without_a_direct_dependency\n'
           if 'ModelWeights_live_DeviceBuffer_owned_bytes_are_exactly_accounted' not in text:
               if nnml2_cap not in text:
@@ -113,19 +105,20 @@ reference_products:
           if 'weight_allocation_accounting_boundary:' not in text:
               if boundary_marker not in text:
                   raise SystemExit('NNML2 boundary insertion point not found')
-              boundary = '''    weight_allocation_accounting_boundary:
-      contract_version: nnis_model_WeightAllocationSummaryV1
-      pull_request: 119
-      exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f
-      merge_commit: 90aca480b2f3f269f087868286e13aa419846654
-      required_CI: CI_353_success_on_exact_head_including_Rust_1_77
-      exact_head_SmolLM2_harness: harness_145_success
-      exact_scope: live_DeviceBuffer_bytes_owned_by_ModelWeights
-      physical_page_residency_claimed: false
-      process_wide_VRAM_claimed: false
-      conversion_peak_claimed: false
-      performance_or_quality_claimed: false
-'''
+              boundary = (
+                  '    weight_allocation_accounting_boundary:\n'
+                  '      contract_version: nnis_model_WeightAllocationSummaryV1\n'
+                  '      pull_request: 119\n'
+                  '      exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f\n'
+                  '      merge_commit: 90aca480b2f3f269f087868286e13aa419846654\n'
+                  '      required_CI: CI_353_success_on_exact_head_including_Rust_1_77\n'
+                  '      exact_head_SmolLM2_harness: harness_145_success\n'
+                  '      exact_scope: live_DeviceBuffer_bytes_owned_by_ModelWeights\n'
+                  '      physical_page_residency_claimed: false\n'
+                  '      process_wide_VRAM_claimed: false\n'
+                  '      conversion_peak_claimed: false\n'
+                  '      performance_or_quality_claimed: false\n'
+              )
               text = text.replace(boundary_marker, boundary + boundary_marker, 1)
           text = text.replace(
               '      - peak_and_steady_state_VRAM_evidence_not_yet_complete',
