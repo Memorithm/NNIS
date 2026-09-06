@@ -12,12 +12,14 @@
 //! claims.
 
 use crate::runtime::build_rope_cache;
+use crate::weights::{summarize_weight_allocations, WeightAllocationObservation};
 use crate::{
     load_model_directory, F16AttentionPlan, F16CachedAttentionKernel,
     F16CachedAttentionParallelScoreCandidate, F16CachedAttentionStagedWeightsCandidate,
     F16FusedMlpCandidate, F16FusedProjectionGroupsCandidate, F16ReferenceExecutionPlan,
     F16ReferenceKernels, F16ReferenceProjectionLayout, F16TransposedProjectionCandidate,
-    F32RuntimeKernels, GenerationConfig, MatrixWeight, ModelConfig, ModelWeights, WeightDType,
+    F32RuntimeKernels, GenerationConfig, MatrixWeight, ModelConfig, ModelWeights,
+    WeightAllocationDTypeV1, WeightAllocationSummaryV1, WeightDType,
 };
 use nnis_jit::JitCompiler;
 use nnis_kernels::{F32TopK, F32TopKWorkspace};
@@ -111,6 +113,62 @@ struct F16ModelWeights {
 }
 
 impl F16ModelWeights {
+    fn weight_allocation_summary_v1(&self) -> Result<WeightAllocationSummaryV1> {
+        let mut observations = Vec::new();
+        self.for_each_buffer(|name, buffer| {
+            if buffer.len() == 0 || buffer.device_ptr() == 0 {
+                return Err(NnisError::invalid_input(format!(
+                    "F16 weight {name} has no live device allocation to account"
+                )));
+            }
+            observations.push(WeightAllocationObservation {
+                logical_name: name.to_string(),
+                allocation_key: buffer.device_ptr(),
+                dtype: WeightAllocationDTypeV1::F16,
+                elements: u64::try_from(buffer.len()).map_err(|_| {
+                    NnisError::invalid_input(format!("F16 weight {name} element count exceeds u64"))
+                })?,
+                bytes: u64::try_from(buffer.size_bytes()).map_err(|_| {
+                    NnisError::invalid_input(format!("F16 weight {name} byte size exceeds u64"))
+                })?,
+            });
+            Ok(())
+        })?;
+        summarize_weight_allocations(observations)
+    }
+
+    fn for_each_buffer(
+        &self,
+        mut visit: impl FnMut(&str, &DeviceBuffer<u16>) -> Result<()>,
+    ) -> Result<()> {
+        visit("token_embedding", self.token_embedding.as_ref())?;
+        for (index, layer) in self.layers.iter().enumerate() {
+            visit(
+                &format!("layers.{index}.input_norm"),
+                layer.input_norm.as_ref(),
+            )?;
+            visit(&format!("layers.{index}.q_proj"), layer.q_proj.as_ref())?;
+            visit(&format!("layers.{index}.k_proj"), layer.k_proj.as_ref())?;
+            visit(&format!("layers.{index}.v_proj"), layer.v_proj.as_ref())?;
+            visit(&format!("layers.{index}.o_proj"), layer.o_proj.as_ref())?;
+            visit(
+                &format!("layers.{index}.post_attention_norm"),
+                layer.post_attention_norm.as_ref(),
+            )?;
+            visit(
+                &format!("layers.{index}.gate_proj"),
+                layer.gate_proj.as_ref(),
+            )?;
+            visit(&format!("layers.{index}.up_proj"), layer.up_proj.as_ref())?;
+            visit(
+                &format!("layers.{index}.down_proj"),
+                layer.down_proj.as_ref(),
+            )?;
+        }
+        visit("final_norm", self.final_norm.as_ref())?;
+        visit("lm_head", self.lm_head.as_ref())
+    }
+
     fn from_f32(
         source: &ModelWeights,
         stream: &Stream,
@@ -421,6 +479,12 @@ impl F16ReferenceModel {
 
     pub fn config(&self) -> &ModelConfig {
         &self.config
+    }
+
+    /// Exact bytes of live CUDA allocations owned by the resident F16 weight graph.
+    /// This is allocation ownership accounting, not physical page residency or peak conversion memory.
+    pub fn weight_allocation_summary_v1(&self) -> Result<WeightAllocationSummaryV1> {
+        self.weights.weight_allocation_summary_v1()
     }
 
     #[must_use]

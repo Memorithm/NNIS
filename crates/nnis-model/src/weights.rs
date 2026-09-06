@@ -46,12 +46,12 @@ pub struct WeightAllocationSummaryV1 {
 }
 
 #[derive(Debug, Clone)]
-struct WeightAllocationObservation {
-    logical_name: String,
-    allocation_key: u64,
-    dtype: WeightAllocationDTypeV1,
-    elements: u64,
-    bytes: u64,
+pub(crate) struct WeightAllocationObservation {
+    pub(crate) logical_name: String,
+    pub(crate) allocation_key: u64,
+    pub(crate) dtype: WeightAllocationDTypeV1,
+    pub(crate) elements: u64,
+    pub(crate) bytes: u64,
 }
 
 fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
@@ -61,7 +61,7 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
     Ok(())
 }
 
-fn summarize_weight_allocations(
+pub(crate) fn summarize_weight_allocations(
     observations: impl IntoIterator<Item = WeightAllocationObservation>,
 ) -> Result<WeightAllocationSummaryV1> {
     let mut logical_tensor_references = 0_u64;
