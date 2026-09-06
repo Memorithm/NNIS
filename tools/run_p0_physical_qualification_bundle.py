@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,6 +34,7 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 SMOLLM2_PROMPT = "Gravity is"
 SMOLLM2_INPUT_IDS = [22_007, 6_463, 314]
 SMOLLM2_DECODE_STEPS = 32
+RUN_CONTEXT_ENV = "NNIS_BENCH_RUN_CONTEXT_ID"
 
 SMOLLM2_ENV = {
     "torch": "2.4.0",
@@ -64,6 +66,14 @@ def non_negative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("value must be non-negative")
     return parsed
+
+
+def require_run_context_id(value: str | None) -> str:
+    if value is None or not value.strip():
+        raise QualificationError(
+            f"{RUN_CONTEXT_ENV} must be a non-empty explicit physical campaign id"
+        )
+    return value.strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -328,6 +338,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
         )
     for command in ["git", "cargo", "curl", "sha256sum", "bash"]:
         require_command(command)
+    run_context_id = require_run_context_id(os.environ.get(RUN_CONTEXT_ENV))
 
     root = repository_root()
     work_dir = args.work_dir.expanduser().resolve()
@@ -353,6 +364,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
     smollm2_fixture = work_dir / "smollm2-fixture"
     smollm2_parity = work_dir / "smollm2-parity-record.json"
     smollm2_logit_report = work_dir / "smollm2-logit-report.log"
+    smollm2_nvml_lifecycle = work_dir / "smollm2-nvml-lifecycle-memory.json"
     smollm2_reference_manifest = smollm2_fixture / "reference" / "reference.json"
     tinyllama_work = work_dir / "tinyllama"
     tinyllama_run_dir = tinyllama_work / f"runs-{head[:12]}"
@@ -397,6 +409,40 @@ def run_bundle(args: argparse.Namespace) -> Path:
     require_clean_repository(root)
     run_stream(smollm2_fixture_command, cwd=root)
     validate_smollm2_reference_contract(smollm2_reference_manifest)
+
+    if smollm2_nvml_lifecycle.exists():
+        smollm2_nvml_lifecycle.unlink()
+    run_stream(
+        [
+            "cargo",
+            "run",
+            "--locked",
+            "-p",
+            "nnis-bench",
+            "--example",
+            "smollm2_nvml_lifecycle_memory",
+            "--",
+            "--model",
+            str(smollm2_fixture / "model"),
+            "--device",
+            "0",
+            "--output",
+            str(smollm2_nvml_lifecycle),
+        ],
+        cwd=root,
+    )
+    run_stream(
+        [
+            sys.executable,
+            str(root / "tools" / "validate_smollm2_nvml_lifecycle_memory.py"),
+            str(smollm2_nvml_lifecycle),
+            "--expected-git-commit",
+            head,
+            "--require-thor",
+        ],
+        cwd=root,
+    )
+
     if smollm2_parity.exists():
         smollm2_parity.unlink()
     if smollm2_logit_report.exists():
@@ -512,6 +558,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "origin_main_commit": head,
         "visible_device_ordinal": 0,
         "device_selection_policy": "first_visible_device_for_all_physical_gates",
+        "run_context_id": run_context_id,
         "smollm2_qualification_contract": {
             "prompt": SMOLLM2_PROMPT,
             "input_ids": SMOLLM2_INPUT_IDS,
@@ -533,6 +580,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
         "artifacts": {
             "nnml0_real_safetensors": artifact_entry(nnml0_evidence),
             "smollm2_reference_manifest": artifact_entry(smollm2_reference_manifest),
+            "smollm2_nvml_lifecycle_memory": artifact_entry(smollm2_nvml_lifecycle),
             "smollm2_parity_record": artifact_entry(smollm2_parity),
             "smollm2_logit_report": artifact_entry(smollm2_logit_report),
             "tinyllama_consensus": artifact_entry(tinyllama_consensus),
@@ -550,6 +598,12 @@ def run_bundle(args: argparse.Namespace) -> Path:
             },
         ],
         "promotion_authorized": False,
+        "nnml2_memory_claim_boundary": (
+            "the SmolLM2 lifecycle artifact is validated NVML current-PID process memory plus exact "
+            "NNIS-owned weight allocation evidence; it is not physical page residency and no "
+            "NVML-minus-owned-bytes difference is attributed to allocator, context, page tables, "
+            "modules, JIT, workspaces, KV, sessions, RoPE, or other runtime overhead"
+        ),
         "claim_boundary": (
             "P0 physical evidence bundle for exact registered checkpoints and NNML0 loader gate only; "
             "SmolLM2 and TinyLlama establish exact greedy generation trajectories, while SmolLM2 "
@@ -562,6 +616,7 @@ def run_bundle(args: argparse.Namespace) -> Path:
     print(f"P0_PHYSICAL_QUALIFICATION_OK head={head}")
     print(f"bundle_manifest={bundle_manifest}")
     print(f"nnml0_evidence={nnml0_evidence}")
+    print(f"smollm2_nvml_lifecycle_memory={smollm2_nvml_lifecycle}")
     print(f"smollm2_parity_record={smollm2_parity}")
     print(f"smollm2_logit_report={smollm2_logit_report}")
     print(f"tinyllama_parity_record={tinyllama_parity}")
@@ -570,6 +625,15 @@ def run_bundle(args: argparse.Namespace) -> Path:
 
 
 def self_test() -> None:
+    if require_run_context_id("  physical-test-run  ") != "physical-test-run":
+        raise AssertionError("run-context normalization failed")
+    try:
+        require_run_context_id("  ")
+    except QualificationError:
+        pass
+    else:
+        raise AssertionError("empty physical run-context unexpectedly passed")
+
     smollm2 = validate_python_probe(
         {
             "python": "3.11.9",

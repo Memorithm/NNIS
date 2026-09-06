@@ -57,6 +57,12 @@ python3 tools/validate_smollm2_nvml_lifecycle_memory.py \
 
 The validator deliberately performs no `NVML - owned allocations` subtraction and assigns no allocator, context, page-table, module, JIT, workspace, KV, session, or RoPE attribution.
 
+## P0 physical bundle integration
+
+`tools/run_p0_physical_qualification_bundle.py` consumes this contract as part of the existing exact-head physical campaign. A physical bundle now requires `NNIS_BENCH_RUN_CONTEXT_ID`, generates the pinned SmolLM2 fixture, runs `smollm2_nvml_lifecycle_memory --output`, validates that artifact with the exact bundle head and `--require-thor`, then records the artifact path, byte count and SHA-256 in `P0_PHYSICAL_QUALIFICATION.json`.
+
+This keeps the memory evidence on the same clean `origin/main` head as the NNML0 loader gate and NNML1 SmolLM2/TinyLlama parity records. The bundle still sets `promotion_authorized` to false and records an explicit NNML2 memory claim boundary. Bundle inclusion is provenance/orchestration evidence; it does not by itself establish physical page residency or an allocator/runtime-overhead decomposition.
+
 ## Interpretation boundary
 
 The following quantities are intentionally different:
