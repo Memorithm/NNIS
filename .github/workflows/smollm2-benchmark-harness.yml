@@ -9,6 +9,7 @@ on:
       - "crates/nnis-bench/examples/smollm2_e2e.rs"
       - "crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs"
       - "crates/nnis-bench/examples/smollm2_weight_allocation_accounting.rs"
+      - "crates/nnis-bench/examples/smollm2_f16_weight_allocation_accounting.rs"
       - "crates/nnis-bench/examples/compare_smollm2_reports.rs"
       - "crates/nnis-bench/examples/silu_multiply_fusion.rs"
       - "crates/nnis-bench/examples/cached_attention_parallel_value.rs"
@@ -56,6 +57,7 @@ jobs:
           cargo check --locked -p nnis-bench --example smollm2_e2e
           cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
           cargo check --locked -p nnis-bench --example smollm2_weight_allocation_accounting
+          cargo check --locked -p nnis-bench --example smollm2_f16_weight_allocation_accounting
           cargo check --locked -p nnis-bench --example compare_smollm2_reports
           cargo check --locked -p nnis-bench --example silu_multiply_fusion
           cargo check --locked -p nnis-bench --example cached_attention_parallel_value
@@ -68,6 +70,7 @@ jobs:
           cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_lm_head_weight_representation -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_weight_allocation_accounting -- -D warnings
+          cargo clippy --locked -p nnis-bench --example smollm2_f16_weight_allocation_accounting -- -D warnings
           cargo clippy --locked -p nnis-bench --example compare_smollm2_reports -- -D warnings
           cargo clippy --locked -p nnis-bench --example silu_multiply_fusion -- -D warnings
           cargo clippy --locked -p nnis-bench --example cached_attention_parallel_value -- -D warnings
