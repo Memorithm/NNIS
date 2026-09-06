@@ -65,3 +65,32 @@ if 'pub fn process_gpu_memory_probe_v1' not in text:
         raise SystemExit('Context::mem_info anchor missing')
     text = text.replace(anchor, method, 1)
 context.write_text(text)
+
+nvml = Path('crates/nnis-sys/src/nvml.rs')
+text = nvml.read_text()
+if 'NVML_ERROR_ALREADY_INITIALIZED' not in text:
+    text = text.replace(
+        'pub const NVML_ERROR_NO_PERMISSION: nvmlReturn_t = 4;\n',
+        'pub const NVML_ERROR_NO_PERMISSION: nvmlReturn_t = 4;\n'
+        '/// Legacy status returned by older NVML versions when already initialized.\n'
+        'pub const NVML_ERROR_ALREADY_INITIALIZED: nvmlReturn_t = 5;\n',
+        1,
+    )
+    text = text.replace(
+        '        assert_eq!(NVML_ERROR_NO_PERMISSION, 4);\n',
+        '        assert_eq!(NVML_ERROR_NO_PERMISSION, 4);\n'
+        '        assert_eq!(NVML_ERROR_ALREADY_INITIALIZED, 5);\n',
+        1,
+    )
+nvml.write_text(text)
+
+process_memory = Path('crates/nnis-rt/src/process_memory.rs')
+text = process_memory.read_text()
+old = '    if init_status != nvml::NVML_SUCCESS {\n'
+new = '''    if init_status != nvml::NVML_SUCCESS
+        && init_status != nvml::NVML_ERROR_ALREADY_INITIALIZED
+    {
+'''
+if old in text:
+    text = text.replace(old, new, 1)
+process_memory.write_text(text)
