@@ -1,5 +1,9 @@
 use nnis::{Context, Device, GenerationConfig, Stream};
-use nnis_model::{load_model_from_safetensors, Model, SafetensorsLoadConfig};
+use nnis_model::{
+    load_model_from_safetensors, preflight_hf_safetensors_source, HfSafetensorsPreflightReportV1,
+    Model, SafetensorsLoadConfig,
+};
+use serde_json::json;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -7,8 +11,16 @@ use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis-hf generate --model DIR --prompt TEXT [--tokenizer FILE] [--device N] [--max-new-tokens N]\n\nLoads an already-materialized local Hugging Face Safetensors directory with NNIS's strict loader. The tokenizer defaults to DIR/tokenizer.json. No network access is performed.";
+const CLI_PREFLIGHT_SCHEMA: &str = "nnis.hf-preflight@1";
+const USAGE: &str = "Usage:\n  nnis-hf validate --model DIR [--tokenizer FILE] [--json]\n  nnis-hf generate --model DIR --prompt TEXT [--tokenizer FILE] [--device N] [--max-new-tokens N]\n\n`validate` performs a CPU-only fail-closed preflight of config.json, Safetensors shards, recognized tensor names/shapes/dtypes, decoder graph completeness, and tokenizer IDs. `generate` loads the same local directory on CUDA. No network access is performed.";
 const SOUP_F32_HINT: &str = "For a dense Soup artifact, produce an NNIS-executable source with: soup merge --adapter ADAPTER --output DIR --dtype float32. Soup's default float16 merge and 4-bit merged formats are not admitted by the current NNIS direct-HF execution path.";
+
+#[derive(Debug, PartialEq, Eq)]
+struct ValidateArgs {
+    model_dir: PathBuf,
+    tokenizer_file: PathBuf,
+    json: bool,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct GenerateArgs {
@@ -22,24 +34,54 @@ struct GenerateArgs {
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     Help,
+    Validate(ValidateArgs),
     Generate(GenerateArgs),
 }
 
-fn parse_args<I>(arguments: I) -> Result<Command, String>
+fn required_value<I>(arguments: &mut I, flag: &str) -> Result<String, String>
 where
-    I: IntoIterator<Item = String>,
+    I: Iterator<Item = String>,
 {
-    let mut arguments = arguments.into_iter();
-    let Some(command) = arguments.next() else {
-        return Ok(Command::Help);
-    };
-    if matches!(command.as_str(), "--help" | "-h") {
-        return Ok(Command::Help);
-    }
-    if command != "generate" {
-        return Err(format!("unknown command {command:?}\n\n{USAGE}"));
+    arguments
+        .next()
+        .ok_or_else(|| format!("{flag} requires a value"))
+}
+
+fn parse_validate<I>(mut arguments: I) -> Result<Command, String>
+where
+    I: Iterator<Item = String>,
+{
+    let mut model_dir = None;
+    let mut tokenizer_file = None;
+    let mut json = false;
+
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--model" => {
+                model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?));
+            }
+            "--tokenizer" => {
+                tokenizer_file = Some(PathBuf::from(required_value(&mut arguments, "--tokenizer")?));
+            }
+            "--json" => json = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            other => return Err(format!("unknown validate argument {other:?}\n\n{USAGE}")),
+        }
     }
 
+    let model_dir = model_dir.ok_or_else(|| "missing --model DIR".to_string())?;
+    let tokenizer_file = tokenizer_file.unwrap_or_else(|| model_dir.join("tokenizer.json"));
+    Ok(Command::Validate(ValidateArgs {
+        model_dir,
+        tokenizer_file,
+        json,
+    }))
+}
+
+fn parse_generate<I>(mut arguments: I) -> Result<Command, String>
+where
+    I: Iterator<Item = String>,
+{
     let mut model_dir = None;
     let mut tokenizer_file = None;
     let mut prompt = None;
@@ -49,30 +91,16 @@ where
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--model" => {
-                model_dir = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .ok_or_else(|| "--model requires a directory".to_string())?,
-                ));
+                model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?));
             }
             "--tokenizer" => {
-                tokenizer_file = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .ok_or_else(|| "--tokenizer requires a file".to_string())?,
-                ));
+                tokenizer_file = Some(PathBuf::from(required_value(&mut arguments, "--tokenizer")?));
             }
             "--prompt" => {
-                prompt = Some(
-                    arguments
-                        .next()
-                        .ok_or_else(|| "--prompt requires text".to_string())?,
-                );
+                prompt = Some(required_value(&mut arguments, "--prompt")?);
             }
             "--device" => {
-                let raw = arguments
-                    .next()
-                    .ok_or_else(|| "--device requires an integer ordinal".to_string())?;
+                let raw = required_value(&mut arguments, "--device")?;
                 device_ordinal = raw
                     .parse::<i32>()
                     .map_err(|error| format!("invalid --device {raw:?}: {error}"))?;
@@ -81,9 +109,7 @@ where
                 }
             }
             "--max-new-tokens" => {
-                let raw = arguments
-                    .next()
-                    .ok_or_else(|| "--max-new-tokens requires an integer".to_string())?;
+                let raw = required_value(&mut arguments, "--max-new-tokens")?;
                 max_new_tokens = raw
                     .parse::<usize>()
                     .map_err(|error| format!("invalid --max-new-tokens {raw:?}: {error}"))?;
@@ -108,13 +134,52 @@ where
     }))
 }
 
-fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Vec<u32>), String> {
-    let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(|error| {
+fn parse_args<I>(arguments: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut arguments = arguments.into_iter();
+    let Some(command) = arguments.next() else {
+        return Ok(Command::Help);
+    };
+    match command.as_str() {
+        "--help" | "-h" => Ok(Command::Help),
+        "validate" => parse_validate(arguments),
+        "generate" => parse_generate(arguments),
+        _ => Err(format!("unknown command {command:?}\n\n{USAGE}")),
+    }
+}
+
+fn load_tokenizer(tokenizer_file: &Path) -> Result<Tokenizer, String> {
+    Tokenizer::from_file(tokenizer_file).map_err(|error| {
         format!(
             "failed to load tokenizer {}: {error}",
             tokenizer_file.display()
         )
-    })?;
+    })
+}
+
+fn validate_tokenizer(tokenizer_file: &Path, model_vocab_size: usize) -> Result<(usize, u32), String> {
+    let tokenizer = load_tokenizer(tokenizer_file)?;
+    let vocab = tokenizer.get_vocab(true);
+    if vocab.is_empty() {
+        return Err("tokenizer vocabulary is empty".to_string());
+    }
+    let max_token_id = vocab
+        .values()
+        .copied()
+        .max()
+        .ok_or_else(|| "tokenizer vocabulary is empty".to_string())?;
+    if max_token_id as usize >= model_vocab_size {
+        return Err(format!(
+            "tokenizer maximum token id {max_token_id} is out of range for model vocabulary {model_vocab_size}"
+        ));
+    }
+    Ok((vocab.len(), max_token_id))
+}
+
+fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Vec<u32>), String> {
+    let tokenizer = load_tokenizer(tokenizer_file)?;
     let encoding = tokenizer
         .encode(prompt, true)
         .map_err(|error| format!("failed to tokenize prompt: {error}"))?;
@@ -123,6 +188,102 @@ fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Ve
         return Err("tokenizer produced no input IDs".to_string());
     }
     Ok((tokenizer, input_ids))
+}
+
+fn safetensors_load_config(model_dir: &Path) -> SafetensorsLoadConfig {
+    SafetensorsLoadConfig {
+        repo_id: None,
+        revision: None,
+        local_dir: model_dir.to_string_lossy().into_owned(),
+    }
+}
+
+fn render_preflight_json(
+    arguments: &ValidateArgs,
+    report: &HfSafetensorsPreflightReportV1,
+    tokenizer_vocab_size: usize,
+    tokenizer_max_token_id: u32,
+) -> Result<String, String> {
+    let ready = report.direct_f32_execution_ready;
+    let value = json!({
+        "schema": CLI_PREFLIGHT_SCHEMA,
+        "model_directory": arguments.model_dir.to_string_lossy(),
+        "tokenizer_file": arguments.tokenizer_file.to_string_lossy(),
+        "model_source": report,
+        "tokenizer": {
+            "vocabulary_size": tokenizer_vocab_size,
+            "maximum_token_id": tokenizer_max_token_id,
+            "model_vocabulary_size": report.metadata.vocab_size,
+        },
+        "direct_execution_ready": ready,
+        "direct_execution_blocker": if ready { None } else { Some(SOUP_F32_HINT) },
+    });
+    serde_json::to_string_pretty(&value)
+        .map_err(|error| format!("failed to serialize preflight JSON: {error}"))
+}
+
+fn render_preflight_text(
+    arguments: &ValidateArgs,
+    report: &HfSafetensorsPreflightReportV1,
+    tokenizer_vocab_size: usize,
+    tokenizer_max_token_id: u32,
+) -> String {
+    let state = if report.direct_f32_execution_ready {
+        "READY"
+    } else {
+        "SOURCE_VALID_NOT_DIRECT_EXECUTION_READY"
+    };
+    let mut output = format!(
+        "NNIS_HF_PREFLIGHT_{state}\nschema={}\nmodel={}\ntokenizer={}\narchitecture={}\nmodel_type={}\nweight_dtype={:?}\nweight_files={}\nrecognized_tensors={}\nignored_tensors={}\nlogical_tensors={}\ntied_lm_head_required={}\ntokenizer_vocab_size={}\ntokenizer_max_token_id={}\nmodel_vocab_size={}\ndirect_f32_execution_ready={}",
+        report.schema_version,
+        arguments.model_dir.display(),
+        arguments.tokenizer_file.display(),
+        report.metadata.architecture,
+        report.metadata.model_type,
+        report.metadata.weight_dtype,
+        report.weight_files.join(","),
+        report.recognized_tensor_count,
+        report.ignored_tensor_count,
+        report.logical_tensor_count,
+        report.tied_lm_head_required,
+        tokenizer_vocab_size,
+        tokenizer_max_token_id,
+        report.metadata.vocab_size,
+        report.direct_f32_execution_ready,
+    );
+    if !report.direct_f32_execution_ready {
+        output.push('\n');
+        output.push_str(SOUP_F32_HINT);
+    }
+    output
+}
+
+fn validate(arguments: &ValidateArgs) -> Result<(String, bool), String> {
+    let load_config = safetensors_load_config(&arguments.model_dir);
+    let report = preflight_hf_safetensors_source(&load_config).map_err(|error| {
+        format!(
+            "failed CPU-only Hugging Face Safetensors preflight for {}: {error}",
+            arguments.model_dir.display()
+        )
+    })?;
+    let (tokenizer_vocab_size, tokenizer_max_token_id) =
+        validate_tokenizer(&arguments.tokenizer_file, report.metadata.vocab_size)?;
+    let output = if arguments.json {
+        render_preflight_json(
+            arguments,
+            &report,
+            tokenizer_vocab_size,
+            tokenizer_max_token_id,
+        )?
+    } else {
+        render_preflight_text(
+            arguments,
+            &report,
+            tokenizer_vocab_size,
+            tokenizer_max_token_id,
+        )
+    };
+    Ok((output, report.direct_f32_execution_ready))
 }
 
 fn generate(arguments: &GenerateArgs) -> Result<String, String> {
@@ -140,11 +301,7 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
     let construction_stream =
         Stream::new(&context).map_err(|error| format!("failed to create CUDA stream: {error}"))?;
 
-    let load_config = SafetensorsLoadConfig {
-        repo_id: None,
-        revision: None,
-        local_dir: arguments.model_dir.to_string_lossy().into_owned(),
-    };
+    let load_config = safetensors_load_config(&arguments.model_dir);
     let (config, weights) =
         load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
             |error| {
@@ -204,6 +361,20 @@ fn main() -> ExitCode {
             println!("{USAGE}");
             ExitCode::SUCCESS
         }
+        Command::Validate(arguments) => match validate(&arguments) {
+            Ok((output, true)) => {
+                println!("{output}");
+                ExitCode::SUCCESS
+            }
+            Ok((output, false)) => {
+                println!("{output}");
+                ExitCode::FAILURE
+            }
+            Err(error) => {
+                eprintln!("nnis-hf validate: {error}");
+                ExitCode::FAILURE
+            }
+        },
         Command::Generate(arguments) => match generate(&arguments) {
             Ok(text) => {
                 println!("{text}");
@@ -232,7 +403,46 @@ mod tests {
     }
 
     #[test]
-    fn model_directory_supplies_default_tokenizer() {
+    fn validate_defaults_to_model_tokenizer_and_text_output() {
+        let parsed = parse_args(strings(&[
+            "validate",
+            "--model",
+            "/models/soup-merged",
+        ]))
+        .unwrap();
+        assert_eq!(
+            parsed,
+            Command::Validate(ValidateArgs {
+                model_dir: PathBuf::from("/models/soup-merged"),
+                tokenizer_file: PathBuf::from("/models/soup-merged/tokenizer.json"),
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn validate_accepts_explicit_tokenizer_and_json_without_cuda() {
+        let parsed = parse_args(strings(&[
+            "validate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--json",
+        ]))
+        .unwrap();
+        assert_eq!(
+            parsed,
+            Command::Validate(ValidateArgs {
+                model_dir: PathBuf::from("/model"),
+                tokenizer_file: PathBuf::from("/tokenizer.json"),
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn model_directory_supplies_default_tokenizer_for_generation() {
         let parsed = parse_args(strings(&[
             "generate",
             "--model",
@@ -283,6 +493,11 @@ mod tests {
 
     #[test]
     fn invalid_arguments_fail_before_cuda() {
+        assert!(parse_args(strings(&["validate"])).is_err());
+        assert!(parse_args(strings(&[
+            "validate", "--model", "/model", "--prompt", "x",
+        ]))
+        .is_err());
         assert!(parse_args(strings(&["generate"])).is_err());
         assert!(parse_args(strings(&[
             "generate",
