@@ -12,6 +12,7 @@ pub mod error;
 pub mod kv_cache;
 pub mod memory;
 pub mod pool;
+pub mod process_memory;
 pub mod stream_event;
 
 pub use async_work::PendingGpuWork;
@@ -22,6 +23,11 @@ pub use error::{ErrorKind, NnisError, Result};
 pub use kv_cache::{KvAppend, KvCache, KvCacheConfig};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use pool::{PooledBuffer, StreamOrderedAllocator};
+pub use process_memory::{
+    ProcessGpuMemoryProbeV1, ProcessGpuMemorySnapshotV1, ProcessGpuMemorySourceV1,
+    ProcessGpuMemoryUnavailableReasonV1, ProcessGpuMemoryUnavailableV1,
+    NNIS_PROCESS_GPU_MEMORY_PROBE_VERSION,
+};
 pub use stream_event::{Event, Stream};
 
 #[cfg(test)]

@@ -95,6 +95,16 @@ impl Context {
         }
         Ok((free as u64, total as u64))
     }
+
+    /// Probe NVML for memory attributed to this compute process on the exact
+    /// CUDA device UUID backing the context.
+    ///
+    /// This intentionally has no `cuMemGetInfo` fallback. Missing NVML,
+    /// unsupported device queries, permission failures and unavailable process
+    /// memory values remain explicit `Unavailable` capability states.
+    pub fn process_gpu_memory_probe_v1(&self) -> crate::process_memory::ProcessGpuMemoryProbeV1 {
+        crate::process_memory::probe(self)
+    }
 }
 
 impl Drop for Context {

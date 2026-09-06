@@ -1,10 +1,10 @@
-//! Raw, dynamically-loaded FFI surface for the CUDA driver API and NVRTC.
+//! Raw, dynamically-loaded FFI surface for the CUDA driver API, NVRTC and optional NVML.
 //!
 //! Design invariants (see ARCHITECTURE.md):
-//! * No link-time dependency on `libcuda` / `libnvrtc`: both libraries are
-//!   resolved at runtime via `dlopen`, so NNIS builds on machines without a
-//!   CUDA toolkit and degrades to a typed "unsupported" state instead of a
-//!   link error.
+//! * No link-time dependency on `libcuda`, `libnvrtc` or optional `libnvidia-ml`:
+//!   native libraries are resolved at runtime via `dlopen`, so NNIS builds on
+//!   machines without the management library and preserves a capability-negative
+//!   state instead of a link error.
 //! * The unsafe surface is confined to this crate. Every foreign function is
 //!   declared with the exact signature from `/usr/include/cuda.h`
 //!   (CUDA 13.0) or `nvrtc.h`; enum constants are transcribed from the
@@ -17,6 +17,7 @@
 
 pub mod constants;
 pub mod driver;
+pub mod nvml;
 pub mod nvrtc;
 
 /// Raw `CUresult` value.

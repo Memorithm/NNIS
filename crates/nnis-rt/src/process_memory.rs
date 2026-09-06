@@ -136,11 +136,7 @@ fn query_processes(
 
     let mut required = 0_u32;
     let first_status = unsafe {
-        (api.nvmlDeviceGetComputeRunningProcesses_v3)(
-            device,
-            &mut required,
-            std::ptr::null_mut(),
-        )
+        (api.nvmlDeviceGetComputeRunningProcesses_v3)(device, &mut required, std::ptr::null_mut())
     };
 
     if first_status == nvml::NVML_SUCCESS {
@@ -166,11 +162,7 @@ fn query_processes(
         let mut entries = vec![nvmlProcessInfo_t::default(); capacity_usize];
         let mut count = capacity;
         let status = unsafe {
-            (api.nvmlDeviceGetComputeRunningProcesses_v3)(
-                device,
-                &mut count,
-                entries.as_mut_ptr(),
-            )
+            (api.nvmlDeviceGetComputeRunningProcesses_v3)(device, &mut count, entries.as_mut_ptr())
         };
 
         if status == nvml::NVML_SUCCESS {
@@ -268,17 +260,14 @@ pub(crate) fn probe(context: &Context) -> ProcessGpuMemoryProbeV1 {
     };
 
     let mut device: nvml::nvmlDevice_t = std::ptr::null_mut();
-    let lookup_status = unsafe {
-        (api.nvmlDeviceGetHandleByUUID)(uuid_c_string.as_ptr(), &mut device)
-    };
+    let lookup_status =
+        unsafe { (api.nvmlDeviceGetHandleByUUID)(uuid_c_string.as_ptr(), &mut device) };
     if lookup_status != nvml::NVML_SUCCESS {
         let reason = match lookup_status {
             nvml::NVML_ERROR_NOT_SUPPORTED => {
                 ProcessGpuMemoryUnavailableReasonV1::QueryNotSupported
             }
-            nvml::NVML_ERROR_NO_PERMISSION => {
-                ProcessGpuMemoryUnavailableReasonV1::PermissionDenied
-            }
+            nvml::NVML_ERROR_NO_PERMISSION => ProcessGpuMemoryUnavailableReasonV1::PermissionDenied,
             _ => ProcessGpuMemoryUnavailableReasonV1::NvmlDeviceLookupFailed,
         };
         return native_unavailable(reason, "nvmlDeviceGetHandleByUUID", lookup_status);
@@ -333,8 +322,8 @@ mod tests {
     #[test]
     fn cuda_uuid_is_bound_to_nvml_gpu_uuid_form() {
         let uuid = nnis_sys::CUuuid([
-            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55,
-            0x66, 0x77, 0x88,
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+            0x77, 0x88,
         ]);
         assert_eq!(
             nvml_uuid_string(uuid),
@@ -366,8 +355,7 @@ mod tests {
 
     #[test]
     fn unsupported_and_permission_statuses_remain_capability_negative() {
-        let unsupported =
-            classify_query_status("query", nvml::NVML_ERROR_NOT_SUPPORTED);
+        let unsupported = classify_query_status("query", nvml::NVML_ERROR_NOT_SUPPORTED);
         assert_eq!(
             unsupported.unavailable().unwrap().reason,
             ProcessGpuMemoryUnavailableReasonV1::QueryNotSupported

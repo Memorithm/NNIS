@@ -135,11 +135,7 @@ pub fn api() -> Result<&'static NvmlApi, LibraryError> {
             Ok(NvmlApi {
                 nvmlInit_v2: resolve(&library, LIB, &["nvmlInit_v2"])?,
                 nvmlErrorString: resolve(&library, LIB, &["nvmlErrorString"])?,
-                nvmlDeviceGetHandleByUUID: resolve(
-                    &library,
-                    LIB,
-                    &["nvmlDeviceGetHandleByUUID"],
-                )?,
+                nvmlDeviceGetHandleByUUID: resolve(&library, LIB, &["nvmlDeviceGetHandleByUUID"])?,
                 nvmlDeviceGetComputeRunningProcesses_v3: resolve(
                     &library,
                     LIB,
