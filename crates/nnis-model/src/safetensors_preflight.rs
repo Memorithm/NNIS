@@ -37,6 +37,15 @@ pub struct HfSafetensorsPreflightReportV1 {
     pub direct_f32_execution_ready: bool,
 }
 
+impl HfSafetensorsPreflightReportV1 {
+    /// Serialize the versioned report using the crate-owned wire schema.
+    pub fn to_json(&self) -> Result<String> {
+        serde_json::to_string(self).map_err(|error| {
+            NnisError::invalid_input(format!("failed to serialize HF preflight report: {error}"))
+        })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct HuggingFaceConfig {
     architectures: Vec<String>,
@@ -591,7 +600,7 @@ mod tests {
             tied_lm_head_required: true,
             direct_f32_execution_ready: false,
         };
-        let json = serde_json::to_string(&report).unwrap();
+        let json = report.to_json().unwrap();
         let decoded: HfSafetensorsPreflightReportV1 = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, report);
         let mut value: Value = serde_json::from_str(&json).unwrap();
