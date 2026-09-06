@@ -1,0 +1,61 @@
+schema_version: 1
+kind: nnis_hf_soup_preflight_record
+status: merged_post_merge_ci_pending
+last_updated: "2026-09-06"
+repository: Memorithm/NNIS
+
+implementation:
+  pull_request: 122
+  exact_head: 30adf2e26004ef5305144e0a2528b74eea84d9d8
+  merge_commit: 7433f189920cf57a889e861e2ff9680c225de457
+  base_main_validated: 8982dce75e9ea68554f4320f427032fa3d66c075
+  required_ci: CI_373_success_including_Rust_1_77
+  smollm2_harness: harness_161_success
+  tinyllama_reference: tinyllama_reference_29_success
+  post_merge_ci: CI_374_pending
+
+contract:
+  report: HfSafetensorsPreflightReportV1
+  report_schema_version: 1
+  cli_schema: nnis.hf-preflight@1
+  cli_surface: nnis-hf_validate
+  network_access: false
+  cuda_context_created: false
+  cuda_allocation_performed: false
+  model_format_v1_changed: false
+  runtime_default_changed: false
+  precision_policy_relaxed: false
+
+validated_capabilities:
+  - supported_Hugging_Face_config_capability_checked_before_CUDA
+  - single_or_indexed_sharded_Safetensors_layout_checked_before_CUDA
+  - shard_relative_path_and_existence_validation
+  - recognized_decoder_tensor_name_shape_dtype_and_byte_length_validation
+  - duplicate_logical_tensor_rejection
+  - complete_decoder_graph_validation_with_tied_LM_head_rule
+  - tokenizer_parseability_and_maximum_token_id_bounded_by_model_vocab
+  - source_admission_distinguished_from_current_direct_F32_execution_readiness
+  - versioned_machine_readable_JSON_for_external_orchestration
+
+limits:
+  - not_general_Hugging_Face_or_SOUP_model_family_support
+  - not_FP16_direct_execution_admission
+  - not_BNB_4bit_or_other_quantized_representation_admission
+  - not_adapter_native_execution
+  - not_numerical_equivalence_evidence
+  - not_model_quality_evidence
+  - not_serving_performance_evidence
+  - not_physical_GPU_or_memory_evidence
+  - unknown_unrecognized_tensors_are_ignored_consistently_with_current_loader
+
+cross_project_boundary:
+  intended_consumers:
+    - scirust_hub_or_other_orchestrators
+  rule: >-
+    External controllers may consume the versioned JSON preflight result to
+    reject incompatible artifacts before scheduling GPU execution, but they must
+    not reimplement or broaden NNIS model-admission semantics.
+
+next:
+  - consume_the_versioned_preflight_result_at_the_orchestration_boundary_without_adding_a_direct_runtime_dependency
+  - keep_NNIS_as_the_owner_of_model_admission_semantics
