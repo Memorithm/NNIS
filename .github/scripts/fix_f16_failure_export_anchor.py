@@ -11,18 +11,18 @@ new_new = "new_runtime_export = '    F16ReferenceAccumulator, F16ReferenceGenera
 text = text.replace(old_new, new_new, 1)
 
 text = text.replace(
-    '    materialization_failure_evidence: Option<F16WeightMaterializationFailureEvidenceV1>,\\n',
-    '    materialization_failure_evidence: Option<Box<F16WeightMaterializationFailureEvidenceV1>>,\\n',
+    '    materialization_failure_evidence: Option<F16WeightMaterializationFailureEvidenceV1>,',
+    '    materialization_failure_evidence: Option<Box<F16WeightMaterializationFailureEvidenceV1>>,',
     1,
 )
 text = text.replace(
-    '        self.materialization_failure_evidence.as_ref()\\n',
-    '        self.materialization_failure_evidence.as_deref()\\n',
+    '        self.materialization_failure_evidence.as_ref()',
+    '        self.materialization_failure_evidence.as_deref()',
     1,
 )
 text = text.replace(
-    '                materialization_failure_evidence,\\n                materialization_evidence_error,\\n',
-    '                materialization_failure_evidence: materialization_failure_evidence.map(Box::new),\\n                materialization_evidence_error,\\n',
+    '                materialization_failure_evidence,\n                materialization_evidence_error,',
+    '                materialization_failure_evidence: materialization_failure_evidence.map(Box::new),\n                materialization_evidence_error,',
     1,
 )
 
