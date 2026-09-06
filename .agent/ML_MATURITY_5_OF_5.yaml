@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 710d7c7466b4bee9d6accb42531e49fef2df4fb1
+  main_head: 26f4d5ab200501568155d5165bcb05b0c9e7cf61
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -169,6 +169,8 @@ current_progress:
       - pr_121_F16_materialization_owned_peak_evidence_v1
       - pr_123_F16_materialization_failure_evidence_v1
       - pr_125_NVML_process_memory_snapshot_v1
+      - pr_126_SmolLM2_NVML_lifecycle_memory_harness_v1
+      - pr_127_SmolLM2_NVML_lifecycle_artifact_validation_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -190,6 +192,8 @@ current_progress:
       - NVML_current_PID_usedGpuMemory_is_available_as_a_fail_closed_process_scoped_software_contract
       - CUDA_to_NVML_device_correlation_uses_UUID_and_does_not_assume_ordinal_equivalence
       - NVML_process_memory_is_not_relabelled_as_physical_page_residency_or_per_allocation_ownership
+      - SmolLM2_NVML_lifecycle_harness_records_three_synchronized_process_memory_boundaries_alongside_exact_owned_weight_summaries
+      - SmolLM2_NVML_lifecycle_artifacts_are_atomically_persisted_and_fail_closed_validated_before_physical_use
     weight_allocation_accounting_boundary:
       contract_version: nnis_model_WeightAllocationSummaryV1
       pull_request: 119
@@ -254,6 +258,21 @@ current_progress:
       physical_page_residency_claimed: false
       per_allocation_attribution_claimed: false
       allocator_or_page_table_overhead_claimed: false
+      performance_or_quality_claimed: false
+    smollm2_nvml_lifecycle_artifact_boundary:
+      contract_version: nnis_smollm2_nvml_lifecycle_memory_v1
+      harness_pull_request: 126
+      artifact_validator_pull_request: 127
+      artifact_validator_exact_head: d058120bf0a5a0cd0686150de947fb941baf85db
+      artifact_validator_merge_commit: 26f4d5ab200501568155d5165bcb05b0c9e7cf61
+      required_CI: CI_382_success_on_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: harness_163_success
+      atomic_artifact_output_qualified: true
+      pinned_checkpoint_and_exact_head_validation_qualified: true
+      Thor_run_context_PID_device_UUID_and_allocation_reconciliation_fail_closed: true
+      real_Thor_model_lifecycle_measurement_collected: false
+      physical_page_residency_claimed: false
+      allocator_or_runtime_overhead_attribution_claimed: false
       performance_or_quality_claimed: false
     execution_transition_boundary:
       contract_version: nnis_model_F16ExecutionTransitionRequirementsV1

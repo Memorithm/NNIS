@@ -128,6 +128,38 @@ recent_verified_updates:
       - no_performance_quality_compression_or_cross_runtime_memory_claim
     next: run_a_pinned_SmolLM2_Thor_lifecycle_campaign_reporting_NVML_process_memory_alongside_exact_NNIS_owned_allocation_summaries
 
+  smollm2_nvml_lifecycle_harness_v1:
+    pull_request: 126
+    exact_head: 15f23004dfe72b901cbdccd561efa026186d7730
+    merge_commit: 150ba5e5fbc1417695ef31533753c824baa1fcad
+    guarantees:
+      - pinned_SmolLM2_lifecycle_harness_records_post_context_source_F32_and_resident_F16_NVML_process_memory
+      - source_and_resident_weight_graphs_include_exact_WeightAllocationSummaryV1_alongside_NVML_observations
+      - F16_materialization_owned_peak_evidence_is_embedded_without_relabelling_NVML_as_owned_bytes
+    limits:
+      - software_harness_only_no_real_Thor_lifecycle_result_in_PR_126
+      - not_physical_GPU_page_residency
+      - no_NVML_minus_owned_bytes_overhead_attribution
+      - no_performance_quality_compression_or_live_transition_claim
+
+  smollm2_nvml_lifecycle_artifact_validation_v1:
+    pull_request: 127
+    exact_head: d058120bf0a5a0cd0686150de947fb941baf85db
+    merge_commit: 26f4d5ab200501568155d5165bcb05b0c9e7cf61
+    required_CI: CI_382_success_including_Rust_1_77
+    smollm2_harness: harness_163_success
+    guarantees:
+      - lifecycle_JSON_can_be_atomically_persisted_as_the_exact_stdout_bytes
+      - validator_fails_closed_on_checkpoint_head_Thor_run_context_PID_device_UUID_and_allocation_summary_drift
+      - source_and_resident_allocation_summaries_must_reconcile_byte_for_byte_with_materialization_evidence
+      - permanent_SmolLM2_CI_runs_validator_syntax_help_and_corruption_self_tests
+    limits:
+      - software_artifact_and_validator_only_no_real_Thor_measurement_in_PR_127
+      - not_physical_GPU_page_residency
+      - no_allocator_context_page_table_module_JIT_workspace_KV_session_or_RoPE_overhead_attribution
+      - no_performance_quality_compression_or_live_transition_claim
+    next: execute_the_persisted_validated_lifecycle_campaign_on_real_Jetson_AGX_Thor_at_an_exact_clean_green_head
+
 reference_products:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
   secondary_server_reference: TensorRT_LLM
