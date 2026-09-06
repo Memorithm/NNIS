@@ -1,0 +1,39 @@
+name: Update NVML process memory roadmap temp
+
+on:
+  push:
+    branches:
+      - agent/sovereignty-roadmap
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sovereignty-roadmap
+      - name: Update roadmap overlays
+        run: python3 .github/scripts/update_nvml_process_memory_roadmap.py
+      - name: Validate YAML parse
+        run: |
+          python3 - <<'PY'
+          import yaml
+          for path in ['.agent/NNIS_SOVEREIGNTY_ROADMAP.yaml', '.agent/ML_MATURITY_5_OF_5.yaml']:
+              with open(path, 'r', encoding='utf-8') as f:
+                  yaml.safe_load(f)
+          PY
+      - name: Commit roadmap maintenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add .agent/NNIS_SOVEREIGNTY_ROADMAP.yaml .agent/ML_MATURITY_5_OF_5.yaml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(agent): record NVML process memory contract"
+          git push origin HEAD:agent/sovereignty-roadmap
