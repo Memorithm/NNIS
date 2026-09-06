@@ -108,7 +108,9 @@ impl F16WeightMaterializationTracker {
         self.live_f16_allocation_bytes = self
             .live_f16_allocation_bytes
             .checked_add(bytes)
-            .ok_or_else(|| NnisError::invalid_input("live F16 materialization bytes overflow u64"))?;
+            .ok_or_else(|| {
+                NnisError::invalid_input("live F16 materialization bytes overflow u64")
+            })?;
         if temporary {
             self.live_temporary_f16_allocation_bytes = self
                 .live_temporary_f16_allocation_bytes
@@ -131,7 +133,9 @@ impl F16WeightMaterializationTracker {
         self.live_f16_allocation_bytes = self
             .live_f16_allocation_bytes
             .checked_sub(bytes)
-            .ok_or_else(|| NnisError::invalid_input("F16 release exceeds live materialization bytes"))?;
+            .ok_or_else(|| {
+                NnisError::invalid_input("F16 release exceeds live materialization bytes")
+            })?;
         self.record(
             logical_name,
             F16WeightMaterializationEventKindV1::ReleaseTemporary,
@@ -155,10 +159,10 @@ impl F16WeightMaterializationTracker {
         self.peak_live_temporary_f16_allocation_bytes = self
             .peak_live_temporary_f16_allocation_bytes
             .max(self.live_temporary_f16_allocation_bytes);
-        self.peak_scoped_owned_allocation_bytes = self.peak_scoped_owned_allocation_bytes.max(scoped);
-        let sequence = u32::try_from(self.events.len()).map_err(|_| {
-            NnisError::invalid_input("F16 materialization event count exceeds u32")
-        })?;
+        self.peak_scoped_owned_allocation_bytes =
+            self.peak_scoped_owned_allocation_bytes.max(scoped);
+        let sequence = u32::try_from(self.events.len())
+            .map_err(|_| NnisError::invalid_input("F16 materialization event count exceeds u32"))?;
         self.events.push(F16WeightMaterializationEventV1 {
             sequence,
             logical_name: logical_name.to_string(),
@@ -199,7 +203,9 @@ impl F16WeightMaterializationTracker {
         let final_scoped_owned_allocation_bytes = self
             .source_owned_allocation_bytes
             .checked_add(self.live_f16_allocation_bytes)
-            .ok_or_else(|| NnisError::invalid_input("final scoped materialization bytes overflow u64"))?;
+            .ok_or_else(|| {
+                NnisError::invalid_input("final scoped materialization bytes overflow u64")
+            })?;
         if self.peak_scoped_owned_allocation_bytes < final_scoped_owned_allocation_bytes {
             return Err(NnisError::invalid_input(
                 "F16 materialization peak is below final scoped allocation bytes",
@@ -211,8 +217,7 @@ impl F16WeightMaterializationTracker {
             source_weight_allocations,
             steady_state_f16_weight_allocations,
             peak_live_f16_allocation_bytes: self.peak_live_f16_allocation_bytes,
-            peak_live_temporary_f16_allocation_bytes: self
-                .peak_live_temporary_f16_allocation_bytes,
+            peak_live_temporary_f16_allocation_bytes: self.peak_live_temporary_f16_allocation_bytes,
             peak_scoped_owned_allocation_bytes: self.peak_scoped_owned_allocation_bytes,
             final_scoped_owned_allocation_bytes,
             events: self.events,
