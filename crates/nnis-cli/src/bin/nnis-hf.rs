@@ -61,7 +61,10 @@ where
                 model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?));
             }
             "--tokenizer" => {
-                tokenizer_file = Some(PathBuf::from(required_value(&mut arguments, "--tokenizer")?));
+                tokenizer_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--tokenizer",
+                )?));
             }
             "--json" => json = true,
             "--help" | "-h" => return Ok(Command::Help),
@@ -94,7 +97,10 @@ where
                 model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?));
             }
             "--tokenizer" => {
-                tokenizer_file = Some(PathBuf::from(required_value(&mut arguments, "--tokenizer")?));
+                tokenizer_file = Some(PathBuf::from(required_value(
+                    &mut arguments,
+                    "--tokenizer",
+                )?));
             }
             "--prompt" => {
                 prompt = Some(required_value(&mut arguments, "--prompt")?);
@@ -159,7 +165,10 @@ fn load_tokenizer(tokenizer_file: &Path) -> Result<Tokenizer, String> {
     })
 }
 
-fn validate_tokenizer(tokenizer_file: &Path, model_vocab_size: usize) -> Result<(usize, u32), String> {
+fn validate_tokenizer(
+    tokenizer_file: &Path,
+    model_vocab_size: usize,
+) -> Result<(usize, u32), String> {
     let tokenizer = load_tokenizer(tokenizer_file)?;
     let vocab = tokenizer.get_vocab(true);
     if vocab.is_empty() {
@@ -404,12 +413,7 @@ mod tests {
 
     #[test]
     fn validate_defaults_to_model_tokenizer_and_text_output() {
-        let parsed = parse_args(strings(&[
-            "validate",
-            "--model",
-            "/models/soup-merged",
-        ]))
-        .unwrap();
+        let parsed = parse_args(strings(&["validate", "--model", "/models/soup-merged"])).unwrap();
         assert_eq!(
             parsed,
             Command::Validate(ValidateArgs {
@@ -494,9 +498,9 @@ mod tests {
     #[test]
     fn invalid_arguments_fail_before_cuda() {
         assert!(parse_args(strings(&["validate"])).is_err());
-        assert!(parse_args(strings(&[
-            "validate", "--model", "/model", "--prompt", "x",
-        ]))
+        assert!(parse_args(strings(
+            &["validate", "--model", "/model", "--prompt", "x",]
+        ))
         .is_err());
         assert!(parse_args(strings(&["generate"])).is_err());
         assert!(parse_args(strings(&[
