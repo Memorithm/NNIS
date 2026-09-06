@@ -71,6 +71,25 @@ recent_verified_updates:
       - no_performance_quality_compression_or_live_transition_claim
     next: instrument_exact_F16_materialization_allocation_lifetimes_and_peak_owned_bytes
 
+  f16_materialization_owned_peak_evidence_v1:
+    pull_request: 121
+    exact_head: ccc844f3b08f4c7e06b4176fbeca442fe1b030b8
+    merge_commit: e86cf6ba9183bfa7b4c05848e2667469143eeade
+    required_CI: CI_363_success_including_Rust_1_77
+    smollm2_harness: harness_153_success
+    guarantees:
+      - successful_F32_to_F16_weight_materialization_records_actual_DeviceBuffer_allocation_lifetimes
+      - transposed_projection_KN_temporary_and_NK_resident_overlap_is_counted_from_live_buffer_size_bytes
+      - final_tracked_F16_bytes_must_match_exact_resident_F16_WeightAllocationSummaryV1
+      - pinned_SmolLM2_Thor_non_timing_harness_publishes_versioned_materialization_evidence
+    limits:
+      - successful_materialization_only_no_failed_attempt_trace_v1
+      - not_physical_GPU_page_residency
+      - not_process_wide_VRAM
+      - not_CUDA_allocator_context_module_JIT_RoPE_KV_session_or_workspace_memory
+      - no_performance_quality_compression_or_live_transition_claim
+    next: audit_available_CUDA_memory_introspection_semantics_before_defining_any_physical_memory_evidence
+
 reference_products:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
   secondary_server_reference: TensorRT_LLM

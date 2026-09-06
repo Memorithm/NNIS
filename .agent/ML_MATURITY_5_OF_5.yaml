@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 50a0a82be55e4ae60867efa483afea1495780cf4
+  main_head: e86cf6ba9183bfa7b4c05848e2667469143eeade
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -166,6 +166,7 @@ current_progress:
       - pr_117_versioned_F16_execution_transition_requirements
       - pr_119_exact_weight_allocation_accounting_v1
       - pr_120_F16_steady_state_weight_allocation_accounting_v1
+      - pr_121_F16_materialization_owned_peak_evidence_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -179,6 +180,9 @@ current_progress:
       - physical_page_residency_process_VRAM_allocator_overhead_and_F16_conversion_peak_remain_explicitly_outside_v1
       - F16_resident_weight_graph_live_DeviceBuffer_u16_bytes_are_exactly_accounted_from_actual_allocations
       - pinned_SmolLM2_F16_accounting_harness_emits_steady_state_owned_bytes_without_timing_or_generation
+      - successful_F16_materialization_owned_allocation_peak_is_event_traced_from_actual_DeviceBuffer_lifetimes
+      - transposed_KN_temporary_overlap_with_resident_NK_is_accounted_and_final_state_reconciles_to_WeightAllocationSummaryV1
+      - failed_materialization_attempt_peak_is_not_persisted_by_v1
     weight_allocation_accounting_boundary:
       contract_version: nnis_model_WeightAllocationSummaryV1
       pull_request: 119
@@ -204,6 +208,20 @@ current_progress:
       process_wide_VRAM_claimed: false
       conversion_peak_claimed: false
       performance_or_quality_claimed: false
+    f16_materialization_owned_peak_boundary:
+      contract_version: nnis_model_F16WeightMaterializationMemoryEvidenceV1
+      pull_request: 121
+      exact_head: ccc844f3b08f4c7e06b4176fbeca442fe1b030b8
+      merge_commit: e86cf6ba9183bfa7b4c05848e2667469143eeade
+      required_CI: CI_363_success_on_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: harness_153_success
+      exact_scope: live_source_ModelWeights_plus_live_F16_weight_materialization_DeviceBuffers
+      actual_buffer_lifetimes_instrumented: true
+      derived_from_model_geometry: false
+      failed_attempt_trace_claimed: false
+      physical_page_residency_claimed: false
+      process_wide_VRAM_claimed: false
+      performance_or_quality_claimed: false
     execution_transition_boundary:
       contract_version: nnis_model_F16ExecutionTransitionRequirementsV1
       pull_request: 117
@@ -219,7 +237,8 @@ current_progress:
     blockers:
       - sampled_paths_have_full_logit_D2H_and_selected_token_H2D_roundtrips
       - no_qualified_concurrent_or_fused_GPU_batch_execution_yet
-      - physical_page_residency_and_F16_conversion_peak_evidence_not_yet_complete
+      - physical_page_residency_and_process_wide_VRAM_evidence_not_yet_complete
+      - failed_F16_materialization_attempt_peak_trace_not_yet_persisted
   performance_composition:
     fused_mlp_plus_parallel_score:
       status: harness_merged_physical_gate_open
