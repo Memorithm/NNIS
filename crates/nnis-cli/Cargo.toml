@@ -18,5 +18,4 @@ path = "src/bin/nnis-hf.rs"
 [dependencies]
 nnis = { path = "../nnis" }
 nnis-model = { path = "../nnis-model" }
-serde_json = { workspace = true }
 tokenizers = { version = "=0.19.1", default-features = false, features = ["unstable_wasm"] }
