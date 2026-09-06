@@ -11,6 +11,7 @@ on:
       - "crates/nnis-bench/examples/smollm2_weight_allocation_accounting.rs"
       - "crates/nnis-bench/examples/smollm2_f16_weight_allocation_accounting.rs"
       - "crates/nnis-bench/examples/smollm2_f16_materialization_memory.rs"
+      - "crates/nnis-bench/examples/smollm2_nvml_lifecycle_memory.rs"
       - "crates/nnis-bench/examples/compare_smollm2_reports.rs"
       - "crates/nnis-bench/examples/silu_multiply_fusion.rs"
       - "crates/nnis-bench/examples/cached_attention_parallel_value.rs"
@@ -33,6 +34,7 @@ on:
       - "docs/R2_CACHED_ATTENTION_PARALLEL_VALUE_E2E.md"
       - "docs/NNML2_WEIGHT_ALLOCATION_ACCOUNTING_V1.md"
       - "docs/NNML2_F16_MATERIALIZATION_MEMORY_EVIDENCE_V1.md"
+      - "docs/NNML2_NVML_PROCESS_MEMORY_LIFECYCLE_V1.md"
       - ".github/workflows/smollm2-benchmark-harness.yml"
   workflow_dispatch:
 
@@ -61,6 +63,7 @@ jobs:
           cargo check --locked -p nnis-bench --example smollm2_weight_allocation_accounting
           cargo check --locked -p nnis-bench --example smollm2_f16_weight_allocation_accounting
           cargo check --locked -p nnis-bench --example smollm2_f16_materialization_memory
+          cargo check --locked -p nnis-bench --example smollm2_nvml_lifecycle_memory
           cargo check --locked -p nnis-bench --example compare_smollm2_reports
           cargo check --locked -p nnis-bench --example silu_multiply_fusion
           cargo check --locked -p nnis-bench --example cached_attention_parallel_value
@@ -75,6 +78,7 @@ jobs:
           cargo clippy --locked -p nnis-bench --example smollm2_weight_allocation_accounting -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_f16_weight_allocation_accounting -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_f16_materialization_memory -- -D warnings
+          cargo clippy --locked -p nnis-bench --example smollm2_nvml_lifecycle_memory -- -D warnings
           cargo clippy --locked -p nnis-bench --example compare_smollm2_reports -- -D warnings
           cargo clippy --locked -p nnis-bench --example silu_multiply_fusion -- -D warnings
           cargo clippy --locked -p nnis-bench --example cached_attention_parallel_value -- -D warnings
