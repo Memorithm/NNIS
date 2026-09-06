@@ -1,0 +1,44 @@
+name: Apply NVML process memory probe
+
+on:
+  push:
+    branches:
+      - feat/nvml-process-memory-probe
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/nvml-process-memory-probe
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+      - name: Apply integration
+        run: python3 .github/scripts/apply_nvml_process_memory_probe.py
+      - name: Validate stable
+        run: |
+          cargo fmt --all
+          cargo check --locked -p nnis-sys -p nnis-rt --all-targets
+          cargo clippy --locked -p nnis-sys -p nnis-rt --all-targets -- -D warnings
+          cargo test --locked -p nnis-sys -p nnis-rt
+      - name: Validate Rust 1.77 MSRV
+        run: |
+          rustup toolchain install 1.77.0 --profile minimal
+          cargo +1.77.0 check --locked -p nnis-sys -p nnis-rt --all-targets
+      - name: Commit validated integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add crates/nnis-sys/src/lib.rs crates/nnis-rt/src/lib.rs crates/nnis-rt/src/context.rs crates/nnis-sys/src/nvml.rs crates/nnis-rt/src/process_memory.rs
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat(rt): expose fail-closed NVML process memory probe"
+          git push origin HEAD:feat/nvml-process-memory-probe
