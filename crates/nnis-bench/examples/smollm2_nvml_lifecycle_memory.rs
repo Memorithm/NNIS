@@ -10,7 +10,9 @@ use nnis_rt::{
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process;
 
 const SOURCE_REPO: &str = "HuggingFaceTB/SmolLM2-135M";
 const SOURCE_REVISION: &str = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2";
@@ -21,6 +23,7 @@ const SOURCE_MODEL_SHA256: &str =
 struct Arguments {
     model_dir: PathBuf,
     device: i32,
+    output_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +87,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     let mut args = env::args().skip(1);
     let mut model_dir = None;
     let mut device = 0_i32;
+    let mut output_file = None;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--model" => {
@@ -98,9 +102,15 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
                     .parse::<i32>()
                     .map_err(|error| format!("invalid --device: {error}"))?;
             }
+            "--output" => {
+                output_file = Some(PathBuf::from(
+                    args.next().ok_or("--output requires a file")?,
+                ));
+            }
             "--help" | "-h" => {
                 return Err(
-                    "usage: smollm2_nvml_lifecycle_memory --model DIR [--device N]".to_string(),
+                    "usage: smollm2_nvml_lifecycle_memory --model DIR [--device N] [--output FILE]"
+                        .to_string(),
                 );
             }
             other => return Err(format!("unknown argument {other:?}")),
@@ -112,6 +122,7 @@ fn parse_arguments() -> std::result::Result<Arguments, String> {
     Ok(Arguments {
         model_dir: model_dir.ok_or("missing --model DIR")?,
         device,
+        output_file,
     })
 }
 
@@ -161,6 +172,39 @@ fn observe_process_memory(device: &Device) -> Result<ProcessMemoryObservationV1>
                 "NVML process-scoped memory observation unavailable: {error}"
             ))
         })
+}
+
+fn write_report_atomic(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| NnisError::io("create lifecycle report directory", error))?;
+    }
+
+    let mut temporary_name = path.as_os_str().to_os_string();
+    temporary_name.push(format!(".tmp-{}", process::id()));
+    let temporary_path = PathBuf::from(temporary_name);
+    let write_result = (|| -> Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+            .map_err(|error| NnisError::io("create temporary lifecycle report", error))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|error| NnisError::io("write temporary lifecycle report", error))?;
+        file.sync_all()
+            .map_err(|error| NnisError::io("sync temporary lifecycle report", error))?;
+        drop(file);
+        fs::rename(&temporary_path, path)
+            .map_err(|error| NnisError::io("atomically publish lifecycle report", error))?;
+        Ok(())
+    })();
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    write_result
 }
 
 fn run(arguments: Arguments) -> Result<Report> {
@@ -233,16 +277,50 @@ fn run(arguments: Arguments) -> Result<Report> {
 fn main() {
     let result = parse_arguments()
         .map_err(NnisError::invalid_input)
-        .and_then(run)
-        .and_then(|report| {
-            serde_json::to_string_pretty(&report)
-                .map_err(|error| NnisError::invalid_input(format!("serialize report: {error}")))
+        .and_then(|arguments| {
+            let output_file = arguments.output_file.clone();
+            run(arguments)
+                .and_then(|report| {
+                    serde_json::to_string_pretty(&report).map_err(|error| {
+                        NnisError::invalid_input(format!("serialize report: {error}"))
+                    })
+                })
+                .and_then(|json| {
+                    let rendered = format!("{json}\n");
+                    if let Some(path) = output_file.as_deref() {
+                        write_report_atomic(path, &rendered)?;
+                    }
+                    Ok(rendered)
+                })
         });
     match result {
-        Ok(json) => println!("{json}"),
+        Ok(rendered) => print!("{rendered}"),
         Err(error) => {
             eprintln!("{error}");
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn atomic_report_write_publishes_exact_bytes() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = env::temp_dir().join(format!(
+            "nnis-smollm2-nvml-lifecycle-{}-{nonce}",
+            process::id()
+        ));
+        let path = directory.join("report.json");
+        let contents = "{\"schema_version\":1}\n";
+        write_report_atomic(&path, contents).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), contents);
+        fs::remove_dir_all(directory).unwrap();
     }
 }
