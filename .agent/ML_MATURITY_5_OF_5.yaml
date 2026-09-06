@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 90aca480b2f3f269f087868286e13aa419846654
+  main_head: 50a0a82be55e4ae60867efa483afea1495780cf4
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -165,6 +165,7 @@ current_progress:
     merged:
       - pr_117_versioned_F16_execution_transition_requirements
       - pr_119_exact_weight_allocation_accounting_v1
+      - pr_120_F16_steady_state_weight_allocation_accounting_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -176,6 +177,8 @@ current_progress:
       - ModelWeights_live_DeviceBuffer_owned_bytes_are_exactly_accounted_with_alias_deduplication
       - SmolLM2_weight_allocation_harness_binds_exact_owned_allocation_bytes_to_checkpoint_config_and_environment_identity_without_timing
       - physical_page_residency_process_VRAM_allocator_overhead_and_F16_conversion_peak_remain_explicitly_outside_v1
+      - F16_resident_weight_graph_live_DeviceBuffer_u16_bytes_are_exactly_accounted_from_actual_allocations
+      - pinned_SmolLM2_F16_accounting_harness_emits_steady_state_owned_bytes_without_timing_or_generation
     weight_allocation_accounting_boundary:
       contract_version: nnis_model_WeightAllocationSummaryV1
       pull_request: 119
@@ -184,6 +187,19 @@ current_progress:
       required_CI: CI_353_success_on_exact_head_including_Rust_1_77
       exact_head_SmolLM2_harness: harness_145_success
       exact_scope: live_DeviceBuffer_bytes_owned_by_ModelWeights
+      physical_page_residency_claimed: false
+      process_wide_VRAM_claimed: false
+      conversion_peak_claimed: false
+      performance_or_quality_claimed: false
+    f16_steady_state_allocation_accounting_boundary:
+      contract_version: nnis_model_WeightAllocationSummaryV1
+      pull_request: 120
+      exact_head: 0f9851a4ab215c3c7c48159fcbbc4ad4610ad0eb
+      merge_commit: 50a0a82be55e4ae60867efa483afea1495780cf4
+      required_CI: CI_361_success_on_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: harness_152_success
+      exact_scope: live_DeviceBuffer_u16_bytes_owned_by_resident_F16ModelWeights
+      derived_from_model_geometry: false
       physical_page_residency_claimed: false
       process_wide_VRAM_claimed: false
       conversion_peak_claimed: false

@@ -54,6 +54,23 @@ recent_verified_updates:
       - no_compression_latency_throughput_or_quality_claim
     next: exact_F16_reference_graph_owned_allocation_accounting_then_conversion_peak_if_lifetimes_are_explicit
 
+  f16_steady_state_weight_allocation_accounting_v1:
+    pull_request: 120
+    exact_head: 0f9851a4ab215c3c7c48159fcbbc4ad4610ad0eb
+    merge_commit: 50a0a82be55e4ae60867efa483afea1495780cf4
+    required_CI: CI_361_success_including_Rust_1_77
+    smollm2_harness: harness_152_success
+    guarantees:
+      - existing_WeightAllocationSummaryV1_reused_for_private_resident_F16_weight_graph
+      - exact_live_DeviceBuffer_u16_owned_bytes_enumerated_from_actual_buffers_not_model_geometry
+      - pinned_SmolLM2_non_timing_F16_accounting_harness
+    limits:
+      - not_physical_GPU_page_residency
+      - not_process_wide_VRAM
+      - not_source_F32_or_conversion_temporary_peak
+      - no_performance_quality_compression_or_live_transition_claim
+    next: instrument_exact_F16_materialization_allocation_lifetimes_and_peak_owned_bytes
+
 reference_products:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
   secondary_server_reference: TensorRT_LLM
