@@ -239,7 +239,7 @@ pub(crate) fn probe(context: &Context) -> ProcessGpuMemoryProbeV1 {
             )
         }
     };
-    if init_status != nvml::NVML_SUCCESS {
+    if init_status != nvml::NVML_SUCCESS && init_status != nvml::NVML_ERROR_ALREADY_INITIALIZED {
         return native_unavailable(
             ProcessGpuMemoryUnavailableReasonV1::NvmlInitializationFailed,
             "nvmlInit_v2",

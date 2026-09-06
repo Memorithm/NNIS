@@ -1,6 +1,6 @@
 use nnis_rt::{
-    Context, Device, ProcessGpuMemoryProbeV1, ProcessGpuMemoryUnavailableReasonV1,
-    ProcessGpuMemorySourceV1, Result,
+    Context, Device, ProcessGpuMemoryProbeV1, ProcessGpuMemorySourceV1,
+    ProcessGpuMemoryUnavailableReasonV1, Result,
 };
 use serde::Serialize;
 use std::env;
@@ -92,9 +92,7 @@ fn reason_name(reason: ProcessGpuMemoryUnavailableReasonV1) -> &'static str {
         ProcessGpuMemoryUnavailableReasonV1::CudaDeviceUuidUnavailable => {
             "cuda_device_uuid_unavailable"
         }
-        ProcessGpuMemoryUnavailableReasonV1::NvmlDeviceLookupFailed => {
-            "nvml_device_lookup_failed"
-        }
+        ProcessGpuMemoryUnavailableReasonV1::NvmlDeviceLookupFailed => "nvml_device_lookup_failed",
         ProcessGpuMemoryUnavailableReasonV1::QueryNotSupported => "query_not_supported",
         ProcessGpuMemoryUnavailableReasonV1::PermissionDenied => "permission_denied",
         ProcessGpuMemoryUnavailableReasonV1::CurrentProcessNotReported => {
@@ -166,7 +164,9 @@ fn main() {
         .and_then(run)
         .and_then(|(report, available)| {
             let json = serde_json::to_string_pretty(&report).map_err(|error| {
-                nnis_rt::NnisError::invalid_input(format!("serialize process-memory report: {error}"))
+                nnis_rt::NnisError::invalid_input(format!(
+                    "serialize process-memory report: {error}"
+                ))
             })?;
             Ok((json, available))
         });

@@ -20,6 +20,8 @@ pub const NVML_ERROR_UNINITIALIZED: nvmlReturn_t = 1;
 pub const NVML_ERROR_INVALID_ARGUMENT: nvmlReturn_t = 2;
 pub const NVML_ERROR_NOT_SUPPORTED: nvmlReturn_t = 3;
 pub const NVML_ERROR_NO_PERMISSION: nvmlReturn_t = 4;
+/// Legacy status returned by older NVML versions when already initialized.
+pub const NVML_ERROR_ALREADY_INITIALIZED: nvmlReturn_t = 5;
 pub const NVML_ERROR_NOT_FOUND: nvmlReturn_t = 6;
 pub const NVML_ERROR_INSUFFICIENT_SIZE: nvmlReturn_t = 7;
 
@@ -187,6 +189,7 @@ mod tests {
         assert_eq!(NVML_SUCCESS, 0);
         assert_eq!(NVML_ERROR_NOT_SUPPORTED, 3);
         assert_eq!(NVML_ERROR_NO_PERMISSION, 4);
+        assert_eq!(NVML_ERROR_ALREADY_INITIALIZED, 5);
         assert_eq!(NVML_ERROR_INSUFFICIENT_SIZE, 7);
         assert_eq!(NVML_VALUE_NOT_AVAILABLE, u64::MAX);
     }
