@@ -1,22 +1,21 @@
-//! Raw, dynamically-loaded FFI surface for the CUDA driver API and NVRTC.
+//! Raw, dynamically-loaded FFI surface for the CUDA driver API, NVRTC and NVML.
 //!
 //! Design invariants (see ARCHITECTURE.md):
-//! * No link-time dependency on `libcuda` / `libnvrtc`: both libraries are
-//!   resolved at runtime via `dlopen`, so NNIS builds on machines without a
-//!   CUDA toolkit and degrades to a typed "unsupported" state instead of a
-//!   link error.
-//! * The unsafe surface is confined to this crate. Every foreign function is
-//!   declared with the exact signature from `/usr/include/cuda.h`
-//!   (CUDA 13.0) or `nvrtc.h`; enum constants are transcribed from the
-//!   installed headers, never from memory.
+//! * No link-time dependency on `libcuda`, `libnvrtc` or `libnvidia-ml`: native
+//!   libraries are resolved at runtime via `dlopen`, so NNIS builds on machines
+//!   without the NVIDIA runtime stack and degrades to typed unavailable states.
+//! * The unsafe surface is confined to this crate. Foreign signatures mirror
+//!   the corresponding NVIDIA headers and are kept minimal to the NNIS-owned
+//!   runtime/telemetry surface.
 //! * Versioned symbol aliases (`cuMemAlloc_v2`, ...) are resolved through
-//!   candidate lists so the crate works across driver generations.
+//!   candidate lists where compatibility requires them.
 
 // Native API names are mirrored 1:1 (cuLaunchKernel, nvrtcCreateProgram, ...).
 #![allow(non_camel_case_types, non_snake_case)]
 
 pub mod constants;
 pub mod driver;
+pub mod nvml;
 pub mod nvrtc;
 
 /// Raw `CUresult` value.
@@ -101,12 +100,12 @@ impl core::fmt::Debug for CUuuid {
     }
 }
 
-/// Error returned when the native libraries cannot be acquired at all.
+/// Error returned when a required native library or symbol cannot be acquired.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LibraryError {
-    /// Which library failed (`"libcuda.so.1"` / `"libnvrtc"`).
+    /// Which library failed (`libcuda`, `libnvrtc`, `libnvidia-ml`, ...).
     pub library: &'static str,
-    /// Candidate sonames that were attempted.
+    /// Candidate sonames or symbols that were attempted.
     pub candidates: Vec<String>,
     /// Underlying `dlerror`-style message of the last attempt.
     pub detail: String,
