@@ -501,7 +501,10 @@ mod tests {
         ])
         .expect("summary");
 
-        assert_eq!(summary.schema_version, NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION);
+        assert_eq!(
+            summary.schema_version,
+            NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION
+        );
         assert_eq!(summary.logical_tensor_references, 2);
         assert_eq!(summary.logical_element_references, 24);
         assert_eq!(summary.unique_device_allocations, 2);
@@ -544,13 +547,7 @@ mod tests {
     #[test]
     fn allocation_summary_rejects_total_byte_overflow() {
         let error = summarize_weight_allocations([
-            observation(
-                "first",
-                100,
-                WeightAllocationDTypeV1::F32,
-                1,
-                u64::MAX,
-            ),
+            observation("first", 100, WeightAllocationDTypeV1::F32, 1, u64::MAX),
             observation("second", 200, WeightAllocationDTypeV1::F32, 1, 1),
         ])
         .expect_err("overflow must fail closed");
