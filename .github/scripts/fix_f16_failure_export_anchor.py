@@ -11,8 +11,8 @@ new_new = "new_runtime_export = '    F16ReferenceAccumulator, F16ReferenceGenera
 text = text.replace(old_new, new_new, 1)
 
 text = text.replace(
-    '    error: NnisError,',
-    '    error: Box<NnisError>,',
+    'pub struct F16ReferenceModelConstructionFailure {\n    error: NnisError,',
+    'pub struct F16ReferenceModelConstructionFailure {\n    error: Box<NnisError>,',
     1,
 )
 text = text.replace(
