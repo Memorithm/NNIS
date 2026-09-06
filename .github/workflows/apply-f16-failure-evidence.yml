@@ -18,6 +18,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
+      - name: Fix integration export anchor
+        run: python3 .github/scripts/fix_f16_failure_export_anchor.py
       - name: Apply integration
         run: python3 .github/scripts/apply_f16_failure_evidence.py
       - name: Validate
