@@ -30,6 +30,33 @@ The harness synchronizes the NNIS stream immediately before each NVML observatio
 
 The report also embeds `F16WeightMaterializationMemoryEvidenceV1` so the already-qualified NNIS-owned conversion peak remains available beside the process-scoped observations.
 
+## Durable artifact output
+
+The harness always emits the versioned JSON report to stdout. `--output FILE` additionally publishes those exact bytes atomically through a same-directory temporary file, `sync_all`, and rename. A partially written JSON file is therefore not a valid campaign artifact.
+
+A physical campaign should bind every process to an explicit run context and retain the exact clean Git head:
+
+```bash
+export NNIS_BENCH_RUN_CONTEXT_ID=nnml2-smollm2-nvml-$(date -u +%Y%m%dT%H%M%SZ)
+cargo run --locked -p nnis-bench --example smollm2_nvml_lifecycle_memory -- \
+  --model /path/to/pinned/smollm2-135m-f32 \
+  --device 0 \
+  --output evidence/nnml2_smollm2_nvml_lifecycle_thor.json
+```
+
+The artifact is then validated independently:
+
+```bash
+python3 tools/validate_smollm2_nvml_lifecycle_memory.py \
+  evidence/nnml2_smollm2_nvml_lifecycle_thor.json \
+  --expected-git-commit "$(git rev-parse HEAD)" \
+  --require-thor
+```
+
+`--require-thor` fails closed unless the report records a clean `aarch64` Git execution, a non-empty run-context id, a Jetson Thor platform identity, and Jetson power/clock evidence. It also requires all three NVML observations to share PID/device/UUID and reconciles the F32/F16 allocation summaries byte-for-byte with the embedded materialization evidence.
+
+The validator deliberately performs no `NVML - owned allocations` subtraction and assigns no allocator, context, page-table, module, JIT, workspace, KV, session, or RoPE attribution.
+
 ## Interpretation boundary
 
 The following quantities are intentionally different:
@@ -51,6 +78,7 @@ A result is admissible as NNIS evidence only when:
 - NVML reports exactly one record for the harness PID at every lifecycle point;
 - none of the three process-memory values is `NVML_VALUE_NOT_AVAILABLE`;
 - the exact Git head, device metadata, driver/runtime identity and report artifact are retained;
+- the persisted artifact passes `validate_smollm2_nvml_lifecycle_memory.py --require-thor` for that same exact head;
 - competing GPU activity is checked and recorded by the campaign operator rather than inferred from a process-memory delta.
 
 ## Explicit non-claims
@@ -66,4 +94,4 @@ This v1 evidence does not establish:
 - live F16 plan transition support;
 - a low-bit representation baseline.
 
-The purpose is to create a reproducible physical process-memory observation surface that can later be consumed alongside the exact NNIS-owned allocation evidence by the preregistered ElasticBitAllocation Stage B protocol.
+The purpose is to create a reproducible physical process-memory observation surface that can later be consumed alongside the exact NNIS-owned allocation evidence by the preregistered ElasticBitAllocation Stage B protocol. The software artifact/validator contract by itself is not a Thor measurement.
