@@ -145,13 +145,15 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
         revision: None,
         local_dir: arguments.model_dir.to_string_lossy().into_owned(),
     };
-    let (config, weights) = load_model_from_safetensors(&context, &construction_stream, &load_config)
-        .map_err(|error| {
-            format!(
-                "failed to load Hugging Face Safetensors model {}: {error}\n{SOUP_F32_HINT}",
-                arguments.model_dir.display()
-            )
-        })?;
+    let (config, weights) =
+        load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
+            |error| {
+                format!(
+                    "failed to load Hugging Face Safetensors model {}: {error}\n{SOUP_F32_HINT}",
+                    arguments.model_dir.display()
+                )
+            },
+        )?;
     let model = Model::new(config, weights, &construction_stream).map_err(|error| {
         format!(
             "failed to construct the qualified NNIS decoder from {}: {error}\n{SOUP_F32_HINT}",
@@ -293,13 +295,7 @@ mod tests {
         ]))
         .is_err());
         assert!(parse_args(strings(&[
-            "generate",
-            "--model",
-            "/model",
-            "--prompt",
-            "x",
-            "--device",
-            "-1",
+            "generate", "--model", "/model", "--prompt", "x", "--device", "-1",
         ]))
         .is_err());
         assert!(parse_args(strings(&["unknown"])).is_err());
