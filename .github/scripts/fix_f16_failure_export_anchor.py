@@ -11,8 +11,18 @@ new_new = "new_runtime_export = '    F16ReferenceAccumulator, F16ReferenceGenera
 text = text.replace(old_new, new_new, 1)
 
 text = text.replace(
+    '    error: NnisError,',
+    '    error: Box<NnisError>,',
+    1,
+)
+text = text.replace(
     '    materialization_failure_evidence: Option<F16WeightMaterializationFailureEvidenceV1>,',
     '    materialization_failure_evidence: Option<Box<F16WeightMaterializationFailureEvidenceV1>>,',
+    1,
+)
+text = text.replace(
+    '        &self.error',
+    '        self.error.as_ref()',
     1,
 )
 text = text.replace(
@@ -21,8 +31,13 @@ text = text.replace(
     1,
 )
 text = text.replace(
-    '                materialization_failure_evidence,\n                materialization_evidence_error,',
-    '                materialization_failure_evidence: materialization_failure_evidence.map(Box::new),\n                materialization_evidence_error,',
+    '        self.error\n    }',
+    '        *self.error\n    }',
+    1,
+)
+text = text.replace(
+    '                error,\n                materialization_failure_evidence,\n                materialization_evidence_error,',
+    '                error: Box::new(error),\n                materialization_failure_evidence: materialization_failure_evidence.map(Box::new),\n                materialization_evidence_error,',
     1,
 )
 
