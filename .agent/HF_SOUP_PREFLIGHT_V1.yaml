@@ -1,6 +1,6 @@
 schema_version: 1
 kind: nnis_hf_soup_preflight_record
-status: merged_post_merge_ci_pending
+status: merged_post_merge_ci_green
 last_updated: "2026-09-06"
 repository: Memorithm/NNIS
 
@@ -12,7 +12,7 @@ implementation:
   required_ci: CI_373_success_including_Rust_1_77
   smollm2_harness: harness_161_success
   tinyllama_reference: tinyllama_reference_29_success
-  post_merge_ci: CI_374_pending
+  post_merge_ci: CI_374_success_including_Rust_1_77
 
 contract:
   report: HfSafetensorsPreflightReportV1
