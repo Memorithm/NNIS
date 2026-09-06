@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 8982dce75e9ea68554f4320f427032fa3d66c075
+  main_head: 710d7c7466b4bee9d6accb42531e49fef2df4fb1
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -168,6 +168,7 @@ current_progress:
       - pr_120_F16_steady_state_weight_allocation_accounting_v1
       - pr_121_F16_materialization_owned_peak_evidence_v1
       - pr_123_F16_materialization_failure_evidence_v1
+      - pr_125_NVML_process_memory_snapshot_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -186,6 +187,9 @@ current_progress:
       - failed_F16_materialization_attempt_peak_is_persisted_at_failure_detection_before_RAII_cleanup
       - historical_F16_constructors_preserve_the_original_NnisError_while_attempt_constructors_can_expose_failure_evidence
       - CUDA_free_total_and_pointer_metadata_are_explicitly_not_treated_as_physical_residency_or_process_attribution
+      - NVML_current_PID_usedGpuMemory_is_available_as_a_fail_closed_process_scoped_software_contract
+      - CUDA_to_NVML_device_correlation_uses_UUID_and_does_not_assume_ordinal_equivalence
+      - NVML_process_memory_is_not_relabelled_as_physical_page_residency_or_per_allocation_ownership
     weight_allocation_accounting_boundary:
       contract_version: nnis_model_WeightAllocationSummaryV1
       pull_request: 119
@@ -238,6 +242,19 @@ current_progress:
       physical_page_residency_claimed: false
       process_wide_VRAM_claimed: false
       performance_or_quality_claimed: false
+    nvml_process_memory_boundary:
+      contract_version: nnis_rt_NvmlProcessMemorySnapshotV1
+      pull_request: 125
+      exact_head: b1c45d69a9d4196a008063e922ca64c77c3f5c7f
+      merge_commit: 710d7c7466b4bee9d6accb42531e49fef2df4fb1
+      required_CI: CI_378_success_on_exact_head_including_Rust_1_77
+      exact_scope: NVML_usedGpuMemory_for_current_PID_on_UUID_correlated_target_GPU
+      software_contract_qualified: true
+      real_Thor_model_lifecycle_measurement_collected: false
+      physical_page_residency_claimed: false
+      per_allocation_attribution_claimed: false
+      allocator_or_page_table_overhead_claimed: false
+      performance_or_quality_claimed: false
     execution_transition_boundary:
       contract_version: nnis_model_F16ExecutionTransitionRequirementsV1
       pull_request: 117
@@ -253,7 +270,8 @@ current_progress:
     blockers:
       - sampled_paths_have_full_logit_D2H_and_selected_token_H2D_roundtrips
       - no_qualified_concurrent_or_fused_GPU_batch_execution_yet
-      - physical_page_residency_and_process_wide_VRAM_evidence_not_yet_complete
+      - physical_page_residency_is_not_claimed_or_established_by_the_current_NVML_contract
+      - real_Thor_process_scoped_NVML_model_lifecycle_evidence_not_yet_collected
   performance_composition:
     fused_mlp_plus_parallel_score:
       status: harness_merged_physical_gate_open

@@ -108,6 +108,26 @@ recent_verified_updates:
       - no_performance_quality_compression_or_live_transition_claim
     next: qualify_a_semantically_correct_process_memory_source_before_any_process_wide_VRAM_claim
 
+  nvml_process_memory_snapshot_v1:
+    pull_request: 125
+    exact_head: b1c45d69a9d4196a008063e922ca64c77c3f5c7f
+    merge_commit: 710d7c7466b4bee9d6accb42531e49fef2df4fb1
+    required_CI: CI_378_success_including_Rust_1_77
+    guarantees:
+      - NVML_is_dynamically_loaded_without_a_link_time_dependency
+      - CUDA_device_is_correlated_to_NVML_by_UUID_not_assumed_ordinal_equivalence
+      - current_PID_usedGpuMemory_is_reported_as_a_versioned_process_scoped_snapshot
+      - unavailable_missing_duplicate_or_unstable_process_records_fail_closed
+      - process_list_growth_is_bounded
+    limits:
+      - software_contract_only_no_real_Thor_measurement_in_PR_125
+      - not_physical_GPU_page_residency
+      - not_per_allocation_residency
+      - not_CUDA_allocator_or_page_table_overhead_attribution
+      - not_weight_only_memory_attribution
+      - no_performance_quality_compression_or_cross_runtime_memory_claim
+    next: run_a_pinned_SmolLM2_Thor_lifecycle_campaign_reporting_NVML_process_memory_alongside_exact_NNIS_owned_allocation_summaries
+
 reference_products:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
   secondary_server_reference: TensorRT_LLM
