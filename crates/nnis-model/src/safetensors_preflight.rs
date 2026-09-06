@@ -382,10 +382,7 @@ fn validate_logical_tensor_set(
         expected.remove("lm_head");
     }
 
-    let missing: Vec<_> = expected
-        .difference(logical_tensors)
-        .cloned()
-        .collect();
+    let missing: Vec<_> = expected.difference(logical_tensors).cloned().collect();
     if !missing.is_empty() {
         return Err(NnisError::invalid_input(format!(
             "required logical tensors are missing from the Safetensors source: {}",
@@ -489,9 +486,10 @@ pub fn preflight_hf_safetensors_source(
     }
 
     let tied_lm_head_required = validate_logical_tensor_set(&logical_tensors, &metadata)?;
+    let synthesized_logical_tensors = if tied_lm_head_required { 1_usize } else { 0_usize };
     let logical_tensor_count = logical_tensors
         .len()
-        .checked_add(usize::from(tied_lm_head_required))
+        .checked_add(synthesized_logical_tensors)
         .ok_or_else(|| NnisError::invalid_input("logical tensor count overflows usize"))?;
     let expected_count = expected_logical_tensor_names(&metadata).len();
     if logical_tensor_count != expected_count {
@@ -622,7 +620,7 @@ mod tests {
             schema_version: NNIS_HF_SAFETENSORS_PREFLIGHT_VERSION,
             metadata,
             weight_files: vec!["model.safetensors".to_string()],
-            recognized_tensor_count: 273,
+            recognized_tensor_count: 272,
             ignored_tensor_count: 0,
             logical_tensor_count: 273,
             tied_lm_head_required: true,
