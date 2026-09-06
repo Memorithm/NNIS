@@ -1,7 +1,5 @@
 use nnis_bench::BenchmarkMetadata;
-use nnis_model::{
-    F16ReferenceModel, F16ReferencePlan, ModelConfig, WeightAllocationSummaryV1,
-};
+use nnis_model::{F16ReferenceModel, F16ReferencePlan, ModelConfig, WeightAllocationSummaryV1};
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -127,12 +125,8 @@ fn run(arguments: Arguments) -> Result<Report> {
     let stream = Stream::new(&context)?;
     let metadata = BenchmarkMetadata::collect(&context);
     let f16_plan = F16ReferencePlan::edge_llm_v0_10_0_alignment();
-    let model = F16ReferenceModel::load_directory(
-        &context,
-        &stream,
-        &arguments.model_dir,
-        f16_plan,
-    )?;
+    let model =
+        F16ReferenceModel::load_directory(&context, &stream, &arguments.model_dir, f16_plan)?;
     validate_model_shape(model.config())?;
     let model_config = model.config().clone();
     let weight_allocations = model.weight_allocation_summary_v1()?;
