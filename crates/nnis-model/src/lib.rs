@@ -15,6 +15,7 @@ mod execution_transition;
 mod f16_attention_plan;
 mod f16_fused_mlp_candidate;
 mod f16_fused_projection_candidate;
+mod f16_materialization_memory;
 mod f16_parallel_score_attention_candidate;
 mod f16_reference_execution_plan;
 mod f16_reference_kernels;
@@ -71,6 +72,11 @@ pub use f16_attention_plan::{
 };
 pub use f16_fused_mlp_candidate::F16FusedMlpCandidate;
 pub use f16_fused_projection_candidate::F16FusedProjectionGroupsCandidate;
+pub use f16_materialization_memory::{
+    F16WeightMaterializationEventKindV1, F16WeightMaterializationEventV1,
+    F16WeightMaterializationMemoryEvidenceV1,
+    NNIS_F16_WEIGHT_MATERIALIZATION_MEMORY_EVIDENCE_VERSION,
+};
 pub use f16_parallel_score_attention_candidate::F16CachedAttentionParallelScoreCandidate;
 pub use f16_reference_execution_plan::{
     F16ReferenceExecutionPlan, F16ReferenceProjectionLayout, F16_REFERENCE_EXECUTION_PLAN_VERSION,
