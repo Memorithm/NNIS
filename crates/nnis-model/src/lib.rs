@@ -31,6 +31,7 @@ mod representation_plan;
 mod runtime;
 mod runtime_kernels;
 mod safetensors_loader;
+mod safetensors_preflight;
 mod sampling;
 mod session_batch;
 mod streaming;
@@ -106,6 +107,10 @@ pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
 pub use safetensors_loader::{
     load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata,
+};
+pub use safetensors_preflight::{
+    preflight_hf_safetensors_source, HfSafetensorsPreflightReportV1,
+    NNIS_HF_SAFETENSORS_PREFLIGHT_VERSION,
 };
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};

@@ -9,11 +9,11 @@ The boundary is artifact-based. NNIS does **not** depend on SOUP's Python runtim
 The integration was designed against:
 
 - SOUP `main` commit `1082db47f1297aed7e71e77410d90d61b4c153e3`.
-- NNIS `main` commit `b9d2f1e74bb68dfa90ca499a24ce857d15e7fb02`.
+- NNIS `main` commit `b9d2f1e74bb68dfa90ca499a24ce857d15e7fb02` for the first direct entrypoint; subsequent preflight work preserves the same admission boundary on newer NNIS heads.
 
 At that SOUP revision, `soup merge` loads the base model at the requested `--dtype`, merges the LoRA adapter, calls `model.save_pretrained(...)`, and saves the tokenizer into the same output directory. The default `--dtype` is `float16`.
 
-At that NNIS revision, the strict local Safetensors loader accepts F32 and BF16 source tensors, while the currently qualified direct decoder construction still requires an F32 logical base graph. Therefore the first executable SOUP -> NNIS path is intentionally restricted to a dense F32 merge.
+The strict local Safetensors loader accepts F32 and BF16 source tensors, while the currently qualified direct decoder construction still requires an F32 logical base graph. Therefore the first executable SOUP -> NNIS path is intentionally restricted to a dense F32 merge.
 
 ## Produce a compatible SOUP artifact
 
@@ -32,10 +32,42 @@ The resulting directory must satisfy NNIS's existing Hugging Face loader contrac
 
 - `config.json` describing a decoder capability NNIS currently admits;
 - `model.safetensors` or `model.safetensors.index.json` plus referenced shards;
-- F32 source tensors matching the declared `torch_dtype`;
+- F32 source tensors matching the declared `torch_dtype` for direct execution;
 - `tokenizer.json` for the CLI path below.
 
 The current loader remains deliberately narrow. A directory can still be rejected for unsupported architecture, bias tensors, RoPE semantics, EOS representation, tensor names/shapes, dtype, or other capability mismatches. SOUP provenance does not bypass those checks.
+
+## Validate before touching CUDA
+
+Use the CPU-only preflight before generation:
+
+```bash
+cargo run --locked -p nnis-cli --bin nnis-hf -- \
+  validate \
+  --model ./merged-nnis
+```
+
+The preflight performs no CUDA device selection, context creation, device allocation, tensor upload, or network access. It validates:
+
+- the supported `config.json` capability and source dtype;
+- single-file versus indexed-sharded Safetensors layout;
+- referenced shard existence and safe relative paths;
+- recognized decoder tensor names, expected shapes and dtypes;
+- tensor byte lengths and duplicate logical tensors;
+- completeness of the logical decoder weight graph, including the tied-LM-head rule;
+- `tokenizer.json` parseability and that its maximum token ID fits the model vocabulary;
+- whether the source satisfies the current F32 direct-execution requirement.
+
+For automation, Hub-style orchestration, CI, or other external consumers, request the versioned JSON form:
+
+```bash
+cargo run --locked -p nnis-cli --bin nnis-hf -- \
+  validate \
+  --model ./merged-nnis \
+  --json
+```
+
+A structurally valid BF16 source may satisfy the loader-source contract but still reports `direct_f32_execution_ready=false`; `nnis-hf validate` exits unsuccessfully in that case because the current direct `Model` path is not executable with a BF16 base graph. This distinction avoids turning source admission into an implicit runtime-support claim.
 
 ## Run the merged model with NNIS
 
@@ -57,7 +89,7 @@ cargo run --locked -p nnis-cli --bin nnis-hf -- \
   --prompt "Hello"
 ```
 
-No network access is performed by the NNIS loader.
+No network access is performed by the NNIS loader or preflight.
 
 ## What this integration does not claim
 
@@ -67,8 +99,9 @@ This boundary does not establish:
 - compatibility with SOUP's default FP16 merged output;
 - compatibility with BNB 4-bit, GGUF, AWQ, GPTQ, ONNX, TensorRT, or other SOUP export targets;
 - LoRA-adapter execution without first merging the adapter;
-- numerical equivalence to Transformers merely because loading succeeds;
+- numerical equivalence to Transformers merely because loading or preflight succeeds;
 - serving-performance, memory, or quality equivalence to another runtime;
+- physical GPU evidence from the CPU-only preflight;
 - a change to NNIS model-format v1 or NNIS's qualified runtime defaults.
 
 Any future FP16 source admission, adapter-native execution, quantized representation, or broader architecture support requires its own explicit versioned semantics and qualification evidence.
