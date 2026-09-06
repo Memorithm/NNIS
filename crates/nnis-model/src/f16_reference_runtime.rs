@@ -116,7 +116,7 @@ impl F16ModelWeights {
     fn weight_allocation_summary_v1(&self) -> Result<WeightAllocationSummaryV1> {
         let mut observations = Vec::new();
         self.for_each_buffer(|name, buffer| {
-            if buffer.len() == 0 || buffer.device_ptr() == 0 {
+            if buffer.is_empty() || buffer.device_ptr() == 0 {
                 return Err(NnisError::invalid_input(format!(
                     "F16 weight {name} has no live device allocation to account"
                 )));
