@@ -57,6 +57,11 @@ jobs:
             tools/tinyllama_1p1b_chat_fixture.py \
             tools/run_tinyllama_massive_campaign.py
 
+      - name: Validate local-HF generation process contract
+        run: |
+          python3 tools/nnis_hub_hf_generate.py --self-test
+          python3 -m py_compile tools/nnis_hub_hf_generate.py
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
