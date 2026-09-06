@@ -1,6 +1,141 @@
 use crate::config::{ModelConfig, WeightDType};
 use nnis_rt::{Context, DeviceBuffer, NnisError, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::sync::Arc;
+
+pub const NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION: u32 = 1;
+
+/// Numeric storage of one device allocation in the weight-accounting contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WeightAllocationDTypeV1 {
+    F32,
+    Bf16,
+    F16,
+}
+
+/// One unique device allocation referenced by one or more logical model weights.
+///
+/// `allocation_index` is deterministic within the summary and intentionally does
+/// not expose the process-local CUDA address used to deduplicate aliases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeightAllocationSegmentV1 {
+    pub allocation_index: u32,
+    pub dtype: WeightAllocationDTypeV1,
+    pub elements: u64,
+    pub bytes: u64,
+    pub logical_names: Vec<String>,
+}
+
+/// Exact accounting of device allocations owned by a model weight graph.
+///
+/// This reports bytes passed to `cuMemAlloc` and still owned by the weight graph.
+/// It is not a measurement of physical page residency, CUDA allocator overhead,
+/// process-wide VRAM use, temporary conversion memory, KV state, workspaces, or
+/// kernel/module storage.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WeightAllocationSummaryV1 {
+    pub schema_version: u32,
+    pub logical_tensor_references: u64,
+    pub logical_element_references: u64,
+    pub unique_device_allocations: u64,
+    pub unique_device_elements: u64,
+    pub owned_device_allocation_bytes: u64,
+    pub segments: Vec<WeightAllocationSegmentV1>,
+}
+
+#[derive(Debug, Clone)]
+struct WeightAllocationObservation {
+    logical_name: String,
+    allocation_key: u64,
+    dtype: WeightAllocationDTypeV1,
+    elements: u64,
+    bytes: u64,
+}
+
+fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
+    *counter = counter
+        .checked_add(value)
+        .ok_or_else(|| NnisError::invalid_input(format!("{label} overflows u64")))?;
+    Ok(())
+}
+
+fn summarize_weight_allocations(
+    observations: impl IntoIterator<Item = WeightAllocationObservation>,
+) -> Result<WeightAllocationSummaryV1> {
+    let mut logical_tensor_references = 0_u64;
+    let mut logical_element_references = 0_u64;
+    let mut unique_device_elements = 0_u64;
+    let mut owned_device_allocation_bytes = 0_u64;
+    let mut allocation_indices = BTreeMap::<u64, usize>::new();
+    let mut segments = Vec::<WeightAllocationSegmentV1>::new();
+
+    for observation in observations {
+        checked_add(
+            &mut logical_tensor_references,
+            1,
+            "logical tensor reference count",
+        )?;
+        checked_add(
+            &mut logical_element_references,
+            observation.elements,
+            "logical element reference count",
+        )?;
+
+        if let Some(&segment_index) = allocation_indices.get(&observation.allocation_key) {
+            let segment = segments.get_mut(segment_index).ok_or_else(|| {
+                NnisError::invalid_input("weight allocation index points outside summary")
+            })?;
+            if segment.dtype != observation.dtype
+                || segment.elements != observation.elements
+                || segment.bytes != observation.bytes
+            {
+                return Err(NnisError::invalid_input(format!(
+                    "weight allocation alias {:?} disagrees with the original allocation contract",
+                    observation.logical_name
+                )));
+            }
+            segment.logical_names.push(observation.logical_name);
+            continue;
+        }
+
+        let allocation_index = u32::try_from(segments.len()).map_err(|_| {
+            NnisError::invalid_input("weight allocation count exceeds u32 contract capacity")
+        })?;
+        checked_add(
+            &mut unique_device_elements,
+            observation.elements,
+            "unique device element count",
+        )?;
+        checked_add(
+            &mut owned_device_allocation_bytes,
+            observation.bytes,
+            "owned device allocation bytes",
+        )?;
+        allocation_indices.insert(observation.allocation_key, segments.len());
+        segments.push(WeightAllocationSegmentV1 {
+            allocation_index,
+            dtype: observation.dtype,
+            elements: observation.elements,
+            bytes: observation.bytes,
+            logical_names: vec![observation.logical_name],
+        });
+    }
+
+    let unique_device_allocations = u64::try_from(segments.len()).map_err(|_| {
+        NnisError::invalid_input("weight allocation count exceeds u64 contract capacity")
+    })?;
+    Ok(WeightAllocationSummaryV1 {
+        schema_version: NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION,
+        logical_tensor_references,
+        logical_element_references,
+        unique_device_allocations,
+        unique_device_elements,
+        owned_device_allocation_bytes,
+        segments,
+    })
+}
 
 /// Device-resident tensor storage in the numeric formats NNIS currently owns.
 #[derive(Debug, Clone)]
@@ -17,6 +152,13 @@ impl DeviceTensor {
         }
     }
 
+    fn allocation_dtype(&self) -> WeightAllocationDTypeV1 {
+        match self {
+            Self::F32(_) => WeightAllocationDTypeV1::F32,
+            Self::Bf16(_) => WeightAllocationDTypeV1::Bf16,
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::F32(buffer) => buffer.len(),
@@ -26,6 +168,20 @@ impl DeviceTensor {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn allocation_size_bytes(&self) -> usize {
+        match self {
+            Self::F32(buffer) => buffer.size_bytes(),
+            Self::Bf16(buffer) => buffer.size_bytes(),
+        }
+    }
+
+    fn allocation_key(&self) -> u64 {
+        match self {
+            Self::F32(buffer) => buffer.device_ptr(),
+            Self::Bf16(buffer) => buffer.device_ptr(),
+        }
     }
 
     pub fn context(&self) -> &Arc<Context> {
@@ -236,6 +392,33 @@ impl ModelWeights {
         self.token_embedding.tensor().context()
     }
 
+    /// Build an exact summary of the device allocations currently owned by
+    /// this weight graph. Aliases of the same live `DeviceBuffer` are counted
+    /// once in `owned_device_allocation_bytes` and retained as logical names.
+    pub fn weight_allocation_summary_v1(&self) -> Result<WeightAllocationSummaryV1> {
+        let mut observations = Vec::new();
+        self.for_each_tensor(|name, tensor| {
+            if tensor.is_empty() || tensor.allocation_key() == 0 {
+                return Err(NnisError::invalid_input(format!(
+                    "weight {name} has no live device allocation to account"
+                )));
+            }
+            observations.push(WeightAllocationObservation {
+                logical_name: name.to_string(),
+                allocation_key: tensor.allocation_key(),
+                dtype: tensor.allocation_dtype(),
+                elements: u64::try_from(tensor.len()).map_err(|_| {
+                    NnisError::invalid_input(format!("weight {name} element count exceeds u64"))
+                })?,
+                bytes: u64::try_from(tensor.allocation_size_bytes()).map_err(|_| {
+                    NnisError::invalid_input(format!("weight {name} byte size exceeds u64"))
+                })?,
+            });
+            Ok(())
+        })?;
+        summarize_weight_allocations(observations)
+    }
+
     fn expect_matrix(name: &str, weight: &MatrixWeight, rows: usize, cols: usize) -> Result<()> {
         if weight.rows() != rows || weight.cols() != cols {
             return Err(NnisError::invalid_input(format!(
@@ -287,5 +470,88 @@ impl ModelWeights {
         }
         visit("final_norm", self.final_norm.tensor())?;
         visit("lm_head", self.lm_head.tensor())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn observation(
+        logical_name: &str,
+        allocation_key: u64,
+        dtype: WeightAllocationDTypeV1,
+        elements: u64,
+        bytes: u64,
+    ) -> WeightAllocationObservation {
+        WeightAllocationObservation {
+            logical_name: logical_name.to_string(),
+            allocation_key,
+            dtype,
+            elements,
+            bytes,
+        }
+    }
+
+    #[test]
+    fn allocation_summary_counts_distinct_allocations_exactly() {
+        let summary = summarize_weight_allocations([
+            observation("embedding", 100, WeightAllocationDTypeV1::F32, 16, 64),
+            observation("lm_head", 200, WeightAllocationDTypeV1::Bf16, 8, 16),
+        ])
+        .expect("summary");
+
+        assert_eq!(
+            summary.schema_version,
+            NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION
+        );
+        assert_eq!(summary.logical_tensor_references, 2);
+        assert_eq!(summary.logical_element_references, 24);
+        assert_eq!(summary.unique_device_allocations, 2);
+        assert_eq!(summary.unique_device_elements, 24);
+        assert_eq!(summary.owned_device_allocation_bytes, 80);
+        assert_eq!(summary.segments[0].allocation_index, 0);
+        assert_eq!(summary.segments[1].allocation_index, 1);
+    }
+
+    #[test]
+    fn allocation_summary_deduplicates_aliases_by_live_allocation() {
+        let summary = summarize_weight_allocations([
+            observation("token_embedding", 100, WeightAllocationDTypeV1::F32, 16, 64),
+            observation("tied_alias", 100, WeightAllocationDTypeV1::F32, 16, 64),
+        ])
+        .expect("summary");
+
+        assert_eq!(summary.logical_tensor_references, 2);
+        assert_eq!(summary.logical_element_references, 32);
+        assert_eq!(summary.unique_device_allocations, 1);
+        assert_eq!(summary.unique_device_elements, 16);
+        assert_eq!(summary.owned_device_allocation_bytes, 64);
+        assert_eq!(
+            summary.segments[0].logical_names,
+            ["token_embedding".to_string(), "tied_alias".to_string()]
+        );
+    }
+
+    #[test]
+    fn allocation_summary_rejects_incoherent_alias_contract() {
+        let error = summarize_weight_allocations([
+            observation("first", 100, WeightAllocationDTypeV1::F32, 16, 64),
+            observation("alias", 100, WeightAllocationDTypeV1::Bf16, 16, 32),
+        ])
+        .expect_err("incoherent alias must fail closed");
+
+        assert!(error.to_string().contains("disagrees"));
+    }
+
+    #[test]
+    fn allocation_summary_rejects_total_byte_overflow() {
+        let error = summarize_weight_allocations([
+            observation("first", 100, WeightAllocationDTypeV1::F32, 1, u64::MAX),
+            observation("second", 200, WeightAllocationDTypeV1::F32, 1, 1),
+        ])
+        .expect_err("overflow must fail closed");
+
+        assert!(error.to_string().contains("owned device allocation bytes"));
     }
 }

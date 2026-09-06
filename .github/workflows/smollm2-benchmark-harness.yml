@@ -8,6 +8,7 @@ on:
       - "crates/nnis-bench/Cargo.toml"
       - "crates/nnis-bench/examples/smollm2_e2e.rs"
       - "crates/nnis-bench/examples/smollm2_lm_head_weight_representation.rs"
+      - "crates/nnis-bench/examples/smollm2_weight_allocation_accounting.rs"
       - "crates/nnis-bench/examples/compare_smollm2_reports.rs"
       - "crates/nnis-bench/examples/silu_multiply_fusion.rs"
       - "crates/nnis-bench/examples/cached_attention_parallel_value.rs"
@@ -28,6 +29,7 @@ on:
       - "docs/R2_SILU_MULTIPLY_FUSION_E2E.md"
       - "docs/R2_CACHED_ATTENTION_PARALLEL_VALUE.md"
       - "docs/R2_CACHED_ATTENTION_PARALLEL_VALUE_E2E.md"
+      - "docs/NNML2_WEIGHT_ALLOCATION_ACCOUNTING_V1.md"
       - ".github/workflows/smollm2-benchmark-harness.yml"
   workflow_dispatch:
 
@@ -53,6 +55,7 @@ jobs:
         run: |
           cargo check --locked -p nnis-bench --example smollm2_e2e
           cargo check --locked -p nnis-bench --example smollm2_lm_head_weight_representation
+          cargo check --locked -p nnis-bench --example smollm2_weight_allocation_accounting
           cargo check --locked -p nnis-bench --example compare_smollm2_reports
           cargo check --locked -p nnis-bench --example silu_multiply_fusion
           cargo check --locked -p nnis-bench --example cached_attention_parallel_value
@@ -64,6 +67,7 @@ jobs:
         run: |
           cargo clippy --locked -p nnis-bench --example smollm2_e2e -- -D warnings
           cargo clippy --locked -p nnis-bench --example smollm2_lm_head_weight_representation -- -D warnings
+          cargo clippy --locked -p nnis-bench --example smollm2_weight_allocation_accounting -- -D warnings
           cargo clippy --locked -p nnis-bench --example compare_smollm2_reports -- -D warnings
           cargo clippy --locked -p nnis-bench --example silu_multiply_fusion -- -D warnings
           cargo clippy --locked -p nnis-bench --example cached_attention_parallel_value -- -D warnings
