@@ -1,8 +1,9 @@
 //! `nnis-rt`: safe NVIDIA driver-runtime layer for NNIS.
 //!
-//! Provides device discovery, primary-context ownership, streams, events and
-//! memory management on top of the raw FFI in [`nnis_sys`]. All CUDA state is
-//! context-routed; see [`context::Context`] for the threading model.
+//! Provides device discovery, primary-context ownership, streams, events,
+//! memory management and optional process-scoped NVML telemetry on top of the
+//! raw FFI in [`nnis_sys`]. All CUDA state is context-routed; see
+//! [`context::Context`] for the threading model.
 
 pub mod async_work;
 pub mod bf16;
@@ -12,6 +13,7 @@ pub mod error;
 pub mod kv_cache;
 pub mod memory;
 pub mod pool;
+pub mod process_memory;
 pub mod stream_event;
 
 pub use async_work::PendingGpuWork;
@@ -22,6 +24,10 @@ pub use error::{ErrorKind, NnisError, Result};
 pub use kv_cache::{KvAppend, KvCache, KvCacheConfig};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use pool::{PooledBuffer, StreamOrderedAllocator};
+pub use process_memory::{
+    current_process_gpu_memory, NvmlProcessMemorySnapshotV1, ProcessGpuMemoryError,
+    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
+};
 pub use stream_event::{Event, Stream};
 
 #[cfg(test)]
