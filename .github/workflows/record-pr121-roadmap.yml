@@ -1,0 +1,31 @@
+name: Record PR121 roadmap
+
+on:
+  push:
+    branches:
+      - agent/sovereignty-roadmap
+
+permissions:
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/sovereignty-roadmap
+      - name: Apply roadmap recorder
+        run: python3 .github/scripts/record_pr121.py
+      - name: Commit roadmap update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add .agent/NNIS_SOVEREIGNTY_ROADMAP.yaml .agent/ML_MATURITY_5_OF_5.yaml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs(agent): record F16 materialization owned peak evidence"
+          git push origin HEAD:agent/sovereignty-roadmap
