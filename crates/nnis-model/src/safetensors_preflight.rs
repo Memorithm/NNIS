@@ -354,8 +354,7 @@ fn validate_logical_set(
     metadata: &SafetensorsMetadata,
 ) -> Result<bool> {
     let mut expected = expected_logical_tensors(metadata);
-    let tied_lm_head_required =
-        metadata.tie_word_embeddings && !logical.contains("lm_head");
+    let tied_lm_head_required = metadata.tie_word_embeddings && !logical.contains("lm_head");
     if tied_lm_head_required {
         expected.remove("lm_head");
     }
@@ -456,7 +455,11 @@ pub fn preflight_hf_safetensors_source(
     }
 
     let tied_lm_head_required = validate_logical_set(&logical, &metadata)?;
-    let synthesized = if tied_lm_head_required { 1_usize } else { 0_usize };
+    let synthesized = if tied_lm_head_required {
+        1_usize
+    } else {
+        0_usize
+    };
     let logical_tensor_count = logical
         .len()
         .checked_add(synthesized)
