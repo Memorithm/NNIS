@@ -14,6 +14,26 @@ implementation:
   tinyllama_reference: tinyllama_reference_29_success
   post_merge_ci: CI_374_success_including_Rust_1_77
 
+artifact_publication:
+  pull_request: 124
+  exact_head: 5975b4a01c7c0825ad8ca97ce4c9e384d0cc4b67
+  merge_commit: b1e2766ace9a2076d4a5721f6dca2d2c7d48d04d
+  required_ci: CI_376_success_including_Rust_1_77
+  tinyllama_reference: tinyllama_reference_31_success
+  post_merge_ci: CI_377_success_including_Rust_1_77
+  cli_surface: nnis-hf_validate_json_output
+  guarantees:
+    - output_requires_explicit_JSON_mode
+    - exact_same_nnis_hf_preflight_1_JSON_bytes_are_emitted_and_persisted
+    - destination_parent_is_created_when_required
+    - same_directory_temporary_file_is_written_and_synced_before_atomic_rename
+    - temporary_file_is_removed_on_publication_failure
+    - no_new_workspace_dependency_or_Cargo_lock_change
+  limits:
+    - output_publication_does_not_change_admission_semantics
+    - output_publication_does_not_convert_negative_direct_execution_readiness_into_success
+    - no_new_CUDA_network_performance_quality_or_memory_claim
+
 contract:
   report: HfSafetensorsPreflightReportV1
   report_schema_version: 1
@@ -36,6 +56,7 @@ validated_capabilities:
   - tokenizer_parseability_and_maximum_token_id_bounded_by_model_vocab
   - source_admission_distinguished_from_current_direct_F32_execution_readiness
   - versioned_machine_readable_JSON_for_external_orchestration
+  - atomic_exact_byte_JSON_artifact_publication_for_external_orchestration
 
 limits:
   - not_general_Hugging_Face_or_SOUP_model_family_support
@@ -57,5 +78,5 @@ cross_project_boundary:
     not reimplement or broaden NNIS model-admission semantics.
 
 next:
-  - consume_the_versioned_preflight_result_at_the_orchestration_boundary_without_adding_a_direct_runtime_dependency
+  - publish_a_Hub_component_that_materializes_a_versioned_model_bundle_and_invokes_the_NNIS_owned_preflight
   - keep_NNIS_as_the_owner_of_model_admission_semantics
