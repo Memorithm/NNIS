@@ -3,8 +3,8 @@ use nnis_model::{
     load_model_from_safetensors, preflight_hf_safetensors_source, HfSafetensorsPreflightReportV1,
     Model, SafetensorsLoadConfig,
 };
-use serde_json::json;
 use std::env;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tokenizers::Tokenizer;
@@ -207,28 +207,61 @@ fn safetensors_load_config(model_dir: &Path) -> SafetensorsLoadConfig {
     }
 }
 
+fn json_string(value: &str) -> String {
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0c}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            control if control <= '\u{1f}' => {
+                write!(&mut output, "\\u{:04x}", control as u32)
+                    .expect("writing to String cannot fail");
+            }
+            other => output.push(other),
+        }
+    }
+    output.push('"');
+    output
+}
+
 fn render_preflight_json(
     arguments: &ValidateArgs,
     report: &HfSafetensorsPreflightReportV1,
     tokenizer_vocab_size: usize,
     tokenizer_max_token_id: u32,
 ) -> Result<String, String> {
-    let ready = report.direct_f32_execution_ready;
-    let value = json!({
-        "schema": CLI_PREFLIGHT_SCHEMA,
-        "model_directory": arguments.model_dir.to_string_lossy(),
-        "tokenizer_file": arguments.tokenizer_file.to_string_lossy(),
-        "model_source": report,
-        "tokenizer": {
-            "vocabulary_size": tokenizer_vocab_size,
-            "maximum_token_id": tokenizer_max_token_id,
-            "model_vocabulary_size": report.metadata.vocab_size,
-        },
-        "direct_execution_ready": ready,
-        "direct_execution_blocker": if ready { None } else { Some(SOUP_F32_HINT) },
-    });
-    serde_json::to_string_pretty(&value)
-        .map_err(|error| format!("failed to serialize preflight JSON: {error}"))
+    let model_source = report
+        .to_json()
+        .map_err(|error| format!("failed to serialize model preflight report: {error}"))?;
+    let model_directory = json_string(arguments.model_dir.to_string_lossy().as_ref());
+    let tokenizer_file = json_string(arguments.tokenizer_file.to_string_lossy().as_ref());
+    let blocker = if report.direct_f32_execution_ready {
+        "null".to_string()
+    } else {
+        json_string(SOUP_F32_HINT)
+    };
+    let mut output = String::new();
+    write!(
+        &mut output,
+        "{{\"schema\":{},\"model_directory\":{},\"tokenizer_file\":{},\"model_source\":{},\"tokenizer\":{{\"vocabulary_size\":{},\"maximum_token_id\":{},\"model_vocabulary_size\":{}}},\"direct_execution_ready\":{},\"direct_execution_blocker\":{}}}",
+        json_string(CLI_PREFLIGHT_SCHEMA),
+        model_directory,
+        tokenizer_file,
+        model_source,
+        tokenizer_vocab_size,
+        tokenizer_max_token_id,
+        report.metadata.vocab_size,
+        report.direct_f32_execution_ready,
+        blocker,
+    )
+    .expect("writing to String cannot fail");
+    Ok(output)
 }
 
 fn render_preflight_text(
@@ -518,6 +551,11 @@ mod tests {
         ]))
         .is_err());
         assert!(parse_args(strings(&["unknown"])).is_err());
+    }
+
+    #[test]
+    fn json_string_escapes_control_and_syntax_characters() {
+        assert_eq!(json_string("a\"b\\c\n"), "\"a\\\"b\\\\c\\n\"");
     }
 
     #[test]
