@@ -74,7 +74,8 @@ pub use f16_fused_mlp_candidate::F16FusedMlpCandidate;
 pub use f16_fused_projection_candidate::F16FusedProjectionGroupsCandidate;
 pub use f16_materialization_memory::{
     F16WeightMaterializationEventKindV1, F16WeightMaterializationEventV1,
-    F16WeightMaterializationMemoryEvidenceV1,
+    F16WeightMaterializationFailureEvidenceV1, F16WeightMaterializationMemoryEvidenceV1,
+    NNIS_F16_WEIGHT_MATERIALIZATION_FAILURE_EVIDENCE_VERSION,
     NNIS_F16_WEIGHT_MATERIALIZATION_MEMORY_EVIDENCE_VERSION,
 };
 pub use f16_parallel_score_attention_candidate::F16CachedAttentionParallelScoreCandidate;
@@ -84,7 +85,8 @@ pub use f16_reference_execution_plan::{
 pub use f16_reference_kernels::F16ReferenceKernels;
 pub use f16_reference_runtime::{
     F16ReferenceAccumulator, F16ReferenceGenerationProfile, F16ReferenceLogits, F16ReferenceModel,
-    F16ReferencePlan, F16ReferenceSession, F16ReferenceStorage, F16_REFERENCE_PLAN_VERSION,
+    F16ReferenceModelConstructionFailure, F16ReferencePlan, F16ReferenceSession,
+    F16ReferenceStorage, F16_REFERENCE_PLAN_VERSION,
 };
 pub use f16_staged_attention_candidate::F16CachedAttentionStagedWeightsCandidate;
 pub use f16_transposed_projection_candidate::F16TransposedProjectionCandidate;

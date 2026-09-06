@@ -12,7 +12,8 @@
 //! claims.
 
 use crate::f16_materialization_memory::{
-    F16WeightMaterializationMemoryEvidenceV1, F16WeightMaterializationTracker,
+    F16WeightMaterializationFailureEvidenceV1, F16WeightMaterializationMemoryEvidenceV1,
+    F16WeightMaterializationTracker,
 };
 use crate::runtime::build_rope_cache;
 use crate::weights::{summarize_weight_allocations, WeightAllocationObservation};
@@ -179,7 +180,7 @@ impl F16ModelWeights {
         execution_plan: F16ReferenceExecutionPlan,
         projection_candidate: Option<&F16TransposedProjectionCandidate>,
         source_owned_allocation_bytes: u64,
-    ) -> Result<(Self, F16WeightMaterializationTracker)> {
+    ) -> Result<F16WeightMaterializationBuildAttempt> {
         fn buffer_bytes(name: &str, buffer: &DeviceBuffer<u16>) -> Result<u64> {
             u64::try_from(buffer.size_bytes()).map_err(|_| {
                 NnisError::invalid_input(format!("F16 allocation {name} byte size exceeds u64"))
@@ -264,121 +265,165 @@ impl F16ModelWeights {
         }
 
         let mut tracker = F16WeightMaterializationTracker::new(source_owned_allocation_bytes)?;
-        let layout = execution_plan.projection_layout;
-        let token_embedding = narrow_resident(
-            "token_embedding",
-            stream,
-            kernels,
-            source.token_embedding.tensor().as_f32()?,
-            &mut tracker,
-        )?;
-        let mut layers = Vec::with_capacity(source.layers.len());
-        for (index, layer) in source.layers.iter().enumerate() {
-            layers.push(F16DecoderLayerWeights {
-                input_norm: narrow_resident(
-                    &format!("layers.{index}.input_norm"),
-                    stream,
-                    kernels,
-                    layer.input_norm.tensor().as_f32()?,
-                    &mut tracker,
-                )?,
-                q_proj: narrow_projection(
-                    &format!("layers.{index}.q_proj"),
-                    stream,
-                    kernels,
-                    &layer.q_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                k_proj: narrow_projection(
-                    &format!("layers.{index}.k_proj"),
-                    stream,
-                    kernels,
-                    &layer.k_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                v_proj: narrow_projection(
-                    &format!("layers.{index}.v_proj"),
-                    stream,
-                    kernels,
-                    &layer.v_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                o_proj: narrow_projection(
-                    &format!("layers.{index}.o_proj"),
-                    stream,
-                    kernels,
-                    &layer.o_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                post_attention_norm: narrow_resident(
-                    &format!("layers.{index}.post_attention_norm"),
-                    stream,
-                    kernels,
-                    layer.post_attention_norm.tensor().as_f32()?,
-                    &mut tracker,
-                )?,
-                gate_proj: narrow_projection(
-                    &format!("layers.{index}.gate_proj"),
-                    stream,
-                    kernels,
-                    &layer.gate_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                up_proj: narrow_projection(
-                    &format!("layers.{index}.up_proj"),
-                    stream,
-                    kernels,
-                    &layer.up_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-                down_proj: narrow_projection(
-                    &format!("layers.{index}.down_proj"),
-                    stream,
-                    kernels,
-                    &layer.down_proj,
-                    layout,
-                    projection_candidate,
-                    &mut tracker,
-                )?,
-            });
-        }
-        let final_norm = narrow_resident(
-            "final_norm",
-            stream,
-            kernels,
-            source.final_norm.tensor().as_f32()?,
-            &mut tracker,
-        )?;
-        let lm_head = narrow_projection(
-            "lm_head",
-            stream,
-            kernels,
-            &source.lm_head,
-            layout,
-            projection_candidate,
-            &mut tracker,
-        )?;
-        Ok((
-            Self {
+        let build_result = (|| -> Result<Self> {
+            let layout = execution_plan.projection_layout;
+            let token_embedding = narrow_resident(
+                "token_embedding",
+                stream,
+                kernels,
+                source.token_embedding.tensor().as_f32()?,
+                &mut tracker,
+            )?;
+            let mut layers = Vec::with_capacity(source.layers.len());
+            for (index, layer) in source.layers.iter().enumerate() {
+                layers.push(F16DecoderLayerWeights {
+                    input_norm: narrow_resident(
+                        &format!("layers.{index}.input_norm"),
+                        stream,
+                        kernels,
+                        layer.input_norm.tensor().as_f32()?,
+                        &mut tracker,
+                    )?,
+                    q_proj: narrow_projection(
+                        &format!("layers.{index}.q_proj"),
+                        stream,
+                        kernels,
+                        &layer.q_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    k_proj: narrow_projection(
+                        &format!("layers.{index}.k_proj"),
+                        stream,
+                        kernels,
+                        &layer.k_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    v_proj: narrow_projection(
+                        &format!("layers.{index}.v_proj"),
+                        stream,
+                        kernels,
+                        &layer.v_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    o_proj: narrow_projection(
+                        &format!("layers.{index}.o_proj"),
+                        stream,
+                        kernels,
+                        &layer.o_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    post_attention_norm: narrow_resident(
+                        &format!("layers.{index}.post_attention_norm"),
+                        stream,
+                        kernels,
+                        layer.post_attention_norm.tensor().as_f32()?,
+                        &mut tracker,
+                    )?,
+                    gate_proj: narrow_projection(
+                        &format!("layers.{index}.gate_proj"),
+                        stream,
+                        kernels,
+                        &layer.gate_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    up_proj: narrow_projection(
+                        &format!("layers.{index}.up_proj"),
+                        stream,
+                        kernels,
+                        &layer.up_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                    down_proj: narrow_projection(
+                        &format!("layers.{index}.down_proj"),
+                        stream,
+                        kernels,
+                        &layer.down_proj,
+                        layout,
+                        projection_candidate,
+                        &mut tracker,
+                    )?,
+                });
+            }
+            let final_norm = narrow_resident(
+                "final_norm",
+                stream,
+                kernels,
+                source.final_norm.tensor().as_f32()?,
+                &mut tracker,
+            )?;
+            let lm_head = narrow_projection(
+                "lm_head",
+                stream,
+                kernels,
+                &source.lm_head,
+                layout,
+                projection_candidate,
+                &mut tracker,
+            )?;
+            Ok(Self {
                 token_embedding,
                 layers,
                 final_norm,
                 lm_head,
-            },
-            tracker,
-        ))
+            })
+        })();
+        Ok(match build_result {
+            Ok(weights) => F16WeightMaterializationBuildAttempt::Completed(weights, tracker),
+            Err(error) => F16WeightMaterializationBuildAttempt::Failed { error, tracker },
+        })
+    }
+}
+
+#[derive(Debug)]
+enum F16WeightMaterializationBuildAttempt {
+    Completed(F16ModelWeights, F16WeightMaterializationTracker),
+    Failed {
+        error: NnisError,
+        tracker: F16WeightMaterializationTracker,
+    },
+}
+
+struct F16MaterializationFailureSink<'a> {
+    evidence: &'a mut Option<F16WeightMaterializationFailureEvidenceV1>,
+    evidence_error: &'a mut Option<String>,
+}
+
+#[derive(Debug)]
+pub struct F16ReferenceModelConstructionFailure {
+    error: Box<NnisError>,
+    materialization_failure_evidence: Option<Box<F16WeightMaterializationFailureEvidenceV1>>,
+    materialization_evidence_error: Option<String>,
+}
+
+impl F16ReferenceModelConstructionFailure {
+    pub fn error(&self) -> &NnisError {
+        self.error.as_ref()
+    }
+
+    pub fn materialization_failure_evidence(
+        &self,
+    ) -> Option<&F16WeightMaterializationFailureEvidenceV1> {
+        self.materialization_failure_evidence.as_deref()
+    }
+
+    pub fn materialization_evidence_error(&self) -> Option<&str> {
+        self.materialization_evidence_error.as_deref()
+    }
+
+    pub fn into_error(self) -> NnisError {
+        *self.error
     }
 }
 
@@ -440,6 +485,69 @@ impl F16ReferenceModel {
         execution_plan: F16ReferenceExecutionPlan,
         attention_plan: F16AttentionPlan,
     ) -> Result<Self> {
+        Self::new_with_execution_and_attention_plan_impl(
+            config,
+            weights,
+            stream,
+            execution_plan,
+            attention_plan,
+            None,
+        )
+    }
+
+    pub fn new_with_execution_plan_attempt(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        execution_plan: F16ReferenceExecutionPlan,
+    ) -> std::result::Result<Self, F16ReferenceModelConstructionFailure> {
+        Self::new_with_execution_and_attention_plan_attempt(
+            config,
+            weights,
+            stream,
+            execution_plan,
+            F16AttentionPlan::reference(),
+        )
+    }
+
+    pub fn new_with_execution_and_attention_plan_attempt(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        execution_plan: F16ReferenceExecutionPlan,
+        attention_plan: F16AttentionPlan,
+    ) -> std::result::Result<Self, F16ReferenceModelConstructionFailure> {
+        let mut materialization_failure_evidence = None;
+        let mut materialization_evidence_error = None;
+        let mut sink = F16MaterializationFailureSink {
+            evidence: &mut materialization_failure_evidence,
+            evidence_error: &mut materialization_evidence_error,
+        };
+        match Self::new_with_execution_and_attention_plan_impl(
+            config,
+            weights,
+            stream,
+            execution_plan,
+            attention_plan,
+            Some(&mut sink),
+        ) {
+            Ok(model) => Ok(model),
+            Err(error) => Err(F16ReferenceModelConstructionFailure {
+                error: Box::new(error),
+                materialization_failure_evidence: materialization_failure_evidence.map(Box::new),
+                materialization_evidence_error,
+            }),
+        }
+    }
+
+    fn new_with_execution_and_attention_plan_impl(
+        config: ModelConfig,
+        weights: ModelWeights,
+        stream: &Stream,
+        execution_plan: F16ReferenceExecutionPlan,
+        attention_plan: F16AttentionPlan,
+        materialization_failure_sink: Option<&mut F16MaterializationFailureSink<'_>>,
+    ) -> Result<Self> {
         execution_plan.validate(&config)?;
         attention_plan.validate(&config)?;
         weights.validate(&config)?;
@@ -493,7 +601,7 @@ impl F16ReferenceModel {
         let top_k = F32TopK::load(&context, &compiler)?;
         let token_runtime = F32RuntimeKernels::load(&context, &compiler)?;
         let source_weight_allocations = weights.weight_allocation_summary_v1()?;
-        let (resident_weights, materialization_tracker) = F16ModelWeights::from_f32(
+        let materialization_attempt = F16ModelWeights::from_f32(
             &weights,
             stream,
             &kernels,
@@ -501,6 +609,24 @@ impl F16ReferenceModel {
             projection_candidate.as_ref(),
             source_weight_allocations.owned_device_allocation_bytes,
         )?;
+        let (resident_weights, materialization_tracker) = match materialization_attempt {
+            F16WeightMaterializationBuildAttempt::Completed(weights, tracker) => (weights, tracker),
+            F16WeightMaterializationBuildAttempt::Failed { error, tracker } => {
+                if let Some(sink) = materialization_failure_sink {
+                    match tracker.failure_evidence(
+                        execution_plan,
+                        source_weight_allocations,
+                        &error,
+                    ) {
+                        Ok(evidence) => *sink.evidence = Some(evidence),
+                        Err(evidence_error) => {
+                            *sink.evidence_error = Some(evidence_error.to_string());
+                        }
+                    }
+                }
+                return Err(error);
+            }
+        };
         let steady_state_f16_weight_allocations =
             resident_weights.weight_allocation_summary_v1()?;
         let materialization_memory_evidence = materialization_tracker.finish(
