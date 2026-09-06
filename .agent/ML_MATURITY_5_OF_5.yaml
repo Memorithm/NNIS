@@ -1,7 +1,7 @@
 schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
-last_updated: "2026-09-05"
+last_updated: "2026-09-06"
 repository: Memorithm/NNIS
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: b9d2f1e74bb68dfa90ca499a24ce857d15e7fb02
+  main_head: 90aca480b2f3f269f087868286e13aa419846654
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -35,6 +35,7 @@ current_progress:
       - pr_103_exact_head_machine_readable_physical_evidence_contract
       - pr_108_capability_bound_real_checkpoint_evidence_v2
       - pr_109_shared_exact_checkpoint_spec_consumed_by_SmolLM2_qualification
+      - pr_118_local_HF_SOUP_F32_entrypoint
     verified_software_capabilities:
       - Hugging_Face_config_driven_supported_Llama_geometry
       - local_Safetensors_F32_BF16_loading_without_Python_runtime
@@ -45,6 +46,7 @@ current_progress:
       - real_checkpoint_evidence_bound_to_versioned_decoder_execution_capabilities
       - schema_v2_rejects_attention_RoPE_MLP_dtype_or_canonical_capability_drift
       - SmolLM2_source_config_and_capability_identity_shared_through_versioned_exact_checkpoint_spec
+      - local_HF_SOUP_F32_entrypoint_reuses_strict_Safetensors_loader_without_relaxing_dtype_or_architecture_admission
     open_gate: >-
       P0 bundle v2 must run on the real CUDA target at the exact qualified head and
       preserve capability-bound NNML0 evidence. No universal NNML0 or model-family
@@ -162,6 +164,7 @@ current_progress:
     status: not_started_as_production_claim
     merged:
       - pr_117_versioned_F16_execution_transition_requirements
+      - pr_119_exact_weight_allocation_accounting_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -170,6 +173,21 @@ current_progress:
       - live_in_place_F16_execution_plan_transition_is_not_authorized
       - transition_requirements_are_versioned_strict_and_owned_by_nnis_model
       - ElasticXxx_can_consume_the_negative_transition_capability_through_an_external_adapter_without_a_direct_dependency
+      - ModelWeights_live_DeviceBuffer_owned_bytes_are_exactly_accounted_with_alias_deduplication
+      - SmolLM2_weight_allocation_harness_binds_exact_owned_allocation_bytes_to_checkpoint_config_and_environment_identity_without_timing
+      - physical_page_residency_process_VRAM_allocator_overhead_and_F16_conversion_peak_remain_explicitly_outside_v1
+    weight_allocation_accounting_boundary:
+      contract_version: nnis_model_WeightAllocationSummaryV1
+      pull_request: 119
+      exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f
+      merge_commit: 90aca480b2f3f269f087868286e13aa419846654
+      required_CI: CI_353_success_on_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: harness_145_success
+      exact_scope: live_DeviceBuffer_bytes_owned_by_ModelWeights
+      physical_page_residency_claimed: false
+      process_wide_VRAM_claimed: false
+      conversion_peak_claimed: false
+      performance_or_quality_claimed: false
     execution_transition_boundary:
       contract_version: nnis_model_F16ExecutionTransitionRequirementsV1
       pull_request: 117
@@ -185,7 +203,7 @@ current_progress:
     blockers:
       - sampled_paths_have_full_logit_D2H_and_selected_token_H2D_roundtrips
       - no_qualified_concurrent_or_fused_GPU_batch_execution_yet
-      - peak_and_steady_state_VRAM_evidence_not_yet_complete
+      - physical_page_residency_and_F16_conversion_peak_evidence_not_yet_complete
   performance_composition:
     fused_mlp_plus_parallel_score:
       status: harness_merged_physical_gate_open

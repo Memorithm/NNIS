@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_agent_execution_roadmap
 status: active
-last_updated: "2026-09-01"
+last_updated: "2026-09-06"
 repository: Memorithm/NNIS
 intended_consumer: autonomous_agent
 visibility_note: >-
@@ -24,6 +24,35 @@ mission:
     Make NVIDIA one backend among several through backend-neutral execution and
     representation contracts, with CUDA first and other backends only when real
     implementations and evidence exist.
+
+recent_verified_updates:
+  local_HF_SOUP_F32_entrypoint:
+    pull_request: 118
+    exact_head: 1b8d37c2c9373b8cbe75c53996c33f7cb8d2ca80
+    merge_commit: 1bc7b93878b863e4f13a7865191554df5c3d8a7a
+    boundary: >-
+      Adds an explicit local Hugging Face/SOUP Safetensors F32 entrypoint through
+      the existing strict loader. It does not authorize FP16, BNB 4-bit,
+      adapter-native execution, or broader model-family support.
+  weight_allocation_accounting_v1:
+    pull_request: 119
+    exact_head: 404c27ff3c0e547f374159ebe832d48cecc7495f
+    merge_commit: 90aca480b2f3f269f087868286e13aa419846654
+    required_CI: CI_353_success_including_Rust_1_77
+    smollm2_harness: harness_145_success
+    guarantees:
+      - exact_live_DeviceBuffer_owned_cuMemAlloc_byte_accounting_for_ModelWeights
+      - physical_aliases_counted_once_without_serializing_raw_device_addresses
+      - pinned_SmolLM2_non_timing_JSON_accounting_harness
+      - Cargo_lock_repaired_for_PR_118_nnis_cli_to_nnis_model_dependency
+    limits:
+      - not_physical_GPU_page_residency
+      - not_process_wide_VRAM
+      - not_CUDA_allocator_overhead
+      - not_KV_session_workspace_kernel_or_module_memory
+      - not_F16_conversion_peak_memory
+      - no_compression_latency_throughput_or_quality_claim
+    next: exact_F16_reference_graph_owned_allocation_accounting_then_conversion_peak_if_lifetimes_are_explicit
 
 reference_products:
   primary_thor_nvidia_reference: TensorRT_Edge_LLM_v0_10_0
