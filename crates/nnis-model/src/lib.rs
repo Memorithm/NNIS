@@ -103,4 +103,8 @@ pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
 pub use streaming::GenerationStreamControl;
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
-pub use weights::{DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight};
+pub use weights::{
+    DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight,
+    WeightAllocationDTypeV1, WeightAllocationSegmentV1, WeightAllocationSummaryV1,
+    NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION,
+};
