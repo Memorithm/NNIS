@@ -1,0 +1,66 @@
+schema_version: 1
+kind: nnis_cross_repository_process_contract_record
+status: complete
+recorded_at: "2026-09-06"
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+contract:
+  name: nnis.hf-generation@1.0.0
+  media_type: application/vnd.nnis.hf-generation.v1+json
+  process_path: tools/nnis_hub_hf_generate.py
+  native_delegate: nnis-hf generate
+  execution_scope: local_hf_f32_greedy_generation
+
+source_boundary:
+  repository: Memorithm/NNIS
+  base_main: 26f4d5ab200501568155d5165bcb05b0c9e7cf61
+  pull_request: 128
+  final_exact_head: e5bf07b932c3d734bd28d449ddfb6cf48cd2fc61
+  exact_head_ci: CI_384_success_including_Rust_1_77
+  merge_commit: 21370baee6f77f2d8538660092cd0ed5630c2180
+  post_merge_ci: CI_385_success_including_Rust_1_77
+
+semantics:
+  model_loading_owner: NNIS_native_nnis_hf
+  cuda_execution_owner: NNIS_native_runtime
+  tokenization_owner: NNIS_native_nnis_hf
+  sampling: greedy
+  result_transport_owner: NNIS_process_contract
+  network_access: false
+
+process_bounds:
+  prompt_utf8_bytes: 1_to_1048576
+  max_new_tokens: 1_to_65536
+  stdout_capture_bytes_max: 16777216
+  stderr_capture_bytes_max: 16777216
+  device_ordinal: non_negative
+  result_path_must_not_preexist: true
+
+artifact_guarantees:
+  - native_stdout_and_stderr_are_preserved_as_UTF8_with_byte_lengths_and_SHA256
+  - native_nonzero_exit_publishes_no_generation_result
+  - result_contract_is_versioned_and_machine_readable
+  - process_invocation_uses_shell_false_and_disabled_stdin
+  - CPU_self_test_pins_exact_native_argv_and_failure_behavior
+
+explicit_non_claims:
+  - promotion_authorized_false
+  - serving_performance_verified_false
+  - numerical_equivalence_verified_false
+  - general_model_family_support_verified_false
+  - no_FP16_4bit_or_adapter_native_execution_claim
+  - no_Jetson_ARM64_qualification_from_this_software_contract
+  - no_HML1_HML2_or_HML4_promotion
+  - no_new_physical_GPU_evidence_from_CPU_CI
+
+relationship_to_SOUP:
+  admitted_path:
+    - SOUP_LoRA_training_bundle
+    - SOUP_dense_F32_merge
+    - nnis.hf-preflight@1
+    - nnis.hf-generation@1.0.0
+  rule: preflight_and_generation_remain_separate_NNIS_owned_contracts
+
+next_slice:
+  goal: publish_a_SciRust_Hub_component_that_materializes_the_existing_model_bundle_and_delegates_generation_to_this_NNIS_process_contract
+  boundary: Hub_must_not_reimplement_or_reinterpret_NNIS_generation_semantics
