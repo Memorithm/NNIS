@@ -8,7 +8,8 @@ mod program;
 
 pub use cache::{CompiledCode, JitCompiler};
 pub use frontend::{
-    FrontendArtifactBoundary, FrontendQualification, KernelFrontend, KernelFrontendContract,
+    FrontendArtifactBoundary, FrontendQualification, FrontendQualificationEvidence,
+    FrontendQualificationEvidenceError, KernelFrontend, KernelFrontendContract,
 };
 pub use launch::{Dim3, KernelArgs, KernelLaunch, KernelParameter, LaunchConfig};
 pub use module::{Kernel, KernelAttributes, Module, OccupancyRecommendation};

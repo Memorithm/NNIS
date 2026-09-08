@@ -1,8 +1,8 @@
 //! GPU-kernel frontend identity and qualification boundaries.
 //!
-//! NNIS historically compiles CUDA C++ source through NVRTC.  Native Rust
+//! NNIS historically compiles CUDA C++ source through NVRTC. Native Rust
 //! frontends can feed the same execution stack only after their artifact and
-//! qualification boundaries are explicit.  This module deliberately does not
+//! qualification boundaries are explicit. This module deliberately does not
 //! invoke an external compiler; it records what an integration is allowed to
 //! hand to the existing loader and keeps unqualified frontends fail-closed.
 
@@ -111,10 +111,116 @@ impl KernelFrontendContract {
     }
 }
 
+/// Evidence collected by a qualification harness for one exact frontend
+/// artifact. This record is intentionally not a capability token: successful
+/// validation makes evidence reviewable but never changes a contract's
+/// [`FrontendQualification`] or enables production routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrontendQualificationEvidence<'a> {
+    pub frontend: KernelFrontend,
+    pub artifact_kind: crate::CodeKind,
+    /// Immutable toolchain identity, including version/channel.
+    pub toolchain_id: &'a str,
+    /// Upstream toolchain source revision used to build the artifact.
+    pub toolchain_commit: &'a str,
+    /// Lowercase or uppercase hexadecimal SHA-256 of the exact emitted artifact.
+    pub artifact_sha256: &'a str,
+    /// Exact device identity used for execution evidence.
+    pub device_identity: &'a str,
+    /// Independent correctness oracle/reference implementation identity.
+    pub oracle_id: &'a str,
+    /// Stable identifier for the qualification run/evidence bundle.
+    pub run_id: &'a str,
+    /// Whether the candidate matched the declared correctness oracle.
+    pub correction_passed: bool,
+    /// Whether declared negative/fail-closed tests passed.
+    pub negative_tests_passed: bool,
+}
+
+/// Fail-closed reasons for rejecting qualification evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrontendQualificationEvidenceError {
+    FrontendMismatch,
+    ArtifactBoundaryMismatch,
+    MissingToolchainIdentity,
+    MissingToolchainCommit,
+    InvalidArtifactSha256,
+    MissingDeviceIdentity,
+    MissingOracleIdentity,
+    MissingRunIdentity,
+    CorrectionFailed,
+    NegativeTestsFailed,
+}
+
+impl FrontendQualificationEvidence<'_> {
+    /// Validate that an evidence record is complete and bound to the exact
+    /// frontend contract/artifact boundary under review.
+    ///
+    /// A successful result does **not** promote an experimental frontend. The
+    /// repository must still change the immutable frontend contract in a
+    /// separately reviewed change after destination-owned qualification gates
+    /// are satisfied.
+    pub fn validate_for(
+        &self,
+        contract: KernelFrontendContract,
+    ) -> Result<(), FrontendQualificationEvidenceError> {
+        if self.frontend != contract.frontend() {
+            return Err(FrontendQualificationEvidenceError::FrontendMismatch);
+        }
+        if !contract.accepts_loader_artifact(self.artifact_kind) {
+            return Err(FrontendQualificationEvidenceError::ArtifactBoundaryMismatch);
+        }
+        if self.toolchain_id.trim().is_empty() {
+            return Err(FrontendQualificationEvidenceError::MissingToolchainIdentity);
+        }
+        if self.toolchain_commit.trim().is_empty() {
+            return Err(FrontendQualificationEvidenceError::MissingToolchainCommit);
+        }
+        if !is_sha256_hex(self.artifact_sha256) {
+            return Err(FrontendQualificationEvidenceError::InvalidArtifactSha256);
+        }
+        if self.device_identity.trim().is_empty() {
+            return Err(FrontendQualificationEvidenceError::MissingDeviceIdentity);
+        }
+        if self.oracle_id.trim().is_empty() {
+            return Err(FrontendQualificationEvidenceError::MissingOracleIdentity);
+        }
+        if self.run_id.trim().is_empty() {
+            return Err(FrontendQualificationEvidenceError::MissingRunIdentity);
+        }
+        if !self.correction_passed {
+            return Err(FrontendQualificationEvidenceError::CorrectionFailed);
+        }
+        if !self.negative_tests_passed {
+            return Err(FrontendQualificationEvidenceError::NegativeTestsFailed);
+        }
+        Ok(())
+    }
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::CodeKind;
+
+    fn valid_simt_evidence() -> FrontendQualificationEvidence<'static> {
+        FrontendQualificationEvidence {
+            frontend: KernelFrontend::CudaRustSimt,
+            artifact_kind: CodeKind::Ptx,
+            toolchain_id: "cuda-oxide/nightly-2026-04-03",
+            toolchain_commit: "0123456789abcdef",
+            artifact_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            device_identity: "gpu-uuid-and-sm-version",
+            oracle_id: "nnis-vector-add-reference-v1",
+            run_id: "qualification-run-001",
+            correction_passed: true,
+            negative_tests_passed: true,
+        }
+    }
 
     #[test]
     fn existing_nvrtc_paths_remain_qualified() {
@@ -150,5 +256,55 @@ mod tests {
         assert_eq!(tile.boundary(), FrontendArtifactBoundary::RuntimeManaged);
         assert!(!tile.accepts_loader_artifact(CodeKind::Ptx));
         assert!(!tile.accepts_loader_artifact(CodeKind::Cubin));
+    }
+
+    #[test]
+    fn qualification_evidence_binds_exact_frontend_and_artifact() {
+        let evidence = valid_simt_evidence();
+        assert_eq!(
+            evidence.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Ok(())
+        );
+        assert!(!KernelFrontendContract::CUDA_RUST_SIMT_PTX.production_routing_allowed());
+
+        let mut wrong_frontend = evidence;
+        wrong_frontend.frontend = KernelFrontend::CudaRustTile;
+        assert_eq!(
+            wrong_frontend.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Err(FrontendQualificationEvidenceError::FrontendMismatch)
+        );
+
+        let mut wrong_artifact = evidence;
+        wrong_artifact.artifact_kind = CodeKind::Cubin;
+        assert_eq!(
+            wrong_artifact.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Err(FrontendQualificationEvidenceError::ArtifactBoundaryMismatch)
+        );
+    }
+
+    #[test]
+    fn qualification_evidence_rejects_incomplete_or_failed_runs() {
+        let evidence = valid_simt_evidence();
+
+        let mut bad_hash = evidence;
+        bad_hash.artifact_sha256 = "not-a-sha256";
+        assert_eq!(
+            bad_hash.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Err(FrontendQualificationEvidenceError::InvalidArtifactSha256)
+        );
+
+        let mut correction_failed = evidence;
+        correction_failed.correction_passed = false;
+        assert_eq!(
+            correction_failed.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Err(FrontendQualificationEvidenceError::CorrectionFailed)
+        );
+
+        let mut negative_tests_failed = evidence;
+        negative_tests_failed.negative_tests_passed = false;
+        assert_eq!(
+            negative_tests_failed.validate_for(KernelFrontendContract::CUDA_RUST_SIMT_PTX),
+            Err(FrontendQualificationEvidenceError::NegativeTestsFailed)
+        );
     }
 }
