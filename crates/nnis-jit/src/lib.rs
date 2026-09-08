@@ -1,11 +1,15 @@
 //! Runtime CUDA compilation, module ownership, and validated kernel launch.
 
 mod cache;
+mod frontend;
 mod launch;
 mod module;
 mod program;
 
 pub use cache::{CompiledCode, JitCompiler};
+pub use frontend::{
+    FrontendArtifactBoundary, FrontendQualification, KernelFrontend, KernelFrontendContract,
+};
 pub use launch::{Dim3, KernelArgs, KernelLaunch, KernelParameter, LaunchConfig};
 pub use module::{Kernel, KernelAttributes, Module, OccupancyRecommendation};
 pub use program::{CodeKind, CompileOptions, JitProgram, ProgramCacheKey};
