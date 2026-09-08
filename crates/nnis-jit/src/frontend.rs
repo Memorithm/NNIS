@@ -132,7 +132,10 @@ mod tests {
             KernelFrontendContract::CUDA_RUST_SIMT_PTX,
             KernelFrontendContract::CUDA_RUST_TILE_RUNTIME,
         ] {
-            assert_eq!(contract.qualification(), FrontendQualification::Experimental);
+            assert_eq!(
+                contract.qualification(),
+                FrontendQualification::Experimental
+            );
             assert!(!contract.production_routing_allowed());
         }
     }
