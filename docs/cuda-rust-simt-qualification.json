@@ -1,0 +1,44 @@
+{
+  "schema": "nnis-cuda-rust-simt-qualification-v1",
+  "status": "unresolved_blocking",
+  "frontend_contract": "CUDA_RUST_SIMT_PTX",
+  "production_routing_authorized": false,
+  "performance_claim_authorized": false,
+  "toolchain": {
+    "name": "cuda-oxide",
+    "version_or_channel": null,
+    "source_commit": null
+  },
+  "artifact": {
+    "kind": "ptx",
+    "sha256": null
+  },
+  "device": {
+    "identity": null,
+    "compute_capability": null,
+    "driver_version": null,
+    "cuda_version": null
+  },
+  "oracle": {
+    "id": "nnis-vector-add-reference-v1",
+    "correction_passed": null,
+    "negative_tests_passed": null
+  },
+  "run": {
+    "id": null,
+    "evidence_bundle_sha256": null
+  },
+  "qualification_requirements": [
+    "exact_toolchain_source_commit",
+    "exact_ptx_sha256",
+    "exact_device_and_cuda_identity",
+    "independent_vector_add_correction_oracle",
+    "negative_fail_closed_tests",
+    "content_addressed_evidence_bundle"
+  ],
+  "scientific_boundary": {
+    "external_prior_art_is_not_memorithm_evidence": true,
+    "correction_qualification_precedes_performance_measurement": true,
+    "successful_manifest_validation_does_not_promote_frontend": true
+  }
+}
