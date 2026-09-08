@@ -1,0 +1,28 @@
+name: CUDA Rust SIMT qualification
+
+on:
+  pull_request:
+    paths:
+      - "docs/cuda-rust-simt-qualification.json"
+      - "scripts/validate_cuda_rust_simt_qualification.py"
+      - ".github/workflows/cuda-rust-simt-qualification.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/cuda-rust-simt-qualification.json"
+      - "scripts/validate_cuda_rust_simt_qualification.py"
+      - ".github/workflows/cuda-rust-simt-qualification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate fail-closed qualification manifest
+        run: python scripts/validate_cuda_rust_simt_qualification.py
