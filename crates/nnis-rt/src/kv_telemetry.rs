@@ -37,16 +37,15 @@ pub fn observe_kv_cache<T: DevicePod>(cache: &KvCache<T>) -> Result<KvCacheTelem
 
     for layer in 0..config.layers {
         let length = cache.len(layer)?;
-        total_live_tokens = total_live_tokens
-            .checked_add(length)
-            .ok_or_else(|| crate::NnisError::invalid_input("KV telemetry live-token sum overflows usize"))?;
+        total_live_tokens = total_live_tokens.checked_add(length).ok_or_else(|| {
+            crate::NnisError::invalid_input("KV telemetry live-token sum overflows usize")
+        })?;
         layer_lengths.push(length);
     }
 
-    let total_capacity_tokens = config
-        .layers
-        .checked_mul(config.capacity)
-        .ok_or_else(|| crate::NnisError::invalid_input("KV telemetry capacity sum overflows usize"))?;
+    let total_capacity_tokens = config.layers.checked_mul(config.capacity).ok_or_else(|| {
+        crate::NnisError::invalid_input("KV telemetry capacity sum overflows usize")
+    })?;
 
     Ok(KvCacheTelemetry {
         layer_lengths,
