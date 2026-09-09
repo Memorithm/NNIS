@@ -11,6 +11,7 @@
   },
   "artifact": {
     "kind": "ptx",
+    "path": null,
     "sha256": null
   },
   "device": {
@@ -26,6 +27,8 @@
   },
   "run": {
     "id": null,
+    "nnis_commit": null,
+    "evidence_bundle_path": null,
     "evidence_bundle_sha256": null
   },
   "qualification_requirements": [
@@ -34,7 +37,8 @@
     "exact_device_and_cuda_identity",
     "independent_vector_add_correction_oracle",
     "negative_fail_closed_tests",
-    "content_addressed_evidence_bundle"
+    "content_addressed_evidence_bundle",
+    "exact_nnis_revision_binding"
   ],
   "scientific_boundary": {
     "external_prior_art_is_not_memorithm_evidence": true,
