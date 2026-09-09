@@ -11,6 +11,7 @@ pub mod context;
 pub mod device;
 pub mod error;
 pub mod kv_cache;
+pub mod kv_telemetry;
 pub mod memory;
 pub mod pool;
 pub mod process_memory;
@@ -22,6 +23,7 @@ pub use context::{gpu_context, Context};
 pub use device::{Device, DeviceProps};
 pub use error::{ErrorKind, NnisError, Result};
 pub use kv_cache::{KvAppend, KvCache, KvCacheConfig};
+pub use kv_telemetry::{observe_kv_cache, KvCacheTelemetry};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use pool::{PooledBuffer, StreamOrderedAllocator};
 pub use process_memory::{
