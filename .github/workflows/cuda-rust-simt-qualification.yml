@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - "docs/cuda-rust-simt-qualification.json"
+      - "docs/cuda-rust-simt-evidence/**"
+      - "artifacts/cuda-rust-simt/**"
       - "scripts/validate_cuda_rust_simt_qualification.py"
       - ".github/workflows/cuda-rust-simt-qualification.yml"
   push:
     branches: [main]
     paths:
       - "docs/cuda-rust-simt-qualification.json"
+      - "docs/cuda-rust-simt-evidence/**"
+      - "artifacts/cuda-rust-simt/**"
       - "scripts/validate_cuda_rust_simt_qualification.py"
       - ".github/workflows/cuda-rust-simt-qualification.yml"
 
@@ -19,10 +23,12 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      NNIS_EXPECTED_REVISION: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Validate fail-closed qualification manifest
+      - name: Validate fail-closed qualification manifest and evidence
         run: python scripts/validate_cuda_rust_simt_qualification.py
