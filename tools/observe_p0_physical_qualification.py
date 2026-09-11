@@ -40,8 +40,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--expected-head")
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--sample-seconds",
+        type=float,
+        default=0.0,
+        help="optional non-negative liveness sampling window; zero disables sampling",
+    )
     parser.add_argument("--self-test", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.sample_seconds < 0.0:
+        parser.error("--sample-seconds must be non-negative")
+    return args
 
 
 def _read_text(path: Path) -> str | None:
@@ -151,6 +160,30 @@ def gpu_process_memory() -> dict[int, int]:
     return result
 
 
+def gpu_utilization_percent() -> float | None:
+    try:
+        completed = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=utilization.gpu",
+                "--format=csv,noheader,nounits",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        first = completed.stdout.splitlines()[0].strip()
+        return float(first)
+    except (IndexError, ValueError):
+        return None
+
+
 def artifact_inventory(work_dir: Path, expected_head: str | None) -> list[dict[str, Any]]:
     candidates: list[Path] = []
     if expected_head:
@@ -221,11 +254,60 @@ def build_snapshot(work_dir: Path, expected_head: str | None) -> dict[str, Any]:
         "work_dir": str(work_dir),
         "expected_head": expected_head,
         "state": classify_state(processes, artifacts),
+        "gpu_utilization_percent": gpu_utilization_percent(),
         "processes": processes,
         "artifacts": artifacts,
         "claim_boundary": (
             "read-only operational observation only; this snapshot is not qualification "
             "evidence and cannot authorize promotion or replace benchmark artifacts"
+        ),
+    }
+
+
+def _benchmark_process(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    for process in snapshot.get("processes", []):
+        if process.get("role") == "llama_f16_massive_abba":
+            return process
+    return None
+
+
+def build_liveness(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    requested_seconds: float,
+) -> dict[str, Any]:
+    observed_seconds = max(
+        0.0,
+        float(after["timestamp_unix_seconds"]) - float(before["timestamp_unix_seconds"]),
+    )
+    before_benchmark = _benchmark_process(before)
+    after_benchmark = _benchmark_process(after)
+    same_pid = (
+        before_benchmark is not None
+        and after_benchmark is not None
+        and before_benchmark.get("pid") == after_benchmark.get("pid")
+    )
+    cpu_delta = None
+    if same_pid:
+        cpu_delta = max(
+            0.0,
+            float(after_benchmark["cpu_seconds"]) - float(before_benchmark["cpu_seconds"]),
+        )
+    cpu_time_advanced = cpu_delta is not None and cpu_delta > 0.0
+    return {
+        "requested_seconds": requested_seconds,
+        "observed_seconds": round(observed_seconds, 3),
+        "benchmark_same_pid": same_pid,
+        "benchmark_pid_before": None if before_benchmark is None else before_benchmark.get("pid"),
+        "benchmark_pid_after": None if after_benchmark is None else after_benchmark.get("pid"),
+        "benchmark_cpu_seconds_delta": None if cpu_delta is None else round(cpu_delta, 3),
+        "benchmark_cpu_time_advanced": cpu_time_advanced,
+        "gpu_utilization_percent_before": before.get("gpu_utilization_percent"),
+        "gpu_utilization_percent_after": after.get("gpu_utilization_percent"),
+        "active_work_observed": same_pid and cpu_time_advanced,
+        "interpretation": (
+            "operational liveness only; CPU-time advancement and sampled GPU utilization "
+            "do not prove benchmark correctness or qualification success"
         ),
     }
 
@@ -246,6 +328,20 @@ def self_test() -> None:
     assert classify_state(active, []) == "tinyllama_benchmark_active"
     assert classify_state([], [{"name": "consensus.json"}, {"name": "parity_record.json"}]) == "tinyllama_complete"
     assert classify_state([], [{"name": "P0_PHYSICAL_QUALIFICATION.json"}]) == "bundle_complete"
+    before = {
+        "timestamp_unix_seconds": 10.0,
+        "gpu_utilization_percent": 96.0,
+        "processes": [{"role": "llama_f16_massive_abba", "pid": 42, "cpu_seconds": 100.0}],
+    }
+    after = {
+        "timestamp_unix_seconds": 20.0,
+        "gpu_utilization_percent": 97.0,
+        "processes": [{"role": "llama_f16_massive_abba", "pid": 42, "cpu_seconds": 109.5}],
+    }
+    liveness = build_liveness(before, after, 10.0)
+    assert liveness["benchmark_same_pid"] is True
+    assert liveness["benchmark_cpu_seconds_delta"] == 9.5
+    assert liveness["active_work_observed"] is True
     with tempfile.TemporaryDirectory() as temporary:
         work = Path(temporary)
         head = "a" * 40
@@ -269,6 +365,11 @@ def main() -> None:
         raise SystemExit("--work-dir is required unless --self-test is used")
     work_dir = args.work_dir.expanduser().resolve()
     snapshot = build_snapshot(work_dir, args.expected_head)
+    if args.sample_seconds > 0.0:
+        before = snapshot
+        time.sleep(args.sample_seconds)
+        snapshot = build_snapshot(work_dir, args.expected_head)
+        snapshot["liveness"] = build_liveness(before, snapshot, args.sample_seconds)
     if args.output is not None:
         atomic_write_json(args.output.expanduser().resolve(), snapshot)
     print(json.dumps(snapshot, indent=2, sort_keys=True))
