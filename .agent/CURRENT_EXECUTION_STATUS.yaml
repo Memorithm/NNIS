@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 1efbf188457026cc9dd1320070808a03c62c794c
+  main_head: faab2eae91d4d950d2cb3215628b47d56d819c9e
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -66,7 +66,7 @@ main_repository_state:
     capability_contract_version: 1
     exact_checkpoint_spec_version: 1
     latest_contract_merge_commit: 259b22b8b45c8d79c60b191c7ed0fcc12916a763
-    current_main_head_requiring_physical_execution: 1efbf188457026cc9dd1320070808a03c62c794c
+    current_main_head_requiring_physical_execution: faab2eae91d4d950d2cb3215628b47d56d819c9e
     rust_msrv: "1.77"
     latest_exact_head_ci:
       exact_head: 1efbf188457026cc9dd1320070808a03c62c794c
