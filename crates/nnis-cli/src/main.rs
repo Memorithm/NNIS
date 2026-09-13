@@ -1,26 +1,62 @@
-use nnis::{Context, Device, GenerationConfig, Model, Stream};
+use nnis::{
+    Context, Device, GenerationConfig, GenerationStreamControl, Model, SamplingConfig, Stream,
+};
 use std::env;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N]\n\nGreedy decoding uses an explicit NNIS model directory and Hugging Face tokenizer.json file. CUDA device ordinal defaults to 0.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n\nDefault decoding is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.";
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 struct GenerateArgs {
     model_dir: PathBuf,
     tokenizer_file: PathBuf,
     prompt: String,
     device_ordinal: i32,
     max_new_tokens: usize,
+    sample: bool,
+    stream: bool,
+    seed: Option<u64>,
+    temperature: Option<f32>,
+    top_k: Option<usize>,
+    top_p: Option<f32>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum Command {
     Help,
     Generate(GenerateArgs),
+}
+
+fn parse_positive_f32(flag: &str, raw: &str) -> Result<f32, String> {
+    let value = raw
+        .parse::<f32>()
+        .map_err(|error| format!("invalid {flag} {raw:?}: {error}"))?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(format!("{flag} must be finite and positive; got {raw}"));
+    }
+    Ok(value)
+}
+
+fn build_sampling_config(arguments: &GenerateArgs) -> Result<SamplingConfig, String> {
+    let seed = arguments
+        .seed
+        .ok_or_else(|| "--sample requires --seed U64".to_string())?;
+    let mut sampling = SamplingConfig::seeded(seed);
+    if let Some(temperature) = arguments.temperature {
+        sampling = sampling.with_temperature(temperature);
+    }
+    if let Some(top_k) = arguments.top_k {
+        sampling = sampling.with_top_k(top_k);
+    }
+    if let Some(top_p) = arguments.top_p {
+        sampling = sampling.with_top_p(top_p);
+    }
+    Ok(sampling)
 }
 
 fn parse_args<I>(arguments: I) -> Result<Command, String>
@@ -43,6 +79,12 @@ where
     let mut prompt = None;
     let mut device_ordinal = DEFAULT_DEVICE_ORDINAL;
     let mut max_new_tokens = DEFAULT_MAX_NEW_TOKENS;
+    let mut sample = false;
+    let mut stream = false;
+    let mut seed = None;
+    let mut temperature = None;
+    let mut top_k = None;
+    let mut top_p = None;
 
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
@@ -89,8 +131,68 @@ where
                     return Err("--max-new-tokens must be greater than zero".to_string());
                 }
             }
+            "--sample" => sample = true,
+            "--stream" => stream = true,
+            "--seed" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--seed requires an unsigned integer".to_string())?;
+                seed = Some(
+                    raw.parse::<u64>()
+                        .map_err(|error| format!("invalid --seed {raw:?}: {error}"))?,
+                );
+            }
+            "--temperature" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--temperature requires a float".to_string())?;
+                temperature = Some(parse_positive_f32("--temperature", &raw)?);
+            }
+            "--top-k" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--top-k requires an integer".to_string())?;
+                let value = raw
+                    .parse::<usize>()
+                    .map_err(|error| format!("invalid --top-k {raw:?}: {error}"))?;
+                if value == 0 {
+                    return Err("--top-k must be greater than zero".to_string());
+                }
+                top_k = Some(value);
+            }
+            "--top-p" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--top-p requires a float".to_string())?;
+                let value = parse_positive_f32("--top-p", &raw)?;
+                if value > 1.0 {
+                    return Err(format!("--top-p must be in (0, 1]; got {raw}"));
+                }
+                top_p = Some(value);
+            }
             "--help" | "-h" => return Ok(Command::Help),
             other => return Err(format!("unknown generate argument {other:?}\n\n{USAGE}")),
+        }
+    }
+
+    if stream && !sample {
+        return Err("--stream requires --sample".to_string());
+    }
+    if sample && seed.is_none() {
+        return Err("--sample requires --seed U64".to_string());
+    }
+    if !sample {
+        if seed.is_some() {
+            return Err("--seed requires --sample".to_string());
+        }
+        if temperature.is_some() {
+            return Err("--temperature requires --sample".to_string());
+        }
+        if top_k.is_some() {
+            return Err("--top-k requires --sample".to_string());
+        }
+        if top_p.is_some() {
+            return Err("--top-p requires --sample".to_string());
         }
     }
 
@@ -100,6 +202,12 @@ where
         prompt: prompt.ok_or_else(|| "missing --prompt TEXT".to_string())?,
         device_ordinal,
         max_new_tokens,
+        sample,
+        stream,
+        seed,
+        temperature,
+        top_k,
+        top_p,
     }))
 }
 
@@ -120,7 +228,14 @@ fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Ve
     Ok((tokenizer, input_ids))
 }
 
-fn generate(arguments: &GenerateArgs) -> Result<String, String> {
+fn decode_token_piece(tokenizer: &Tokenizer, token: u32) -> Result<String, String> {
+    tokenizer
+        .decode(&[token], true)
+        .map_err(|error| format!("failed to decode generated token ID {token}: {error}"))
+}
+
+/// Returns `Some(text)` for buffered output paths; `None` when streaming already printed.
+fn generate(arguments: &GenerateArgs) -> Result<Option<String>, String> {
     let (tokenizer, input_ids) =
         tokenize_prompt(&arguments.tokenizer_file, arguments.prompt.as_str())?;
 
@@ -161,14 +276,55 @@ fn generate(arguments: &GenerateArgs) -> Result<String, String> {
         }
         None => GenerationConfig::greedy(arguments.max_new_tokens),
     };
+
+    if !arguments.sample {
+        let generated = model
+            .new_session()
+            .and_then(|mut session| session.generate(&input_ids, generation))
+            .map_err(|error| format!("NNIS generation failed: {error}"))?;
+        let text = tokenizer
+            .decode(&generated, true)
+            .map_err(|error| format!("failed to decode generated token IDs: {error}"))?;
+        return Ok(Some(text));
+    }
+
+    let sampling = build_sampling_config(arguments)?;
+    if arguments.stream {
+        let mut stdout = io::stdout();
+        let mut decode_error = None;
+        model
+            .new_session()
+            .and_then(|mut session| {
+                session.generate_sampled_streaming(&input_ids, generation, sampling, |token| {
+                    match decode_token_piece(&tokenizer, token) {
+                        Ok(piece) => {
+                            let _ = write!(stdout, "{piece}");
+                            let _ = stdout.flush();
+                            GenerationStreamControl::Continue
+                        }
+                        Err(error) => {
+                            decode_error = Some(error);
+                            GenerationStreamControl::Stop
+                        }
+                    }
+                })
+            })
+            .map_err(|error| format!("NNIS sampled streaming generation failed: {error}"))?;
+        if let Some(error) = decode_error {
+            return Err(error);
+        }
+        println!();
+        return Ok(None);
+    }
+
     let generated = model
         .new_session()
-        .and_then(|mut session| session.generate(&input_ids, generation))
-        .map_err(|error| format!("NNIS generation failed: {error}"))?;
-
-    tokenizer
+        .and_then(|mut session| session.generate_sampled(&input_ids, generation, sampling))
+        .map_err(|error| format!("NNIS sampled generation failed: {error}"))?;
+    let text = tokenizer
         .decode(&generated, true)
-        .map_err(|error| format!("failed to decode generated token IDs: {error}"))
+        .map_err(|error| format!("failed to decode generated token IDs: {error}"))?;
+    Ok(Some(text))
 }
 
 fn main() -> ExitCode {
@@ -186,10 +342,11 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Generate(arguments) => match generate(&arguments) {
-            Ok(text) => {
+            Ok(Some(text)) => {
                 println!("{text}");
                 ExitCode::SUCCESS
             }
+            Ok(None) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("nnis generate: {error}");
                 ExitCode::FAILURE
@@ -204,6 +361,22 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    fn base_generate_args() -> GenerateArgs {
+        GenerateArgs {
+            model_dir: PathBuf::from("/model"),
+            tokenizer_file: PathBuf::from("/tokenizer.json"),
+            prompt: "Hello, NNIS!".to_string(),
+            device_ordinal: 3,
+            max_new_tokens: 7,
+            sample: false,
+            stream: false,
+            seed: None,
+            temperature: None,
+            top_k: None,
+            top_p: None,
+        }
     }
 
     #[test]
@@ -228,16 +401,7 @@ mod tests {
             "7",
         ]))
         .unwrap();
-        assert_eq!(
-            parsed,
-            Command::Generate(GenerateArgs {
-                model_dir: PathBuf::from("/model"),
-                tokenizer_file: PathBuf::from("/tokenizer.json"),
-                prompt: "Hello, NNIS!".to_string(),
-                device_ordinal: 3,
-                max_new_tokens: 7,
-            })
-        );
+        assert_eq!(parsed, Command::Generate(base_generate_args()));
     }
 
     #[test]
@@ -256,6 +420,46 @@ mod tests {
             panic!("expected generate command");
         };
         assert_eq!(arguments.device_ordinal, 0);
+        assert!(!arguments.sample);
+        assert!(!arguments.stream);
+    }
+
+    #[test]
+    fn sample_requires_seed_and_accepts_builders_without_cuda() {
+        let parsed = parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--sample",
+            "--seed",
+            "42",
+            "--temperature",
+            "0.8",
+            "--top-k",
+            "16",
+            "--top-p",
+            "0.9",
+            "--stream",
+        ]))
+        .unwrap();
+        let Command::Generate(arguments) = parsed else {
+            panic!("expected generate command");
+        };
+        assert!(arguments.sample);
+        assert!(arguments.stream);
+        assert_eq!(arguments.seed, Some(42));
+        assert_eq!(arguments.temperature, Some(0.8));
+        assert_eq!(arguments.top_k, Some(16));
+        assert_eq!(arguments.top_p, Some(0.9));
+        let sampling = build_sampling_config(&arguments).unwrap();
+        assert_eq!(sampling.seed, 42);
+        assert_eq!(sampling.temperature, 0.8);
+        assert_eq!(sampling.top_k, Some(16));
+        assert_eq!(sampling.top_p, Some(0.9));
     }
 
     #[test]
@@ -298,6 +502,67 @@ mod tests {
         ]))
         .is_err());
         assert!(parse_args(strings(&["unknown"])).is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--sample",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--stream",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--seed",
+            "1",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--temperature",
+            "0.5",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "generate",
+            "--model",
+            "/model",
+            "--tokenizer",
+            "/tokenizer.json",
+            "--prompt",
+            "x",
+            "--sample",
+            "--seed",
+            "1",
+            "--top-p",
+            "1.5",
+        ]))
+        .is_err());
     }
 
     #[test]

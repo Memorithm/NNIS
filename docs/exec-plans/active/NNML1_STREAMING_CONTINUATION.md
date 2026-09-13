@@ -1,26 +1,20 @@
 # NNML1 streaming continuation
 
-This branch advances the NNML1 broader-decoder-runtime program with a narrowly scoped sampled streaming surface.
+Status: **completed** (library surface merged; CLI follow-on selected).
 
-## Current slice
+## Merged software
 
-- add token-by-token delivery for the existing reproducible sampled generation path;
-- preserve the existing sampling policy and RNG sequence;
-- make callback stop graceful only after the emitted token has been executed;
-- keep session position and KV state continuation-ready;
-- preserve the existing fixed-length greedy device-resident path unchanged.
+- PR #104 — reproducible seeded sampling (`InferenceSession::generate_sampled`, `SamplingConfig`)
+- PR #105 — sampled token streaming (`generate_sampled_streaming`, `GenerationStreamControl`)
+- PR #106 — sampled multi-session batch (`SampledSessionBatch`)
 
-## Required merge gates
+Active follow-on software slice: `docs/exec-plans/active/NNML1_CLI_SAMPLED_STREAMING.md`
+(`NNML1_CLI_SAMPLED_STREAMING_SURFACE`) — expose sampling/streaming through the
+`nnis` facade and opt-in CLI flags. That slice does not reopen this library plan.
 
-- `cargo fmt --all -- --check`;
-- `cargo check --workspace --all-targets --locked`;
-- strict Clippy under the repository workflow;
-- workspace tests;
-- Rust 1.77 MSRV gate;
-- CUDA-optional sampled streaming tests when hardware is present.
+## Boundaries (unchanged)
 
-## Boundaries
-
-This slice does not claim dynamic batching, concurrent request scheduling, network transport streaming, backpressure, device-resident sampling, serving-grade performance, or multiple-model-family qualification.
-
-After merge, the next non-physical NNML1 slice should address batched-session contracts only if the existing single-session ownership invariants can be preserved explicitly. Physical P0/P1 gates for real Safetensors qualification and the `fused_mlp + parallel-score` composition remain separate and must not be inferred from this work.
+This work does not claim dynamic batching as a scheduler, concurrent request
+serving, network transport streaming, backpressure, device-resident sampling,
+serving-grade performance, physical Thor parity, or multiple-model-family
+qualification. Physical P0/P1 gates remain separate.
