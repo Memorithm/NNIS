@@ -39,9 +39,10 @@ pub mod kernels {
 pub mod model {
     pub use nnis_model::{
         load_model_directory, Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig,
-        InferenceSession, MatrixWeight, Model, ModelConfig, ModelManifest, ModelWeights,
-        TensorManifest, VectorWeight, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
-        NNIS_MODEL_VERSION,
+        GenerationStreamControl, InferenceSession, MatrixWeight, Model, ModelConfig, ModelManifest,
+        ModelWeights, SampledBatchRequest, SampledSessionBatch, SamplingConfig, TensorManifest,
+        VectorWeight, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION,
+        NNIS_SAMPLING_POLICY_VERSION,
     };
 }
 
@@ -63,9 +64,10 @@ pub use runtime::{
 };
 
 pub use model::{
-    load_model_directory, Activation, GenerationConfig, InferenceSession, Model, ModelConfig,
-    ModelManifest, TensorManifest, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST,
-    NNIS_MODEL_VERSION,
+    load_model_directory, Activation, GenerationConfig, GenerationStreamControl, InferenceSession,
+    Model, ModelConfig, ModelManifest, SampledBatchRequest, SampledSessionBatch, SamplingConfig,
+    TensorManifest, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION,
+    NNIS_SAMPLING_POLICY_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.

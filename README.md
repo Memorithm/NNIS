@@ -108,12 +108,19 @@ cargo run --release -p nnis-cli --bin nnis -- generate \
 
 `--device` is the CUDA device ordinal and defaults to `0` when omitted. The
 command tokenizes the prompt, loads the model on that CUDA device, runs greedy
-generation, and decodes only the newly generated token IDs back to text. When
-the NNIS model metadata contains `eos_token_id`, generation stops after that
-token is produced; older manifests without EOS metadata retain fixed-length
-greedy decoding. Fixed-length generation remains fully device-resident.
-EOS-aware generation deliberately observes one token per step on the host to
-stop safely. Sampling and streaming output are not yet part of this command.
+generation by default, and decodes only the newly generated token IDs back to
+text. When the NNIS model metadata contains `eos_token_id`, generation stops
+after that token is produced; older manifests without EOS metadata retain
+fixed-length greedy decoding. Fixed-length greedy generation remains fully
+device-resident. EOS-aware generation deliberately observes one token per step
+on the host to stop safely.
+
+Opt-in host-visible NNML1 sampling is available with `--sample --seed U64`,
+optionally plus `--temperature`, `--top-k`, and `--top-p`. Add `--stream` with
+`--sample` to print each decoded token piece as it is emitted. These flags do
+not change the default greedy path and make no serving-performance or physical
+parity claim. The same opt-in flags are mirrored on `nnis-hf generate`; the
+`nnis.hf-generation@1.0.0` process contract remains greedy-by-default.
 
 The pinned tiny-Llama fixture used for model-runtime qualification can also
 produce a matching tokenizer file for CLI testing:
