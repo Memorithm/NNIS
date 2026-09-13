@@ -295,24 +295,19 @@ fn generate(arguments: &GenerateArgs) -> Result<Option<String>, String> {
         model
             .new_session()
             .and_then(|mut session| {
-                session.generate_sampled_streaming(
-                    &input_ids,
-                    generation,
-                    sampling,
-                    |token| {
-                        match decode_token_piece(&tokenizer, token) {
-                            Ok(piece) => {
-                                let _ = write!(stdout, "{piece}");
-                                let _ = stdout.flush();
-                                GenerationStreamControl::Continue
-                            }
-                            Err(error) => {
-                                decode_error = Some(error);
-                                GenerationStreamControl::Stop
-                            }
+                session.generate_sampled_streaming(&input_ids, generation, sampling, |token| {
+                    match decode_token_piece(&tokenizer, token) {
+                        Ok(piece) => {
+                            let _ = write!(stdout, "{piece}");
+                            let _ = stdout.flush();
+                            GenerationStreamControl::Continue
                         }
-                    },
-                )
+                        Err(error) => {
+                            decode_error = Some(error);
+                            GenerationStreamControl::Stop
+                        }
+                    }
+                })
             })
             .map_err(|error| format!("NNIS sampled streaming generation failed: {error}"))?;
         if let Some(error) = decode_error {
