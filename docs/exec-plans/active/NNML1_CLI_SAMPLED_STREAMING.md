@@ -1,3 +1,10 @@
+# NNML1 CLI sampled/streaming surface
+
+## Status
+
+Completed and merged as PR #137.
+
+
 # NNML1 CLI sampled / streaming surface
 
 Status: **active** (selected next non-physical software slice).
