@@ -98,6 +98,7 @@ pub use format::{
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
 pub use kernels::F32DecoderKernels;
+pub use nnis_rt::KvCacheTelemetry;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
 pub use representation_plan::{
     load_model_directory_with_representation_plan, PhysicalWeightRepresentation,
