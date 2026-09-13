@@ -8,8 +8,10 @@ use std::sync::Arc;
 /// Safe CUDA device, context, stream, event, and allocation APIs.
 pub mod runtime {
     pub use nnis_rt::{
-        gpu_context, Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event,
-        NnisError, PinnedBuffer, Result, Stream,
+        current_process_gpu_memory, gpu_context, observe_kv_cache, Context, Device, DeviceBuffer,
+        DevicePod, DeviceProps, ErrorKind, Event, KvCacheTelemetry, NnisError,
+        NvmlProcessMemorySnapshotV1, PinnedBuffer, ProcessGpuMemoryError, Result, Stream,
+        NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
     };
 }
 
@@ -39,10 +41,10 @@ pub mod kernels {
 pub mod model {
     pub use nnis_model::{
         load_model_directory, Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig,
-        GenerationStreamControl, InferenceSession, MatrixWeight, Model, ModelConfig, ModelManifest,
-        ModelWeights, SampledBatchRequest, SampledSessionBatch, SamplingConfig, TensorManifest,
-        VectorWeight, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION,
-        NNIS_SAMPLING_POLICY_VERSION,
+        GenerationStreamControl, InferenceSession, KvCacheTelemetry, MatrixWeight, Model,
+        ModelConfig, ModelManifest, ModelWeights, SampledBatchRequest, SampledSessionBatch,
+        SamplingConfig, TensorManifest, VectorWeight, WeightDType, NNIS_MODEL_FORMAT,
+        NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     };
 }
 
@@ -59,8 +61,9 @@ pub use kernels::{
     F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
 pub use runtime::{
-    Context, Device, DeviceBuffer, DevicePod, DeviceProps, ErrorKind, Event, NnisError,
-    PinnedBuffer, Result, Stream,
+    current_process_gpu_memory, observe_kv_cache, Context, Device, DeviceBuffer, DevicePod,
+    DeviceProps, ErrorKind, Event, KvCacheTelemetry, NnisError, NvmlProcessMemorySnapshotV1,
+    PinnedBuffer, ProcessGpuMemoryError, Result, Stream, NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
 };
 
 pub use model::{

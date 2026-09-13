@@ -9,7 +9,10 @@ use nnis_jit::JitCompiler;
 use nnis_kernels::{
     F32Bf16Gemv, F32Elementwise, F32Gather, F32Gemm, F32Gemv, F32TopK, F32TopKWorkspace,
 };
-use nnis_rt::{Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, NnisError, Result, Stream};
+use nnis_rt::{
+    observe_kv_cache, Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, KvCacheTelemetry,
+    NnisError, Result, Stream,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -631,6 +634,17 @@ impl<'model> InferenceSession<'model> {
 
     pub fn capacity(&self) -> usize {
         self.model.config.max_position_embeddings
+    }
+
+    /// Read-only logical KV occupancy after synchronizing this session stream.
+    ///
+    /// Does not copy K/V payload bytes to the host and does not change placement
+    /// or eviction policy. Pending asynchronous appends are retired by the
+    /// stream synchronize before lengths are observed.
+    pub fn kv_cache_telemetry(&mut self) -> Result<KvCacheTelemetry> {
+        self.stream.synchronize()?;
+        self.pending_appends.clear();
+        observe_kv_cache(&self.cache)
     }
 
     pub fn reset(&mut self) -> Result<()> {

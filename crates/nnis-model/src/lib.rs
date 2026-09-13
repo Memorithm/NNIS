@@ -103,6 +103,7 @@ pub use representation_plan::{
     load_model_directory_with_representation_plan, PhysicalWeightRepresentation,
     WeightRepresentationPlan, WEIGHT_REPRESENTATION_PLAN_VERSION,
 };
+pub use nnis_rt::KvCacheTelemetry;
 pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
 pub use safetensors_loader::{
