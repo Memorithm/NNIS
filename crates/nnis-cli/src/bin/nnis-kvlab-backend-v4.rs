@@ -49,6 +49,32 @@ fn exact_checkpoint_spec(args: &Args) -> Result<&'static ExactDecoderCheckpointS
     ))
 }
 
+fn exact_checkpoint_kv_bytes_per_token(spec: &ExactDecoderCheckpointSpec) -> Result<u64, String> {
+    if spec.num_attention_heads == 0 || spec.hidden_size % spec.num_attention_heads != 0 {
+        return Err(format!(
+            "exact checkpoint {} has invalid attention geometry for KV accounting",
+            spec.name
+        ));
+    }
+    let head_dim = spec.hidden_size / spec.num_attention_heads;
+    [
+        spec.num_hidden_layers as u64,
+        spec.num_key_value_heads as u64,
+        head_dim as u64,
+        2_u64,
+        std::mem::size_of::<f32>() as u64,
+    ]
+    .into_iter()
+    .try_fold(1_u64, |product, factor| {
+        product.checked_mul(factor).ok_or_else(|| {
+            format!(
+                "exact checkpoint {} KV byte accounting overflows u64",
+                spec.name
+            )
+        })
+    })
+}
+
 fn sha256_file(path: &std::path::Path) -> Result<String, String> {
     let mut file = std::fs::File::open(path)
         .map_err(|error| format!("failed to open {} for SHA-256: {error}", path.display()))?;
@@ -320,6 +346,13 @@ fn trace_sha256(request: &RequestV4) -> Result<String, String> {
 fn execute_request(args: &Args, request: &RequestV4) -> Result<(Vec<u8>, f64, f64), String> {
     let checkpoint_spec = exact_checkpoint_spec(args)?;
     validate_local_checkpoint_artifact(args, checkpoint_spec)?;
+    let expected_bytes_per_token = exact_checkpoint_kv_bytes_per_token(checkpoint_spec)?;
+    if request.bytes_per_token != expected_bytes_per_token {
+        return Err(format!(
+            "request bytes_per_token {} does not match NNIS f32 KV cache geometry for {}: expected {}",
+            request.bytes_per_token, checkpoint_spec.name, expected_bytes_per_token
+        ));
+    }
 
     let device = Device::get(args.device_ordinal).map_err(|error| {
         format!(
@@ -782,6 +815,18 @@ mod tests {
         );
         request.insert("trace_sha256".to_string(), Value::String(trace_sha256));
         serde_json::to_string(&request).unwrap()
+    }
+
+    #[test]
+    fn exact_checkpoint_kv_byte_accounting_matches_f32_runtime_geometry() {
+        assert_eq!(
+            exact_checkpoint_kv_bytes_per_token(&SMOLLM2_135M_BF16).unwrap(),
+            46_080
+        );
+        assert_eq!(
+            exact_checkpoint_kv_bytes_per_token(&TINYLLAMA_1P1B_CHAT_BF16).unwrap(),
+            45_056
+        );
     }
 
     #[test]

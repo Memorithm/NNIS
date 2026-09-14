@@ -12,6 +12,16 @@ The currently admitted checkpoints are the frozen NNIS specs for `HuggingFaceTB/
 
 This attestation covers the model checkpoint and decoder configuration only. The v4 backend consumes already-tokenized integer ids and does not load a tokenizer, so tokenizer identity remains campaign provenance owned by KVLab/reference fixtures rather than a local tokenizer-artifact validation performed by this binary.
 
+## Logical KV byte accounting
+
+The request's `bytes_per_token` is not accepted as an arbitrary accounting label. Before selecting a CUDA device, the backend derives the logical per-token KV payload from the admitted exact checkpoint and NNIS's actual `KvCache<f32>` representation:
+
+`2 × layers × KV_heads × head_dim × sizeof(f32)`
+
+The factor of two is K plus V. A request whose `bytes_per_token` differs from this value fails closed before model execution. Under the currently admitted checkpoints the exact logical values are 46,080 bytes/token for SmolLM2-135M and 45,056 bytes/token for TinyLlama-1.1B-Chat-v1.0.
+
+This is logical active-row accounting for the NNIS f32 KV representation. It is not evidence of allocator release, resident HBM reduction, or avoided physical memory traffic after compaction because the fixed-capacity cache allocations remain owned by the session.
+
 For a candidate request, NNIS calls `InferenceSession::compact_kv_cache_rows(retained_positions)`. The session logical/RoPE position must remain equal to the original input length. The first evaluation token is then decoded as a bridge under the selected history. Remaining evaluation tokens are teacher-forced; NNIS reports observed mean negative log-likelihood and top-1 token accuracy and returns a canonical response attesting the exact request SHA-256, mode, policy and retained positions.
 
 The baseline retains every input position and does not compact the cache. A candidate equal to the full baseline is rejected.
