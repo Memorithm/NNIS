@@ -1,3 +1,4 @@
+# Temporary branch-local patch helper; removed before PR.
 name: Temporary KVLab v4 KV byte accounting guard
 
 on:
