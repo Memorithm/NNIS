@@ -30,9 +30,7 @@ pub fn compact_kv_cache_layer<T: DevicePod>(
     let active = cache.len(layer)?;
     validate_retained_positions(active, retained_positions)?;
 
-    if retained_positions.len() == active
-        && retained_positions.iter().copied().eq(0..active)
-    {
+    if retained_positions.len() == active && retained_positions.iter().copied().eq(0..active) {
         return cache.stream().synchronize();
     }
 
@@ -48,8 +46,14 @@ pub fn compact_kv_cache_layer<T: DevicePod>(
         .checked_mul(retained)
         .and_then(|value| value.checked_mul(config.head_dim))
         .ok_or_else(|| NnisError::invalid_input("KV compaction scratch shape overflows usize"))?;
-    let scratch_keys = Arc::new(DeviceBuffer::<T>::new(cache.stream().ctx(), scratch_elements)?);
-    let scratch_values = Arc::new(DeviceBuffer::<T>::new(cache.stream().ctx(), scratch_elements)?);
+    let scratch_keys = Arc::new(DeviceBuffer::<T>::new(
+        cache.stream().ctx(),
+        scratch_elements,
+    )?);
+    let scratch_values = Arc::new(DeviceBuffer::<T>::new(
+        cache.stream().ctx(),
+        scratch_elements,
+    )?);
 
     stage_selected_rows(
         cache,
@@ -226,18 +230,15 @@ mod tests {
             return;
         };
         let stream = Stream::new(&context).unwrap();
-        let mut cache = KvCache::<f32>::new(
-            &stream,
-            KvCacheConfig::new(1, 2, 2, 4).unwrap(),
-        )
-        .unwrap();
+        let mut cache =
+            KvCache::<f32>::new(&stream, KvCacheConfig::new(1, 2, 2, 4).unwrap()).unwrap();
         let keys = Arc::new(
             DeviceBuffer::from_host(
                 &context,
                 &stream,
                 &[
-                    10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0, 110.0, 111.0, 120.0,
-                    121.0, 130.0, 131.0, 140.0, 141.0,
+                    10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0, 110.0, 111.0, 120.0, 121.0,
+                    130.0, 131.0, 140.0, 141.0,
                 ],
             )
             .unwrap(),
@@ -247,8 +248,8 @@ mod tests {
                 &context,
                 &stream,
                 &[
-                    1010.0, 1011.0, 1020.0, 1021.0, 1030.0, 1031.0, 1040.0, 1041.0, 1110.0,
-                    1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0,
+                    1010.0, 1011.0, 1020.0, 1021.0, 1030.0, 1031.0, 1040.0, 1041.0, 1110.0, 1111.0,
+                    1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0,
                 ],
             )
             .unwrap(),
