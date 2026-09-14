@@ -82,7 +82,9 @@ where
 
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
-            "--model" => model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?)),
+            "--model" => {
+                model_dir = Some(PathBuf::from(required_value(&mut arguments, "--model")?))
+            }
             "--model-id" => model_id = Some(required_value(&mut arguments, "--model-id")?),
             "--model-revision" => {
                 model_revision = Some(required_value(&mut arguments, "--model-revision")?)
@@ -113,8 +115,7 @@ where
     let args = Args {
         model_dir: model_dir.ok_or_else(|| "missing --model DIR".to_string())?,
         model_id: model_id.ok_or_else(|| "missing --model-id ID".to_string())?,
-        model_revision: model_revision
-            .ok_or_else(|| "missing --model-revision REV".to_string())?,
+        model_revision: model_revision.ok_or_else(|| "missing --model-revision REV".to_string())?,
         tokenizer_revision: tokenizer_revision
             .ok_or_else(|| "missing --tokenizer-revision REV".to_string())?,
         runtime_backend,
@@ -171,10 +172,16 @@ fn validate_request(request: &RequestV3, args: &Args) -> Result<(), String> {
         || request.runtime_backend != args.runtime_backend
         || request.runtime_revision != args.runtime_revision
     {
-        return Err("request model/runtime provenance does not match backend configuration".to_string());
+        return Err(
+            "request model/runtime provenance does not match backend configuration".to_string(),
+        );
     }
 
-    validate_unique_ids("logical_input_token_ids", &request.logical_input_token_ids, false)?;
+    validate_unique_ids(
+        "logical_input_token_ids",
+        &request.logical_input_token_ids,
+        false,
+    )?;
     validate_unique_ids(
         "retained_logical_token_ids",
         &request.retained_logical_token_ids,
@@ -264,7 +271,10 @@ fn trace_sha256(request: &RequestV3) -> Result<String, String> {
         serde_json::to_value(&request.model_input_token_ids)
             .map_err(|error| format!("failed to serialize model ids: {error}"))?,
     );
-    trace.insert("schema".to_string(), Value::String(TRACE_SCHEMA.to_string()));
+    trace.insert(
+        "schema".to_string(),
+        Value::String(TRACE_SCHEMA.to_string()),
+    );
     let payload = serde_json::to_vec(&trace)
         .map_err(|error| format!("failed to serialize canonical trace: {error}"))?;
     Ok(sha256_hex(&payload))
@@ -296,13 +306,10 @@ fn execute_request(args: &Args, request: &RequestV3) -> Result<(Vec<u8>, f64, f6
         revision: None,
         local_dir: args.model_dir.to_string_lossy().into_owned(),
     };
-    let (config, weights) = load_model_from_safetensors(&context, &construction_stream, &load_config)
-        .map_err(|error| {
-            format!(
-                "failed to load model {}: {error}",
-                args.model_dir.display()
-            )
-        })?;
+    let (config, weights) =
+        load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
+            |error| format!("failed to load model {}: {error}", args.model_dir.display()),
+        )?;
     let model = Model::new(config, weights, &construction_stream)
         .map_err(|error| format!("failed to construct NNIS model: {error}"))?;
 
@@ -376,8 +383,14 @@ fn execute_request(args: &Args, request: &RequestV3) -> Result<(Vec<u8>, f64, f6
 
 fn validate_model_token_range(request: &RequestV3, vocab_size: usize) -> Result<(), String> {
     for (field, tokens) in [
-        ("model_input_token_ids", request.model_input_token_ids.as_slice()),
-        ("evaluation_token_ids", request.evaluation_token_ids.as_slice()),
+        (
+            "model_input_token_ids",
+            request.model_input_token_ids.as_slice(),
+        ),
+        (
+            "evaluation_token_ids",
+            request.evaluation_token_ids.as_slice(),
+        ),
     ] {
         if let Some(&token) = tokens.iter().find(|&&token| token as usize >= vocab_size) {
             return Err(format!(
@@ -460,8 +473,14 @@ fn render_artifact(
         serde_json::to_value(retained_rows)
             .map_err(|error| format!("failed to serialize retained rows: {error}"))?,
     );
-    root.insert("schema".to_string(), Value::String(ARTIFACT_SCHEMA.to_string()));
-    root.insert("seed".to_string(), Value::Number(Number::from(request.seed)));
+    root.insert(
+        "schema".to_string(),
+        Value::String(ARTIFACT_SCHEMA.to_string()),
+    );
+    root.insert(
+        "seed".to_string(),
+        Value::Number(Number::from(request.seed)),
+    );
 
     let mut step_values = Vec::with_capacity(steps.len());
     for step in steps {
@@ -487,7 +506,8 @@ fn render_artifact(
         );
     }
     root.insert("steps".to_string(), Value::Array(step_values));
-    serde_json::to_vec(&root).map_err(|error| format!("failed to serialize evaluation artefact: {error}"))
+    serde_json::to_vec(&root)
+        .map_err(|error| format!("failed to serialize evaluation artefact: {error}"))
 }
 
 fn render_response(
@@ -538,8 +558,12 @@ fn render_response(
         "request_sha256".to_string(),
         Value::String(request_sha256.to_string()),
     );
-    root.insert("schema".to_string(), Value::String(RESPONSE_SCHEMA.to_string()));
-    serde_json::to_string(&root).map_err(|error| format!("failed to serialize backend response: {error}"))
+    root.insert(
+        "schema".to_string(),
+        Value::String(RESPONSE_SCHEMA.to_string()),
+    );
+    serde_json::to_string(&root)
+        .map_err(|error| format!("failed to serialize backend response: {error}"))
 }
 
 fn metric_value(
@@ -549,8 +573,8 @@ fn metric_value(
     preference: &str,
     value: f64,
 ) -> Result<Value, String> {
-    let number = Number::from_f64(value)
-        .ok_or_else(|| format!("metric {name} is not JSON-finite"))?;
+    let number =
+        Number::from_f64(value).ok_or_else(|| format!("metric {name} is not JSON-finite"))?;
     let mut metric = BTreeMap::<String, Value>::new();
     metric.insert("kind".to_string(), Value::String(kind.to_string()));
     metric.insert("name".to_string(), Value::String(name.to_string()));
@@ -579,7 +603,9 @@ fn require_ascii_text(name: &str, value: &str) -> Result<(), String> {
         return Err(format!("{name} must be non-empty"));
     }
     if !value.is_ascii() {
-        return Err(format!("{name} must be ASCII for canonical JSON interoperability"));
+        return Err(format!(
+            "{name} must be ASCII for canonical JSON interoperability"
+        ));
     }
     Ok(())
 }
@@ -659,11 +685,17 @@ mod tests {
             "model_input_token_ids".to_string(),
             serde_json::to_value(&model).unwrap(),
         );
-        trace.insert("schema".to_string(), Value::String(TRACE_SCHEMA.to_string()));
+        trace.insert(
+            "schema".to_string(),
+            Value::String(TRACE_SCHEMA.to_string()),
+        );
         let trace_sha256 = sha256_hex(&serde_json::to_vec(&trace).unwrap());
 
         let mut request = BTreeMap::<String, Value>::new();
-        request.insert("bytes_per_token".to_string(), Value::Number(Number::from(64_u64)));
+        request.insert(
+            "bytes_per_token".to_string(),
+            Value::Number(Number::from(64_u64)),
+        );
         request.insert(
             "evaluation_id".to_string(),
             Value::String("holdout-1".to_string()),
@@ -681,7 +713,10 @@ mod tests {
             serde_json::to_value(&logical).unwrap(),
         );
         request.insert("mode".to_string(), Value::String("candidate".to_string()));
-        request.insert("model_id".to_string(), Value::String("example/model".to_string()));
+        request.insert(
+            "model_id".to_string(),
+            Value::String("example/model".to_string()),
+        );
         request.insert(
             "model_input_token_ids".to_string(),
             serde_json::to_value(&model).unwrap(),
@@ -707,7 +742,10 @@ mod tests {
             "runtime_revision".to_string(),
             Value::String("a69734c33b26fac85810ef4ce63502fb7a65f228".to_string()),
         );
-        request.insert("schema".to_string(), Value::String(REQUEST_SCHEMA.to_string()));
+        request.insert(
+            "schema".to_string(),
+            Value::String(REQUEST_SCHEMA.to_string()),
+        );
         request.insert("seed".to_string(), Value::Number(Number::from(7_u64)));
         request.insert(
             "tokenizer_revision".to_string(),
@@ -757,8 +795,7 @@ mod tests {
     #[test]
     fn response_is_sorted_canonical_ascii_json() {
         let request = parse_request(&request_json(), &args()).unwrap();
-        let response = render_response(&request, &"c".repeat(64), b"artifact", 0.25, 0.5)
-            .unwrap();
+        let response = render_response(&request, &"c".repeat(64), b"artifact", 0.25, 0.5).unwrap();
         let reparsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(serde_json::to_string(&reparsed).unwrap(), response);
         assert!(response.is_ascii());
