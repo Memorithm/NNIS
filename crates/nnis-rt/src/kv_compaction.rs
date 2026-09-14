@@ -105,10 +105,7 @@ pub fn compact_kv_cache<T: DevicePod>(
     rebuild_and_swap(cache, &selections)
 }
 
-fn rebuild_and_swap<T: DevicePod>(
-    cache: &mut KvCache<T>,
-    selections: &[Vec<usize>],
-) -> Result<()> {
+fn rebuild_and_swap<T: DevicePod>(cache: &mut KvCache<T>, selections: &[Vec<usize>]) -> Result<()> {
     let config = cache.config();
     if selections.len() != config.layers {
         return Err(NnisError::invalid_input(format!(
@@ -147,13 +144,7 @@ fn rebuild_and_swap<T: DevicePod>(
             cache.stream().ctx(),
             scratch_elements,
         )?);
-        stage_selected_rows(
-            cache,
-            layer,
-            selection,
-            &scratch_keys,
-            &scratch_values,
-        )?;
+        stage_selected_rows(cache, layer, selection, &scratch_keys, &scratch_values)?;
         replacement.append_layer(layer, scratch_keys, scratch_values, retained)?;
     }
 
@@ -436,7 +427,9 @@ mod tests {
         assert_eq!(&values[0..4], &[1010.0, 1011.0, 1030.0, 1031.0]);
         assert_eq!(
             &values[8..16],
-            &[1110.0, 1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0]
+            &[
+                1110.0, 1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0
+            ]
         );
     }
 
