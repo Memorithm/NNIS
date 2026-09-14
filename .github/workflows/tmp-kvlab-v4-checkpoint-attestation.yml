@@ -25,6 +25,8 @@ jobs:
 
           p = Path("crates/nnis-cli/src/bin/nnis-kvlab-backend-v4.rs")
           s = p.read_text()
+          if "fn exact_checkpoint_spec(args: &Args)" in s:
+              raise SystemExit(0)
 
           old_import = 'use nnis_model::{load_model_from_safetensors, Model, SafetensorsLoadConfig};'
           new_import = '''use nnis_model::{
@@ -108,23 +110,18 @@ jobs:
           assert execute_marker in s
           s = s.replace(execute_marker, execute_replacement, 1)
 
-          load_marker = '''    let (config, weights) =
-              load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
-                  |error| format!("failed to load model {}: {error}", args.model_dir.display()),
-              )?;
-              let model = Model::new(config, weights, &construction_stream)
-                  .map_err(|error| format!("failed to construct NNIS model: {error}"))?;'''
-          load_replacement = '''    let (config, weights) =
-              load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
-                  |error| format!("failed to load model {}: {error}", args.model_dir.display()),
-              )?;
-              checkpoint_spec
-                  .validate_config(&config)
-                  .map_err(|error| format!("loaded model does not satisfy exact checkpoint {}: {error}", checkpoint_spec.name))?;
-              let model = Model::new(config, weights, &construction_stream)
-                  .map_err(|error| format!("failed to construct NNIS model: {error}"))?;'''
-          assert load_marker in s
-          s = s.replace(load_marker, load_replacement, 1)
+          model_marker = '    let model = Model::new(config, weights, &construction_stream)'
+          model_replacement = '''    checkpoint_spec
+              .validate_config(&config)
+              .map_err(|error| {
+                  format!(
+                      "loaded model does not satisfy exact checkpoint {}: {error}",
+                      checkpoint_spec.name
+                  )
+              })?;
+              let model = Model::new(config, weights, &construction_stream)'''
+          assert model_marker in s
+          s = s.replace(model_marker, model_replacement, 1)
 
           test_marker = '''    #[test]
               fn request_accepts_repeated_model_tokens_and_position_identity() {'''
@@ -142,7 +139,7 @@ jobs:
               }
 
               #[test]
-              fn file_digest_is_streamed_and_detects_checkpoint_mismatch() {
+              fn file_digest_is_streamed() {
                   let path = std::env::temp_dir().join(format!(
                       "nnis-kvlab-v4-sha-{}-{}.bin",
                       std::process::id(),
@@ -172,6 +169,9 @@ jobs:
           cargo fmt --all
       - name: Commit patch
         run: |
+          if git diff --quiet; then
+            exit 0
+          fi
           git config user.name "MEMOPERF"
           git config user.email "contact@checkupauto.fr"
           git add crates/nnis-cli/src/bin/nnis-kvlab-backend-v4.rs
