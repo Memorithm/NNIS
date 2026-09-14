@@ -108,7 +108,8 @@ pub use representation_plan::{
 pub use runtime::{InferenceSession, Model};
 pub use runtime_kernels::F32RuntimeKernels;
 pub use safetensors_loader::{
-    load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata,
+    load_model_from_safetensors, load_model_from_safetensors_f32, LoadedSafetensorsModel,
+    SafetensorsLoadConfig, SafetensorsMetadata,
 };
 pub use safetensors_preflight::{
     preflight_hf_safetensors_source, HfSafetensorsPreflightReportV1,

@@ -394,8 +394,12 @@ dependencies = [
 name = "nnis-cli"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "nnis",
  "nnis-model",
+ "serde",
+ "serde_json",
+ "sha2",
  "tokenizers",
 ]
 
