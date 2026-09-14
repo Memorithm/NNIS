@@ -19,6 +19,10 @@ path = "src/bin/nnis-hf.rs"
 name = "nnis-kvlab-backend"
 path = "src/bin/nnis-kvlab-backend.rs"
 
+[[bin]]
+name = "nnis-kvlab-backend-v4"
+path = "src/bin/nnis-kvlab-backend-v4.rs"
+
 [dependencies]
 base64 = "=0.13.1"
 nnis = { path = "../nnis" }
