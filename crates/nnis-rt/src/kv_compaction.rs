@@ -1,11 +1,10 @@
 //! Correctness-first physical compaction for the owned KV cache.
 //!
 //! A compaction keeps an explicit ordered subset of the currently active KV
-//! rows. K/V values are copied to device scratch first, then the selected rows
-//! are written back as the new contiguous active prefix through the public
-//! `KvCache` append path. This module does not reinterpret logical token
-//! positions or RoPE positions; callers remain responsible for preserving any
-//! higher-level logical-position state.
+//! rows. Selected K/V rows are captured into device scratch and rebuilt into a
+//! fresh cache before a mutating operation commits. This module does not
+//! reinterpret logical token positions or RoPE positions; callers remain
+//! responsible for preserving higher-level logical-position state.
 
 use crate::{DeviceBuffer, DevicePod, KvCache, NnisError, Result};
 use nnis_sys::{driver, CUdeviceptr};
@@ -13,23 +12,31 @@ use std::mem::size_of;
 use std::sync::Arc;
 
 /// Compact one KV-cache layer to the explicit active-row positions supplied by
-/// the caller.
+/// the caller while preserving every other layer.
 ///
 /// `retained_positions` must be strictly increasing, unique, and address rows
-/// in the layer's current active prefix. Empty input drops every active row for
-/// the layer. Supplying the exact identity selection is a synchronized no-op.
+/// in the layer's current active prefix. Supplying the exact identity selection
+/// is a synchronized no-op.
 ///
-/// The operation is synchronous and correctness-first. Selected K/V rows are
-/// staged into separate device allocations before the cache prefix is rebuilt,
-/// so source and destination regions never overlap during selection capture.
+/// For a non-empty non-identity selection, the complete replacement cache is
+/// built first and swapped into place only after every required transfer has
+/// completed. A validation, allocation, CUDA-copy, append, or synchronization
+/// failure therefore leaves the original cache logically unchanged.
 pub fn compact_kv_cache_layer<T: DevicePod>(
     cache: &mut KvCache<T>,
     layer: usize,
     retained_positions: &[usize],
 ) -> Result<()> {
+    let config = cache.config();
+    if layer >= config.layers {
+        return Err(NnisError::invalid_input(format!(
+            "KV compaction layer {layer} is out of range for {} layers",
+            config.layers
+        )));
+    }
+
     let active = cache.len(layer)?;
     validate_retained_positions(active, retained_positions)?;
-
     if retained_positions.len() == active && retained_positions.iter().copied().eq(0..active) {
         return cache.stream().synchronize();
     }
@@ -39,31 +46,22 @@ pub fn compact_kv_cache_layer<T: DevicePod>(
         return cache.reset_layer(layer);
     }
 
-    let config = cache.config();
-    let retained = retained_positions.len();
-    let scratch_elements = compaction_scratch_elements(config.heads, retained, config.head_dim)?;
-    let scratch_keys = Arc::new(DeviceBuffer::<T>::new(
-        cache.stream().ctx(),
-        scratch_elements,
-    )?);
-    let scratch_values = Arc::new(DeviceBuffer::<T>::new(
-        cache.stream().ctx(),
-        scratch_elements,
-    )?);
+    let mut selections = Vec::with_capacity(config.layers);
+    for current_layer in 0..config.layers {
+        let current_active = cache.len(current_layer)?;
+        let selection = if current_layer == layer {
+            retained_positions.to_vec()
+        } else {
+            (0..current_active).collect()
+        };
+        validate_retained_positions(current_active, &selection)?;
+        if !selection.is_empty() {
+            let _ = compaction_scratch_elements(config.heads, selection.len(), config.head_dim)?;
+        }
+        selections.push(selection);
+    }
 
-    stage_selected_rows(
-        cache,
-        layer,
-        retained_positions,
-        &scratch_keys,
-        &scratch_values,
-    )?;
-
-    // The scratch capture is complete before logical length changes. Rebuild
-    // the active prefix through the existing append path so cache accounting
-    // remains owned by KvCache rather than duplicated here.
-    cache.reset_layer(layer)?;
-    cache.append_layer(layer, scratch_keys, scratch_values, retained)
+    rebuild_and_swap(cache, &selections)
 }
 
 /// Compact every layer of a KV cache to the same explicit active-row selection.
@@ -102,11 +100,45 @@ pub fn compact_kv_cache<T: DevicePod>(
         return Ok(());
     }
 
-    let retained = retained_positions.len();
-    let scratch_elements = compaction_scratch_elements(config.heads, retained, config.head_dim)?;
+    let _ = compaction_scratch_elements(config.heads, retained_positions.len(), config.head_dim)?;
+    let selections = vec![retained_positions.to_vec(); config.layers];
+    rebuild_and_swap(cache, &selections)
+}
+
+fn rebuild_and_swap<T: DevicePod>(
+    cache: &mut KvCache<T>,
+    selections: &[Vec<usize>],
+) -> Result<()> {
+    let config = cache.config();
+    if selections.len() != config.layers {
+        return Err(NnisError::invalid_input(format!(
+            "KV compaction requires one selection per layer; got {} for {} layers",
+            selections.len(),
+            config.layers
+        )));
+    }
+
+    // Validate every layer and scratch shape before the first transfer is
+    // submitted. This keeps ordinary Rust validation errors outside the CUDA
+    // submission window.
+    for (layer, selection) in selections.iter().enumerate() {
+        let active = cache.len(layer)?;
+        validate_retained_positions(active, selection)?;
+        if !selection.is_empty() {
+            let _ = compaction_scratch_elements(config.heads, selection.len(), config.head_dim)?;
+        }
+    }
+
+    cache.stream().synchronize()?;
     let mut replacement = KvCache::<T>::new(cache.stream(), config)?;
 
-    for layer in 0..config.layers {
+    for (layer, selection) in selections.iter().enumerate() {
+        if selection.is_empty() {
+            continue;
+        }
+        let retained = selection.len();
+        let scratch_elements =
+            compaction_scratch_elements(config.heads, retained, config.head_dim)?;
         let scratch_keys = Arc::new(DeviceBuffer::<T>::new(
             cache.stream().ctx(),
             scratch_elements,
@@ -118,7 +150,7 @@ pub fn compact_kv_cache<T: DevicePod>(
         stage_selected_rows(
             cache,
             layer,
-            retained_positions,
+            selection,
             &scratch_keys,
             &scratch_values,
         )?;
@@ -163,16 +195,22 @@ fn stage_selected_rows<T: DevicePod>(
     scratch_values: &Arc<DeviceBuffer<T>>,
 ) -> Result<()> {
     let config = cache.config();
-    let row_bytes = config
-        .head_dim
+    let row_elements = config.head_dim;
+    let row_bytes = row_elements
         .checked_mul(size_of::<T>())
         .ok_or_else(|| NnisError::invalid_input("KV compaction row size overflows usize"))?;
     let retained = retained_positions.len();
     let stream = cache.stream();
     let context = stream.ctx();
-    context.set_current()?;
-    let api = driver::api()?;
+    let copy_count = config
+        .heads
+        .checked_mul(retained)
+        .ok_or_else(|| NnisError::invalid_input("KV compaction copy count overflows usize"))?;
 
+    // Resolve and range-check the complete transfer plan before submitting the
+    // first CUDA operation. `device_region_address` validates the whole row,
+    // not merely its starting element.
+    let mut copies = Vec::with_capacity(copy_count);
     for head in 0..config.heads {
         for (destination_position, &source_position) in retained_positions.iter().enumerate() {
             let source_element = layer
@@ -192,37 +230,64 @@ fn stage_selected_rows<T: DevicePod>(
                     NnisError::invalid_input("KV compaction destination offset overflows usize")
                 })?;
 
-            let source_key = device_address(cache.keys(), source_element)?;
-            let source_value = device_address(cache.values(), source_element)?;
-            let destination_key = device_address(scratch_keys.as_ref(), destination_element)?;
-            let destination_value = device_address(scratch_values.as_ref(), destination_element)?;
+            copies.push(KvRowCopy {
+                source_key: device_region_address(cache.keys(), source_element, row_elements)?,
+                source_value: device_region_address(cache.values(), source_element, row_elements)?,
+                destination_key: device_region_address(
+                    scratch_keys.as_ref(),
+                    destination_element,
+                    row_elements,
+                )?,
+                destination_value: device_region_address(
+                    scratch_values.as_ref(),
+                    destination_element,
+                    row_elements,
+                )?,
+                head,
+                source_position,
+                destination_position,
+            });
+        }
+    }
 
-            // SAFETY: all offsets were checked against live allocations, the
-            // owning CUDA context is current, and scratch/cache buffers remain
-            // borrowed until the synchronization below.
-            let key_rc = unsafe {
-                (api.cuMemcpyAsync)(destination_key, source_key, row_bytes, stream.raw())
-            };
-            if key_rc != 0 {
-                let error = NnisError::driver("cuMemcpyAsync(KV compaction key stage)", key_rc)
-                    .with("layer", layer)
-                    .with("head", head)
-                    .with("source_position", source_position)
-                    .with("destination_position", destination_position);
-                return stage_error(stream, scratch_keys, scratch_values, error);
-            }
-            // SAFETY: same proof as the key transfer above.
-            let value_rc = unsafe {
-                (api.cuMemcpyAsync)(destination_value, source_value, row_bytes, stream.raw())
-            };
-            if value_rc != 0 {
-                let error = NnisError::driver("cuMemcpyAsync(KV compaction value stage)", value_rc)
-                    .with("layer", layer)
-                    .with("head", head)
-                    .with("source_position", source_position)
-                    .with("destination_position", destination_position);
-                return stage_error(stream, scratch_keys, scratch_values, error);
-            }
+    context.set_current()?;
+    let api = driver::api()?;
+    for copy in copies {
+        // SAFETY: the entire plan was range-validated before submission, every
+        // allocation remains borrowed, and the stream belongs to this context.
+        let key_rc = unsafe {
+            (api.cuMemcpyAsync)(
+                copy.destination_key,
+                copy.source_key,
+                row_bytes,
+                stream.raw(),
+            )
+        };
+        if key_rc != 0 {
+            let error = NnisError::driver("cuMemcpyAsync(KV compaction key stage)", key_rc)
+                .with("layer", layer)
+                .with("head", copy.head)
+                .with("source_position", copy.source_position)
+                .with("destination_position", copy.destination_position);
+            return stage_error(stream, scratch_keys, scratch_values, error);
+        }
+
+        // SAFETY: same proof as the key transfer above.
+        let value_rc = unsafe {
+            (api.cuMemcpyAsync)(
+                copy.destination_value,
+                copy.source_value,
+                row_bytes,
+                stream.raw(),
+            )
+        };
+        if value_rc != 0 {
+            let error = NnisError::driver("cuMemcpyAsync(KV compaction value stage)", value_rc)
+                .with("layer", layer)
+                .with("head", copy.head)
+                .with("source_position", copy.source_position)
+                .with("destination_position", copy.destination_position);
+            return stage_error(stream, scratch_keys, scratch_values, error);
         }
     }
 
@@ -231,6 +296,17 @@ fn stage_selected_rows<T: DevicePod>(
         return Err(error.with("operation", "KV compaction staging synchronization"));
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct KvRowCopy {
+    source_key: CUdeviceptr,
+    source_value: CUdeviceptr,
+    destination_key: CUdeviceptr,
+    destination_value: CUdeviceptr,
+    head: usize,
+    source_position: usize,
+    destination_position: usize,
 }
 
 fn stage_error<T: DevicePod>(
@@ -257,10 +333,17 @@ fn retain_scratch_on_failed_sync<T: DevicePod>(
     std::mem::forget(Arc::clone(scratch_values));
 }
 
-fn device_address<T>(buffer: &DeviceBuffer<T>, element_offset: usize) -> Result<CUdeviceptr> {
-    if element_offset > buffer.len() {
+fn device_region_address<T>(
+    buffer: &DeviceBuffer<T>,
+    element_offset: usize,
+    elements: usize,
+) -> Result<CUdeviceptr> {
+    let end = element_offset
+        .checked_add(elements)
+        .ok_or_else(|| NnisError::invalid_input("KV compaction region overflows usize"))?;
+    if end > buffer.len() {
         return Err(NnisError::invalid_input(format!(
-            "KV compaction element offset {element_offset} exceeds buffer length {}",
+            "KV compaction region {element_offset}..{end} exceeds buffer length {}",
             buffer.len()
         )));
     }
@@ -291,47 +374,70 @@ mod tests {
     }
 
     #[test]
-    fn compaction_preserves_selected_device_rows_on_gpu() {
+    fn layer_compaction_preserves_other_layers_on_gpu() {
         let Some(context) = gpu_context() else {
             eprintln!("skipped: no CUDA device");
             return;
         };
         let stream = Stream::new(&context).unwrap();
         let mut cache =
-            KvCache::<f32>::new(&stream, KvCacheConfig::new(1, 2, 2, 4).unwrap()).unwrap();
-        let keys = Arc::new(
-            DeviceBuffer::from_host(
-                &context,
-                &stream,
-                &[
-                    10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0, 110.0, 111.0, 120.0, 121.0,
-                    130.0, 131.0, 140.0, 141.0,
-                ],
-            )
-            .unwrap(),
-        );
-        let values = Arc::new(
-            DeviceBuffer::from_host(
-                &context,
-                &stream,
-                &[
-                    1010.0, 1011.0, 1020.0, 1021.0, 1030.0, 1031.0, 1040.0, 1041.0, 1110.0, 1111.0,
-                    1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0,
-                ],
-            )
-            .unwrap(),
-        );
-        cache.append_layer(0, keys, values, 4).unwrap();
+            KvCache::<f32>::new(&stream, KvCacheConfig::new(2, 1, 2, 4).unwrap()).unwrap();
+
+        for layer in 0..2 {
+            let base = layer as f32 * 100.0;
+            let keys = Arc::new(
+                DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &[
+                        base + 10.0,
+                        base + 11.0,
+                        base + 20.0,
+                        base + 21.0,
+                        base + 30.0,
+                        base + 31.0,
+                        base + 40.0,
+                        base + 41.0,
+                    ],
+                )
+                .unwrap(),
+            );
+            let values = Arc::new(
+                DeviceBuffer::from_host(
+                    &context,
+                    &stream,
+                    &[
+                        base + 1010.0,
+                        base + 1011.0,
+                        base + 1020.0,
+                        base + 1021.0,
+                        base + 1030.0,
+                        base + 1031.0,
+                        base + 1040.0,
+                        base + 1041.0,
+                    ],
+                )
+                .unwrap(),
+            );
+            cache.append_layer(layer, keys, values, 4).unwrap();
+        }
 
         compact_kv_cache_layer(&mut cache, 0, &[0, 2]).unwrap();
         assert_eq!(cache.len(0).unwrap(), 2);
+        assert_eq!(cache.len(1).unwrap(), 4);
 
         let keys = cache.keys().to_vec(&stream).unwrap();
         let values = cache.values().to_vec(&stream).unwrap();
         assert_eq!(&keys[0..4], &[10.0, 11.0, 30.0, 31.0]);
-        assert_eq!(&keys[8..12], &[110.0, 111.0, 130.0, 131.0]);
+        assert_eq!(
+            &keys[8..16],
+            &[110.0, 111.0, 120.0, 121.0, 130.0, 131.0, 140.0, 141.0]
+        );
         assert_eq!(&values[0..4], &[1010.0, 1011.0, 1030.0, 1031.0]);
-        assert_eq!(&values[8..12], &[1110.0, 1111.0, 1130.0, 1131.0]);
+        assert_eq!(
+            &values[8..16],
+            &[1110.0, 1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0]
+        );
     }
 
     #[test]
