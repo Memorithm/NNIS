@@ -17,7 +17,7 @@ use std::sync::Arc;
 ///
 /// `retained_positions` must be strictly increasing, unique, and address rows
 /// in the layer's current active prefix. Empty input drops every active row for
-/// the layer. Supplying the exact identity selection is a no-op.
+/// the layer. Supplying the exact identity selection is a synchronized no-op.
 ///
 /// The operation is synchronous and correctness-first. Selected K/V rows are
 /// staged into separate device allocations before the cache prefix is rebuilt,
@@ -33,7 +33,7 @@ pub fn compact_kv_cache_layer<T: DevicePod>(
     if retained_positions.len() == active
         && retained_positions.iter().copied().eq(0..active)
     {
-        return Ok(());
+        return cache.stream().synchronize();
     }
 
     if retained_positions.is_empty() {
@@ -155,7 +155,11 @@ fn stage_selected_rows<T: DevicePod>(
         }
     }
 
-    stream.synchronize()
+    if let Err(error) = stream.synchronize() {
+        retain_scratch_on_failed_sync(scratch_keys, scratch_values);
+        return Err(error.with("operation", "KV compaction staging synchronization"));
+    }
+    Ok(())
 }
 
 fn stage_error<T: DevicePod>(
@@ -165,14 +169,21 @@ fn stage_error<T: DevicePod>(
     error: NnisError,
 ) -> Result<()> {
     if stream.synchronize().is_err() {
-        // The driver did not prove prior transfers stopped touching scratch.
-        // Leak one retained ownership reference for each destination allocation
-        // rather than risk freeing device memory still referenced by CUDA.
-        std::mem::forget(Arc::clone(scratch_keys));
-        std::mem::forget(Arc::clone(scratch_values));
+        retain_scratch_on_failed_sync(scratch_keys, scratch_values);
         return Err(error.with("synchronization", "failed after compaction staging error"));
     }
     Err(error)
+}
+
+fn retain_scratch_on_failed_sync<T: DevicePod>(
+    scratch_keys: &Arc<DeviceBuffer<T>>,
+    scratch_values: &Arc<DeviceBuffer<T>>,
+) {
+    // CUDA did not prove prior transfers stopped touching these allocations.
+    // Leak one retained ownership reference for each destination rather than
+    // risk freeing device memory still referenced by the driver.
+    std::mem::forget(Arc::clone(scratch_keys));
+    std::mem::forget(Arc::clone(scratch_values));
 }
 
 fn device_address<T>(buffer: &DeviceBuffer<T>, element_offset: usize) -> Result<CUdeviceptr> {
