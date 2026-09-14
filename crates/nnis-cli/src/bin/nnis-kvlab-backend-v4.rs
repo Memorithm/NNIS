@@ -143,8 +143,8 @@ fn parse_request(payload: &str, args: &Args) -> Result<RequestV4, String> {
     if canonical != payload {
         return Err("backend request JSON must be canonical".to_string());
     }
-    let request: RequestV4 =
-        serde_json::from_value(value).map_err(|error| format!("invalid request schema: {error}"))?;
+    let request: RequestV4 = serde_json::from_value(value)
+        .map_err(|error| format!("invalid request schema: {error}"))?;
     validate_request(&request, args)?;
     Ok(request)
 }
