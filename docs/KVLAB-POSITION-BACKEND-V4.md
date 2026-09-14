@@ -27,3 +27,21 @@ For a candidate request, NNIS calls `InferenceSession::compact_kv_cache_rows(ret
 The baseline retains every input position and does not compact the cache. A candidate equal to the full baseline is rejected.
 
 This backend is an execution mechanism, not evidence that a particular campaign has run. It does not infer allocator release, HBM residency reduction, avoided memory traffic, latency or throughput improvements from row compaction. Those claims require separate measurements. Quality claims are limited to the explicit teacher-forced metrics returned for an actually executed request.
+
+## Source dtype versus execution dtype
+
+The backend explicitly calls `load_model_from_safetensors_f32`. The loaded
+source configuration is validated against the exact BF16 checkpoint spec,
+while the actual device weight graph and execution configuration are F32.
+BF16 payloads are widened on the host before upload and retain their exact
+high 16 bits; F32 inputs remain unchanged. The default Safetensors loader
+continues to preserve source storage for existing callers. A tied LM head
+is materialized from the already-F32 embedding in this opt-in path.
+
+The older backend at revision `58e7db8e1c4b471a7fe82a4beba11904240c4e89`
+loaded BF16 device tensors before calling the F32-only decoder, which
+rejects that configuration. Frozen KVLab R1 inputs still bind that old
+revision and must not be silently relabelled. Executing the repaired path
+requires a separately preregistered successor runtime revision. CPU tests
+cover all 65,536 BF16 encodings, transpose orientation, source identity and
+unchanged default loading. They are not evidence of a CUDA campaign run.

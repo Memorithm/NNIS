@@ -454,6 +454,57 @@ fn transpose_matrix<T: Copy + Default>(values: Vec<T>, rows: usize, cols: usize)
     Ok(output)
 }
 
+/// Widen BF16 source bits before upload; never relabel a BF16 allocation as F32.
+fn materialize_host_dtype(host: HostTensor, execution_dtype: WeightDType) -> Result<HostTensor> {
+    match (host, execution_dtype) {
+        (HostTensor::Bf16(values), WeightDType::F32) => Ok(HostTensor::F32(
+            values
+                .into_iter()
+                .map(|bits| f32::from_bits(u32::from(bits) << 16))
+                .collect(),
+        )),
+        (host @ HostTensor::F32(_), WeightDType::F32)
+        | (host @ HostTensor::Bf16(_), WeightDType::Bf16) => Ok(host),
+        (HostTensor::F32(_), WeightDType::Bf16) => Err(NnisError::unsupported(
+            "Safetensors loading does not implicitly narrow F32 weights to BF16",
+        )),
+    }
+}
+
+/// Source identity and resident execution representation are separate contracts.
+#[derive(Debug)]
+pub struct LoadedSafetensorsModel {
+    pub source_config: ModelConfig,
+    pub execution_config: ModelConfig,
+    pub weights: ModelWeights,
+}
+
+fn execution_config_for_dtype(
+    source: &ModelConfig,
+    dtype: Option<WeightDType>,
+) -> Result<ModelConfig> {
+    source.validate_execution_support()?;
+    let mut execution = source.clone();
+    if let Some(dtype) = dtype {
+        execution.weight_dtype = dtype;
+    }
+    execution.validate_execution_support()?;
+    Ok(execution)
+}
+
+/// Explicit F32 materialization of supported F32/BF16 local source tensors.
+///
+/// The source configuration retains its original dtype for checkpoint validation.
+/// Every resident tensor, including a tied LM head, is actually stored as F32.
+/// This is a loading capability, not numerical parity or performance evidence.
+pub fn load_model_from_safetensors_f32(
+    context: &Arc<Context>,
+    stream: &Stream,
+    config: &SafetensorsLoadConfig,
+) -> Result<LoadedSafetensorsModel> {
+    load_model_from_safetensors_inner(context, stream, config, Some(WeightDType::F32))
+}
+
 fn upload_host_tensor(
     context: &Arc<Context>,
     stream: &Stream,
@@ -488,6 +539,7 @@ fn load_shard(
     stream: &Stream,
     path: &Path,
     metadata: &SafetensorsMetadata,
+    execution_dtype: WeightDType,
     tensors: &mut HashMap<String, (Vec<usize>, DeviceTensor)>,
 ) -> Result<()> {
     let data =
@@ -537,6 +589,7 @@ fn load_shard(
                 )?),
             };
         }
+        let host = materialize_host_dtype(host, execution_dtype)?;
         let device = upload_host_tensor(context, stream, host)?;
         insert_tensor(tensors, spec.internal_name, spec.internal_shape, device)?;
     }
@@ -673,6 +726,16 @@ pub fn load_model_from_safetensors(
     stream: &Stream,
     config: &SafetensorsLoadConfig,
 ) -> Result<(ModelConfig, ModelWeights)> {
+    let loaded = load_model_from_safetensors_inner(context, stream, config, None)?;
+    Ok((loaded.execution_config, loaded.weights))
+}
+
+fn load_model_from_safetensors_inner(
+    context: &Arc<Context>,
+    stream: &Stream,
+    config: &SafetensorsLoadConfig,
+    execution_dtype: Option<WeightDType>,
+) -> Result<LoadedSafetensorsModel> {
     if !Arc::ptr_eq(context, stream.ctx()) {
         return Err(NnisError::invalid_input(
             "Safetensors loader context and upload stream must match",
@@ -680,15 +743,27 @@ pub fn load_model_from_safetensors(
     }
     let directory = Path::new(&config.local_dir);
     let metadata = parse_metadata(directory)?;
-    let model_config = metadata_to_model_config(&metadata)?;
+    let source_config = metadata_to_model_config(&metadata)?;
+    let model_config = execution_config_for_dtype(&source_config, execution_dtype)?;
     let files = discover_weight_files(directory)?;
     let mut tensors = HashMap::new();
     for path in &files {
-        load_shard(context, stream, path, &metadata, &mut tensors)?;
+        load_shard(
+            context,
+            stream,
+            path,
+            &metadata,
+            model_config.weight_dtype,
+            &mut tensors,
+        )?;
     }
     add_tied_lm_head_if_needed(context, stream, &metadata, &mut tensors)?;
     let weights = build_model_weights(tensors, &model_config)?;
-    Ok((model_config, weights))
+    Ok(LoadedSafetensorsModel {
+        source_config,
+        execution_config: model_config,
+        weights,
+    })
 }
 
 #[cfg(test)]
@@ -715,6 +790,79 @@ mod tests {
         "torch_dtype": "bfloat16",
         "vocab_size": 49152
     }"#;
+
+    #[test]
+    fn f32_materialization_preserves_every_bf16_encoding() {
+        let source: Vec<u16> = (0..=u16::MAX).collect();
+        let HostTensor::F32(widened) =
+            materialize_host_dtype(HostTensor::Bf16(source.clone()), WeightDType::F32).unwrap()
+        else {
+            panic!("expected actual F32 storage")
+        };
+        for (&bits, value) in source.iter().zip(&widened) {
+            assert_eq!(value.to_bits(), u32::from(bits) << 16);
+        }
+        let HostTensor::Bf16(preserved) =
+            materialize_host_dtype(HostTensor::Bf16(source.clone()), WeightDType::Bf16).unwrap()
+        else {
+            panic!("source loader changed dtype")
+        };
+        assert_eq!(source, preserved);
+    }
+
+    #[test]
+    fn f32_source_payload_is_preserved_without_narrowing() {
+        let bits = [0_u32, 0x80000000, 0x3f800001, 0x7fc01234];
+        let values: Vec<f32> = bits.iter().copied().map(f32::from_bits).collect();
+        let HostTensor::F32(preserved) =
+            materialize_host_dtype(HostTensor::F32(values.clone()), WeightDType::F32).unwrap()
+        else {
+            panic!("expected F32")
+        };
+        assert_eq!(
+            preserved
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            bits
+        );
+        assert!(materialize_host_dtype(HostTensor::F32(values), WeightDType::Bf16).is_err());
+    }
+
+    #[test]
+    fn source_checkpoint_identity_is_not_relabelled_for_execution() {
+        for spec in [&crate::SMOLLM2_135M_BF16, &crate::TINYLLAMA_1P1B_CHAT_BF16] {
+            let source = spec.expected_config();
+            spec.validate_config(&source).unwrap();
+            let execution = execution_config_for_dtype(&source, Some(WeightDType::F32)).unwrap();
+            assert_eq!(execution.weight_dtype, WeightDType::F32);
+            assert_eq!(source.weight_dtype, WeightDType::Bf16);
+            assert!(spec.validate_config(&execution).is_err());
+            let mut restored = execution;
+            restored.weight_dtype = source.weight_dtype;
+            assert_eq!(restored, source);
+            assert_eq!(execution_config_for_dtype(&source, None).unwrap(), source);
+        }
+    }
+
+    #[test]
+    fn invalid_source_geometry_cannot_be_hidden_by_materialization() {
+        let mut source = crate::SMOLLM2_135M_BF16.expected_config();
+        source.num_attention_heads = 0;
+        assert!(execution_config_for_dtype(&source, Some(WeightDType::F32)).is_err());
+    }
+
+    #[test]
+    fn bf16_transpose_and_widening_preserve_matrix_orientation() {
+        let bits = vec![0x3f80_u16, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0];
+        let transposed = transpose_matrix(bits, 2, 3).unwrap();
+        let HostTensor::F32(values) =
+            materialize_host_dtype(HostTensor::Bf16(transposed), WeightDType::F32).unwrap()
+        else {
+            panic!("expected F32")
+        };
+        assert_eq!(values, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    }
 
     #[test]
     fn smollm2_config_is_read_without_hardcoded_dimensions() {

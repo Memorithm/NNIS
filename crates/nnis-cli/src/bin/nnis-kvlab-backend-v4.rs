@@ -1,6 +1,6 @@
 use nnis::{Context, Device, Stream};
 use nnis_model::{
-    load_model_from_safetensors, ExactDecoderCheckpointSpec, Model, SafetensorsLoadConfig,
+    load_model_from_safetensors_f32, ExactDecoderCheckpointSpec, Model, SafetensorsLoadConfig,
     SMOLLM2_135M_BF16, TINYLLAMA_1P1B_CHAT_BF16,
 };
 use serde::Deserialize;
@@ -369,18 +369,22 @@ fn execute_request(args: &Args, request: &RequestV4) -> Result<(Vec<u8>, f64, f6
         revision: None,
         local_dir: args.model_dir.to_string_lossy().into_owned(),
     };
-    let (config, weights) =
-        load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
-            |error| format!("failed to load model {}: {error}", args.model_dir.display()),
-        )?;
-    checkpoint_spec.validate_config(&config).map_err(|error| {
-        format!(
-            "loaded model does not satisfy exact checkpoint {}: {error}",
-            checkpoint_spec.name
-        )
-    })?;
-    let model = Model::new(config, weights, &construction_stream)
-        .map_err(|error| format!("failed to construct NNIS model: {error}"))?;
+    let loaded = load_model_from_safetensors_f32(&context, &construction_stream, &load_config)
+        .map_err(|error| format!("failed to load model {}: {error}", args.model_dir.display()))?;
+    checkpoint_spec
+        .validate_config(&loaded.source_config)
+        .map_err(|error| {
+            format!(
+                "loaded model does not satisfy exact checkpoint {}: {error}",
+                checkpoint_spec.name
+            )
+        })?;
+    let model = Model::new(
+        loaded.execution_config,
+        loaded.weights,
+        &construction_stream,
+    )
+    .map_err(|error| format!("failed to construct NNIS model: {error}"))?;
 
     validate_model_token_range(request, model.config().vocab_size)?;
     let decoded_evaluation_tokens = request
