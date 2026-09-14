@@ -1,0 +1,71 @@
+schema_version: 1
+kind: nnis_soup_hf_transport_hardening_record
+recorded_on: "2026-09-14"
+status: merged_software_contract_verified
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
+
+implementation:
+  pull_request: 148
+  pull_request_url: https://github.com/Memorithm/NNIS/pull/148
+  exact_head: ef976ac8936e8c10ba7b2ebca46ee9b5004e3fca
+  merge_commit: 5436736002834dd6dd7d5ace8c1c044b47aed18f
+  contract: nnis.hf-generation@1.0.0
+  media_type: application/vnd.nnis.hf-generation.v1+json
+  successful_wire_contract_changed: false
+  native_model_runtime_changed: false
+  source_dtype_or_execution_precision_changed: false
+  model_format_changed: false
+  rust_msrv_changed: false
+
+verification:
+  exact_head_ci:
+    number: 434
+    run_id: 34899987445
+    conclusion: success
+    rust_1_77: success
+  post_merge_ci:
+    number: 435
+    run_id: 34900319878
+    conclusion: success
+  new_cpu_transport_tests: 12
+  local_existing_self_test: passed
+  local_new_unit_tests: passed
+  local_python_syntax: passed
+  real_soup_training_executed_in_this_slice: false
+  real_cuda_generation_executed_in_this_slice: false
+
+repairs:
+  - enforce_16_MiB_per_stream_before_retaining_output_not_after_unbounded_subprocess_run
+  - concurrently_drain_POSIX_stdout_and_stderr_with_bounded_reads
+  - enforce_positive_finite_native_deadline_including_closed_pipe_child_completion
+  - kill_and_reap_direct_native_child_on_capture_failure
+  - preserve_outer_Hub_process_group_for_run_cancellation
+  - atomically_publish_complete_synced_JSON_using_no_replace_hard_link
+  - preserve_concurrent_publishers_and_dangling_destination_symlinks
+  - reject_boolean_or_noninteger_device_and_token_requests
+  - reject_NUL_and_invalid_UTF8_prompt_before_spawn
+
+limits:
+  - POSIX_capture_only
+  - hard_link_capable_storage_and_trusted_parent_directories_required
+  - no_total_process_RSS_limit
+  - no_standalone_descendant_supervision_or_OS_sandbox_claim
+  - no_directory_entry_durability_after_power_loss_claim
+  - private_temporary_cleanup_is_best_effort
+  - OS_argv_limits_can_be_stricter_than_prompt_byte_policy
+  - serialized_JSON_can_exceed_raw_stream_lengths_due_to_escaping
+  - no_quality_performance_numerical_equivalence_or_promotion_claim
+
+cross_repository_transfer:
+  repository: Memorithm/scirust-hub
+  pull_request: 44
+  pull_request_url: https://github.com/Memorithm/scirust-hub/pull/44
+  purpose: preserve_single_validated_snapshot_bytes_and_complete_no_replace_publication_at_Hub_boundary
+  domain_semantics_remain_owned_by: NNIS
+
+next_evidence_gate: >-
+  Deploy exact verified wrapper and native binary on an appropriate target, then
+  run the SOUP F32 artifact workflow with real model inputs and retain separate
+  preflight and generation artifacts. Do not infer physical qualification from
+  synthetic subprocess or filesystem tests.
