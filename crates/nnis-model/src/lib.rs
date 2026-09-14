@@ -28,6 +28,7 @@ mod fusion_plan;
 mod kernels;
 mod projection_plan;
 mod representation_plan;
+#[path = "runtime/mod.rs"]
 mod runtime;
 mod runtime_kernels;
 mod safetensors_loader;
