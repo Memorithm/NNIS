@@ -56,21 +56,44 @@ On successful native generation the process writes one new JSON result and print
 
 The process does not strip the newline printed by the native CLI or reconstruct generated text from logs. `output.stdout_utf8` is the captured native stdout exactly as decoded from UTF-8 bytes, and `output.stdout_sha256` binds the original bytes.
 
-If native generation exits unsuccessfully, produces an oversized capture, cannot be executed, or emits invalid UTF-8 on a successful run, the process fails and does not publish the result artifact.
+If native generation exits unsuccessfully, produces an oversized capture, times out, cannot be executed, or emits invalid UTF-8 on a successful run, the process fails and does not publish the result artifact.
 
-The result path must not already exist. This prevents a failed or retried process from silently replacing an earlier immutable result.
+The result path must not already exist. This prevents a failed or retried process from silently replacing an earlier immutable result. JSON is written and synced to a private temporary file in the destination directory, then published by an atomic, no-replace hard link. A write, sync or link failure cannot expose a partial result at the destination. A concurrent publisher's file or symlink is neither overwritten nor removed. Filesystems without hard-link support fail closed; there is no non-atomic fallback. Temporary-file cleanup is best effort and cannot erase a competing destination. This requires trusted parent directories and does not promise directory-entry durability after power loss or hostile-filesystem isolation.
 
 ## Process bounds
 
 Version 1 deliberately adds bounded orchestration limits without changing native generation semantics:
 
-- prompt: 1 to 1 MiB of UTF-8;
-- `max-new-tokens`: 1 to 65,536;
+- prompt: 1 to 1 MiB of UTF-8, without NUL; operating-system argument-size limits may reject a smaller prompt;
+- `max-new-tokens`: integer 1 to 65,536 (booleans are not integers in this contract);
 - stdout capture: at most 16 MiB;
 - stderr capture: at most 16 MiB;
-- CUDA device ordinal: non-negative.
+- CUDA device ordinal: integer 0 to 2,147,483,647;
+- native execution deadline: 3,600 seconds by default, configurable with positive finite `--timeout-seconds`.
 
-The native NNIS model/session checks remain authoritative for model capacity, CUDA availability and all decoder execution failures.
+The two POSIX pipes are drained concurrently and incrementally. Their limits are checked before appending bytes to each retained capture, not after `subprocess.run` has buffered all output. At most one overflow-detection byte is read beyond a stream's budget. The retained captures, UTF-8 decoding and JSON serialization still consume host memory; this is not a total-process RSS limit. JSON escaping can enlarge a report beyond its raw stream lengths. A consumer such as Hub may impose a separate serialized-report size limit.
+
+The deadline covers pipe draining and child completion after process creation. It also handles a child that closes both streams without exiting. On overflow, timeout or read failure, the direct native child is killed and reaped and the pipes are closed. The child does not create a separate process group, preserving Hub's outer run-group cancellation. This is not standalone descendant supervision, network sandboxing, or a hard real-time guarantee for process creation/OS cleanup. Non-POSIX capture is explicitly rejected before spawning a child.
+
+For an explicit shorter process budget:
+
+```bash
+python3 tools/nnis_hub_hf_generate.py \
+  --model ./merged-nnis --prompt "Hello" \
+  --timeout-seconds 120 \
+  --result ./artifacts/generation-120s.json
+```
+
+The timeout is wrapper policy, not a decoder parameter or measured performance claim. Existing successful JSON fields, native argv, model admission, precision and sampling semantics are unchanged. The native NNIS model/session checks remain authoritative for model capacity, CUDA availability and all decoder execution failures.
+
+CPU-only regression checks:
+
+```bash
+python3 tools/nnis_hub_hf_generate.py --self-test
+python3 -m unittest tools/test_nnis_hub_hf_generate.py -v
+```
+
+These checks use synthetic child processes, not real models or CUDA evidence.
 
 ## Relationship to SOUP and Hub
 

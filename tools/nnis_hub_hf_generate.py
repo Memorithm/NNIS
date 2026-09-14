@@ -13,9 +13,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import selectors
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +28,10 @@ MEDIA_TYPE = "application/vnd.nnis.hf-generation.v1+json"
 MAX_PROMPT_BYTES = 1024 * 1024
 MAX_NEW_TOKENS = 65_536
 MAX_CAPTURE_BYTES = 16 * 1024 * 1024
+MAX_DEVICE_ORDINAL = 2_147_483_647
+DEFAULT_TIMEOUT_SECONDS = 3600.0
+READ_CHUNK_BYTES = 64 * 1024
+MAX_ERROR_BYTES = 4096
 
 
 class ProcessContractError(ValueError):
@@ -51,16 +58,21 @@ def _validate_request(
 ) -> None:
     _require_model_directory(model_dir)
     _require_tokenizer(tokenizer_file)
-    prompt_bytes = prompt.encode("utf-8")
+    if not isinstance(prompt, str) or "\0" in prompt:
+        raise ProcessContractError("prompt must be a string without NUL bytes")
+    try:
+        prompt_bytes = prompt.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise ProcessContractError("prompt must be valid UTF-8") from error
     if not prompt_bytes or len(prompt_bytes) > MAX_PROMPT_BYTES:
         raise ProcessContractError(
             f"prompt must encode to 1..={MAX_PROMPT_BYTES} UTF-8 bytes; got {len(prompt_bytes)}"
         )
-    if device_ordinal < 0:
-        raise ProcessContractError("device ordinal must be non-negative")
-    if not 1 <= max_new_tokens <= MAX_NEW_TOKENS:
+    if type(device_ordinal) is not int or not 0 <= device_ordinal <= MAX_DEVICE_ORDINAL:
+        raise ProcessContractError(f"device ordinal must be an integer in [0, {MAX_DEVICE_ORDINAL}]")
+    if type(max_new_tokens) is not int or not 1 <= max_new_tokens <= MAX_NEW_TOKENS:
         raise ProcessContractError(
-            f"max-new-tokens must be in [1, {MAX_NEW_TOKENS}]; got {max_new_tokens}"
+            f"max-new-tokens must be an integer in [1, {MAX_NEW_TOKENS}]; got {max_new_tokens}"
         )
 
 
@@ -72,7 +84,23 @@ def _run_native_generation(
     prompt: str,
     device_ordinal: int,
     max_new_tokens: int,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> tuple[bytes, bytes]:
+    """Drain both POSIX pipes incrementally, enforcing limits before retaining bytes.
+
+    The child stays in the caller's process group so Hub cancellation can reach
+    the entire run. On failure we kill/reap the direct native child; this is not
+    hostile-code isolation or independent descendant supervision.
+    """
+    if os.name != "posix":
+        raise ProcessContractError("bounded native generation capture requires POSIX")
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or not math.isfinite(timeout_seconds)
+        or timeout_seconds <= 0
+    ):
+        raise ProcessContractError("timeout-seconds must be positive and finite")
     command = [
         nnis_hf_bin,
         "generate",
@@ -88,28 +116,67 @@ def _run_native_generation(
         str(max_new_tokens),
     ]
     try:
-        completed = subprocess.run(
+        child = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            check=False,
             shell=False,
+            bufsize=0,
         )
     except OSError as error:
         raise RuntimeError(f"cannot execute native NNIS generator {nnis_hf_bin!r}: {error}") from error
 
-    if len(completed.stdout) > MAX_CAPTURE_BYTES or len(completed.stderr) > MAX_CAPTURE_BYTES:
-        raise RuntimeError(
-            "native NNIS generation output exceeds the process-contract capture budget"
-        )
-    if completed.returncode != 0:
-        stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+    streams = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout_seconds
+    try:
+        with selectors.DefaultSelector() as selector:
+            for label, pipe in (("stdout", child.stdout), ("stderr", child.stderr)):
+                assert pipe is not None
+                os.set_blocking(pipe.fileno(), False)
+                selector.register(pipe, selectors.EVENT_READ, label)
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("native NNIS generation exceeded timeout-seconds")
+                for key, _events in selector.select(timeout=min(remaining, 0.1)):
+                    output = streams[key.data]
+                    # Read at most one overflow byte; never retain it in the capture.
+                    size = min(READ_CHUNK_BYTES, MAX_CAPTURE_BYTES - len(output) + 1)
+                    try:
+                        chunk = os.read(key.fd, size)
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(key.fileobj)
+                        key.fileobj.close()
+                        continue
+                    if len(output) + len(chunk) > MAX_CAPTURE_BYTES:
+                        raise RuntimeError(
+                            f"native NNIS {key.data} exceeds the process-contract capture budget"
+                        )
+                    output.extend(chunk)
+        # EOF alone is not process completion: a child can close both pipes and hang.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("native NNIS generation exceeded timeout-seconds")
+        try:
+            returncode = child.wait(timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError("native NNIS generation exceeded timeout-seconds") from error
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait()
+        for pipe in (child.stdout, child.stderr):
+            if pipe is not None:
+                pipe.close()
+
+    if returncode != 0:
+        stderr = bytes(streams["stderr"][:MAX_ERROR_BYTES]).decode("utf-8", errors="replace").strip()
         detail = f": {stderr}" if stderr else ""
-        raise RuntimeError(
-            f"native nnis-hf generate failed with exit {completed.returncode}{detail}"
-        )
-    return completed.stdout, completed.stderr
+        raise RuntimeError(f"native nnis-hf generate failed with exit {returncode}{detail}")
+    return bytes(streams["stdout"]), bytes(streams["stderr"])
 
 
 def _decode_utf8(data: bytes, label: str) -> str:
@@ -165,19 +232,35 @@ def build_result(
 
 
 def _write_new_json(path: Path, value: dict[str, Any]) -> None:
+    """Publish complete JSON with an atomic no-replace link in a trusted directory.
+
+    Only our temporary file is cleaned up. A concurrent publisher's destination
+    must never be overwritten or removed, including when it is a symlink.
+    """
     if path.exists() or path.is_symlink():
         raise ProcessContractError(f"result path already exists: {path}")
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+    encoded = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    temporary: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("x", encoding="utf-8", newline="\n") as handle:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=path.parent, prefix=".nnis-result-", delete=False) as handle:
+            temporary = Path(handle.name)
             handle.write(encoded)
             handle.flush()
             os.fsync(handle.fileno())
+        # Unlike rename/replace, link fails atomically if another writer won.
+        os.link(temporary, path)
     except FileExistsError as error:
         raise ProcessContractError(f"result path already exists: {path}") from error
     except OSError as error:
         raise RuntimeError(f"cannot write generation result {path}: {error}") from error
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except OSError:
+                # Do not mask a primary failure or turn a published result into failure.
+                pass
 
 
 def execute(
@@ -189,6 +272,7 @@ def execute(
     device_ordinal: int,
     max_new_tokens: int,
     result_path: Path,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     resolved_tokenizer = tokenizer_file or model_dir / "tokenizer.json"
     _validate_request(
@@ -207,6 +291,7 @@ def execute(
         prompt=prompt,
         device_ordinal=device_ordinal,
         max_new_tokens=max_new_tokens,
+        timeout_seconds=timeout_seconds,
     )
     result = build_result(
         model_dir=model_dir,
@@ -334,6 +419,7 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--result", type=Path)
     parser.add_argument("--nnis-hf-bin", default="nnis-hf")
+    parser.add_argument("--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -353,6 +439,7 @@ def main() -> int:
             device_ordinal=args.device,
             max_new_tokens=args.max_new_tokens,
             result_path=args.result,
+            timeout_seconds=args.timeout_seconds,
         )
     except ProcessContractError as error:
         print(f"error: {error}", file=os.sys.stderr)
