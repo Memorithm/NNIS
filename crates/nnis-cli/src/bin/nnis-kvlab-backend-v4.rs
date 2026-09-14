@@ -1,5 +1,8 @@
 use nnis::{Context, Device, Stream};
-use nnis_model::{load_model_from_safetensors, Model, SafetensorsLoadConfig};
+use nnis_model::{
+    load_model_from_safetensors, ExactDecoderCheckpointSpec, Model, SafetensorsLoadConfig,
+    SMOLLM2_135M_BF16, TINYLLAMA_1P1B_CHAT_BF16,
+};
 use serde::Deserialize;
 use serde_json::{Number, Value};
 use sha2::{Digest, Sha256};
@@ -26,6 +29,56 @@ struct Args {
     runtime_backend: String,
     runtime_revision: String,
     device_ordinal: i32,
+}
+
+fn exact_checkpoint_spec(args: &Args) -> Result<&'static ExactDecoderCheckpointSpec, String> {
+    for spec in [&SMOLLM2_135M_BF16, &TINYLLAMA_1P1B_CHAT_BF16] {
+        if args.model_id == spec.source_repo {
+            if args.model_revision != spec.source_revision {
+                return Err(format!(
+                    "model revision {:?} does not match exact checkpoint {} revision {}",
+                    args.model_revision, spec.name, spec.source_revision
+                ));
+            }
+            return Ok(spec);
+        }
+    }
+    Err(format!(
+        "model identity {}@{} has no exact NNIS checkpoint specification for KVLab v4 evidence",
+        args.model_id, args.model_revision
+    ))
+}
+
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|error| format!("failed to open {} for SHA-256: {error}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; 1024 * 1024];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|error| format!("failed to read {} for SHA-256: {error}", path.display()))?;
+        if count == 0 {
+            break;
+        }
+        digest.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn validate_local_checkpoint_artifact(
+    args: &Args,
+    spec: &ExactDecoderCheckpointSpec,
+) -> Result<(), String> {
+    let path = args.model_dir.join("model.safetensors");
+    let actual = sha256_file(&path)?;
+    if actual != spec.source_model_sha256 {
+        return Err(format!(
+            "local model.safetensors SHA-256 mismatch for {}: got {}, expected {}",
+            spec.name, actual, spec.source_model_sha256
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,6 +318,9 @@ fn trace_sha256(request: &RequestV4) -> Result<String, String> {
 }
 
 fn execute_request(args: &Args, request: &RequestV4) -> Result<(Vec<u8>, f64, f64), String> {
+    let checkpoint_spec = exact_checkpoint_spec(args)?;
+    validate_local_checkpoint_artifact(args, checkpoint_spec)?;
+
     let device = Device::get(args.device_ordinal).map_err(|error| {
         format!(
             "failed to select CUDA device {}: {error}",
@@ -284,6 +340,12 @@ fn execute_request(args: &Args, request: &RequestV4) -> Result<(Vec<u8>, f64, f6
         load_model_from_safetensors(&context, &construction_stream, &load_config).map_err(
             |error| format!("failed to load model {}: {error}", args.model_dir.display()),
         )?;
+    checkpoint_spec.validate_config(&config).map_err(|error| {
+        format!(
+            "loaded model does not satisfy exact checkpoint {}: {error}",
+            checkpoint_spec.name
+        )
+    })?;
     let model = Model::new(config, weights, &construction_stream)
         .map_err(|error| format!("failed to construct NNIS model: {error}"))?;
 
@@ -720,6 +782,38 @@ mod tests {
         );
         request.insert("trace_sha256".to_string(), Value::String(trace_sha256));
         serde_json::to_string(&request).unwrap()
+    }
+
+    #[test]
+    fn exact_checkpoint_identity_requires_registered_source_and_revision() {
+        let mut configured = args();
+        configured.model_id = SMOLLM2_135M_BF16.source_repo.to_string();
+        configured.model_revision = SMOLLM2_135M_BF16.source_revision.to_string();
+        let spec = exact_checkpoint_spec(&configured).unwrap();
+        assert_eq!(spec.name, SMOLLM2_135M_BF16.name);
+
+        configured.model_revision = "deadbeef".to_string();
+        assert!(exact_checkpoint_spec(&configured).is_err());
+        assert!(exact_checkpoint_spec(&args()).is_err());
+    }
+
+    #[test]
+    fn file_digest_is_streamed() {
+        let path = std::env::temp_dir().join(format!(
+            "nnis-kvlab-v4-sha-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"abc").unwrap();
+        let digest = sha256_file(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     #[test]
