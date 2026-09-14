@@ -1,0 +1,224 @@
+name: Temporary KVLab F32 loader repair
+on:
+  push:
+    branches: [fix/kvlab-explicit-f32-materialization]
+permissions:
+  contents: write
+concurrency:
+  group: kvlab-f32-loader-repair
+  cancel-in-progress: false
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Patch additive loader and backend
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('crates/nnis-model/src/safetensors_loader.rs')
+          s = p.read_text()
+          assert hashlib.sha1(b'blob '+str(len(s.encode())).encode()+b'\0'+s.encode()).hexdigest() == 'fbd9d8b4855ec505d72822dcb19a4ee36c49eeb2'
+          def replace(old, new):
+              global s
+              assert s.count(old) == 1, (old, s.count(old))
+              s = s.replace(old, new, 1)
+          replace('''fn load_shard(
+              context: &Arc<Context>,
+              stream: &Stream,
+              path: &Path,
+              metadata: &SafetensorsMetadata,
+              tensors:''', '''fn load_shard(
+              context: &Arc<Context>,
+              stream: &Stream,
+              path: &Path,
+              metadata: &SafetensorsMetadata,
+              execution_dtype: WeightDType,
+              tensors:''')
+          replace('''        let device = upload_host_tensor(context, stream, host)?;''', '''        let host = materialize_host_dtype(host, execution_dtype)?;
+                  let device = upload_host_tensor(context, stream, host)?;''')
+          marker = 'fn upload_host_tensor('
+          helper = '''/// Widen BF16 source bits before upload; never relabel a BF16 allocation as F32.
+          fn materialize_host_dtype(host: HostTensor, execution_dtype: WeightDType) -> Result<HostTensor> {
+              match (host, execution_dtype) {
+                  (HostTensor::Bf16(values), WeightDType::F32) => Ok(HostTensor::F32(
+                      values.into_iter().map(|bits| f32::from_bits(u32::from(bits) << 16)).collect(),
+                  )),
+                  (host @ HostTensor::F32(_), WeightDType::F32)
+                  | (host @ HostTensor::Bf16(_), WeightDType::Bf16) => Ok(host),
+                  (HostTensor::F32(_), WeightDType::Bf16) => Err(NnisError::unsupported(
+                      "Safetensors loading does not implicitly narrow F32 weights to BF16",
+                  )),
+              }
+          }
+
+          /// Source identity and resident execution representation are separate contracts.
+          #[derive(Debug)]
+          pub struct LoadedSafetensorsModel {
+              pub source_config: ModelConfig,
+              pub execution_config: ModelConfig,
+              pub weights: ModelWeights,
+          }
+
+          fn execution_config_for_dtype(source: &ModelConfig, dtype: Option<WeightDType>) -> Result<ModelConfig> {
+              source.validate_execution_support()?;
+              let mut execution = source.clone();
+              if let Some(dtype) = dtype { execution.weight_dtype = dtype; }
+              execution.validate_execution_support()?;
+              Ok(execution)
+          }
+
+          /// Explicit F32 materialization of supported F32/BF16 local source tensors.
+          ///
+          /// The source configuration retains its original dtype for checkpoint validation.
+          /// Every resident tensor, including a tied LM head, is actually stored as F32.
+          /// This is a loading capability, not numerical parity or performance evidence.
+          pub fn load_model_from_safetensors_f32(
+              context: &Arc<Context>,
+              stream: &Stream,
+              config: &SafetensorsLoadConfig,
+          ) -> Result<LoadedSafetensorsModel> {
+              load_model_from_safetensors_inner(context, stream, config, Some(WeightDType::F32))
+          }
+
+          '''
+          replace(marker, helper+marker)
+          replace(''') -> Result<(ModelConfig, ModelWeights)> {
+              if !Arc::ptr_eq(context, stream.ctx()) {''', ''') -> Result<(ModelConfig, ModelWeights)> {
+              let loaded = load_model_from_safetensors_inner(context, stream, config, None)?;
+              Ok((loaded.execution_config, loaded.weights))
+          }
+
+          fn load_model_from_safetensors_inner(
+              context: &Arc<Context>,
+              stream: &Stream,
+              config: &SafetensorsLoadConfig,
+              execution_dtype: Option<WeightDType>,
+          ) -> Result<LoadedSafetensorsModel> {
+              if !Arc::ptr_eq(context, stream.ctx()) {''')
+          replace('''    let model_config = metadata_to_model_config(&metadata)?;
+              let files = discover_weight_files(directory)?;''', '''    let source_config = metadata_to_model_config(&metadata)?;
+              let model_config = execution_config_for_dtype(&source_config, execution_dtype)?;
+              let files = discover_weight_files(directory)?;''')
+          replace('load_shard(context, stream, path, &metadata, &mut tensors)?;', 'load_shard(context, stream, path, &metadata, model_config.weight_dtype, &mut tensors)?;')
+          replace('''    Ok((model_config, weights))
+          }
+
+          #[cfg(test)]''', '''    Ok(LoadedSafetensorsModel { source_config, execution_config: model_config, weights })
+          }
+
+          #[cfg(test)]''')
+          tests = '''    #[test]
+              fn f32_materialization_preserves_every_bf16_encoding() {
+                  let source: Vec<u16> = (0..=u16::MAX).collect();
+                  let HostTensor::F32(widened) = materialize_host_dtype(HostTensor::Bf16(source.clone()), WeightDType::F32).unwrap() else { panic!("expected actual F32 storage") };
+                  for (&bits, value) in source.iter().zip(&widened) {
+                      assert_eq!(value.to_bits(), u32::from(bits) << 16);
+                  }
+                  let HostTensor::Bf16(preserved) = materialize_host_dtype(HostTensor::Bf16(source.clone()), WeightDType::Bf16).unwrap() else { panic!("source loader changed dtype") };
+                  assert_eq!(source, preserved);
+              }
+
+              #[test]
+              fn f32_source_payload_is_preserved_without_narrowing() {
+                  let bits = [0_u32, 0x80000000, 0x3f800001, 0x7fc01234];
+                  let values: Vec<f32> = bits.iter().copied().map(f32::from_bits).collect();
+                  let HostTensor::F32(preserved) = materialize_host_dtype(HostTensor::F32(values.clone()), WeightDType::F32).unwrap() else { panic!("expected F32") };
+                  assert_eq!(preserved.iter().map(|value| value.to_bits()).collect::<Vec<_>>(), bits);
+                  assert!(materialize_host_dtype(HostTensor::F32(values), WeightDType::Bf16).is_err());
+              }
+
+              #[test]
+              fn source_checkpoint_identity_is_not_relabelled_for_execution() {
+                  for spec in [&crate::SMOLLM2_135M_BF16, &crate::TINYLLAMA_1P1B_CHAT_BF16] {
+                      let source = spec.expected_config();
+                      spec.validate_config(&source).unwrap();
+                      let execution = execution_config_for_dtype(&source, Some(WeightDType::F32)).unwrap();
+                      assert_eq!(execution.weight_dtype, WeightDType::F32);
+                      assert_eq!(source.weight_dtype, WeightDType::Bf16);
+                      assert!(spec.validate_config(&execution).is_err());
+                      let mut restored = execution;
+                      restored.weight_dtype = source.weight_dtype;
+                      assert_eq!(restored, source);
+                      assert_eq!(execution_config_for_dtype(&source, None).unwrap(), source);
+                  }
+              }
+
+              #[test]
+              fn invalid_source_geometry_cannot_be_hidden_by_materialization() {
+                  let mut source = crate::SMOLLM2_135M_BF16.expected_config();
+                  source.num_attention_heads = 0;
+                  assert!(execution_config_for_dtype(&source, Some(WeightDType::F32)).is_err());
+              }
+
+              #[test]
+              fn bf16_transpose_and_widening_preserve_matrix_orientation() {
+                  let bits = vec![0x3f80_u16, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0];
+                  let transposed = transpose_matrix(bits, 2, 3).unwrap();
+                  let HostTensor::F32(values) = materialize_host_dtype(HostTensor::Bf16(transposed), WeightDType::F32).unwrap() else { panic!("expected F32") };
+                  assert_eq!(values, vec![1.0,4.0,2.0,5.0,3.0,6.0]);
+              }
+
+          '''
+          replace('''    #[test]
+              fn smollm2_config_is_read_without_hardcoded_dimensions() {''', tests+'''    #[test]
+              fn smollm2_config_is_read_without_hardcoded_dimensions() {''')
+          p.write_text(s)
+          p = Path('crates/nnis-model/src/lib.rs')
+          s = p.read_text()
+          old = '    load_model_from_safetensors, SafetensorsLoadConfig, SafetensorsMetadata,'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, '    load_model_from_safetensors, load_model_from_safetensors_f32, LoadedSafetensorsModel, SafetensorsLoadConfig, SafetensorsMetadata,'))
+          p = Path('crates/nnis-cli/src/bin/nnis-kvlab-backend-v4.rs')
+          s = p.read_text()
+          assert s.count('load_model_from_safetensors') == 2
+          s = s.replace('load_model_from_safetensors', 'load_model_from_safetensors_f32')
+          s = s.replace('let (config, weights) =\n        load_model_from_safetensors_f32', 'let loaded =\n        load_model_from_safetensors_f32')
+          assert 'let loaded =' in s
+          assert s.count('checkpoint_spec.validate_config(&config)') == 1
+          s = s.replace('checkpoint_spec.validate_config(&config)', 'checkpoint_spec.validate_config(&loaded.source_config)')
+          assert s.count('Model::new(config, weights, &construction_stream)') == 1
+          s = s.replace('Model::new(config, weights, &construction_stream)', 'Model::new(loaded.execution_config, loaded.weights, &construction_stream)')
+          p.write_text(s)
+          p = Path('docs/KVLAB-POSITION-BACKEND-V4.md')
+          p.write_text(p.read_text()+'''
+
+          ## Source dtype versus execution dtype
+
+          The backend explicitly calls `load_model_from_safetensors_f32`. The loaded
+          source configuration is validated against the exact BF16 checkpoint spec,
+          while the actual device weight graph and execution configuration are F32.
+          BF16 payloads are widened on the host before upload and retain their exact
+          high 16 bits; F32 inputs remain unchanged. The default Safetensors loader
+          continues to preserve source storage for existing callers. A tied LM head
+          is materialized from the already-F32 embedding in this opt-in path.
+
+          The older backend at revision `58e7db8e1c4b471a7fe82a4beba11904240c4e89`
+          loaded BF16 device tensors before calling the F32-only decoder, which
+          rejects that configuration. Frozen KVLab R1 inputs still bind that old
+          revision and must not be silently relabelled. Executing the repaired path
+          requires a separately preregistered successor runtime revision. CPU tests
+          cover all 65,536 BF16 encodings, transpose orientation, source identity and
+          unchanged default loading. They are not evidence of a CUDA campaign run.
+          ''')
+          PY
+      - name: Format and test
+        run: |
+          cargo +stable fmt --all
+          cargo +stable clippy --locked -p nnis-model -p nnis-cli --all-targets -- -D warnings
+          cargo +stable test --locked -p nnis-model --lib
+          cargo +stable test --locked -p nnis-cli --bin nnis-kvlab-backend-v4
+      - name: Commit source changes
+        run: |
+          git config user.name 'MEMOPERF'
+          git config user.email 'contact@checkupauto.fr'
+          git add crates/nnis-model/src/safetensors_loader.rs crates/nnis-model/src/lib.rs crates/nnis-cli/src/bin/nnis-kvlab-backend-v4.rs docs/KVLAB-POSITION-BACKEND-V4.md
+          git commit -m 'fix(kvlab): materialize BF16 checkpoints into actual F32 execution weights'
+          git push origin HEAD:fix/kvlab-explicit-f32-materialization
