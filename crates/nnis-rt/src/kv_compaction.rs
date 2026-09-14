@@ -31,10 +31,7 @@ pub fn compact_kv_cache_layer<T: DevicePod>(
     validate_retained_positions(active, retained_positions)?;
 
     if retained_positions.len() == active
-        && retained_positions
-            .iter()
-            .copied()
-            .eq(0..active)
+        && retained_positions.iter().copied().eq(0..active)
     {
         return Ok(());
     }
@@ -91,8 +88,8 @@ fn stage_selected_rows<T: DevicePod>(
     cache: &KvCache<T>,
     layer: usize,
     retained_positions: &[usize],
-    scratch_keys: &DeviceBuffer<T>,
-    scratch_values: &DeviceBuffer<T>,
+    scratch_keys: &Arc<DeviceBuffer<T>>,
+    scratch_values: &Arc<DeviceBuffer<T>>,
 ) -> Result<()> {
     let config = cache.config();
     let row_bytes = config
@@ -113,7 +110,9 @@ fn stage_selected_rows<T: DevicePod>(
                 .and_then(|value| value.checked_mul(config.capacity))
                 .and_then(|value| value.checked_add(source_position))
                 .and_then(|value| value.checked_mul(config.head_dim))
-                .ok_or_else(|| NnisError::invalid_input("KV compaction source offset overflows usize"))?;
+                .ok_or_else(|| {
+                    NnisError::invalid_input("KV compaction source offset overflows usize")
+                })?;
             let destination_element = head
                 .checked_mul(retained)
                 .and_then(|value| value.checked_add(destination_position))
@@ -124,8 +123,8 @@ fn stage_selected_rows<T: DevicePod>(
 
             let source_key = device_address(cache.keys(), source_element)?;
             let source_value = device_address(cache.values(), source_element)?;
-            let destination_key = device_address(scratch_keys, destination_element)?;
-            let destination_value = device_address(scratch_values, destination_element)?;
+            let destination_key = device_address(scratch_keys.as_ref(), destination_element)?;
+            let destination_value = device_address(scratch_values.as_ref(), destination_element)?;
 
             // SAFETY: all offsets were checked against live allocations, the
             // owning CUDA context is current, and scratch/cache buffers remain
@@ -161,19 +160,18 @@ fn stage_selected_rows<T: DevicePod>(
 
 fn stage_error<T: DevicePod>(
     stream: &crate::Stream,
-    scratch_keys: &DeviceBuffer<T>,
-    scratch_values: &DeviceBuffer<T>,
+    scratch_keys: &Arc<DeviceBuffer<T>>,
+    scratch_values: &Arc<DeviceBuffer<T>>,
     error: NnisError,
 ) -> Result<()> {
     if stream.synchronize().is_err() {
         // The driver did not prove prior transfers stopped touching scratch.
-        // The buffers are borrowed here and owned by the caller, so there is
-        // no safe ownership object to leak from this helper. Surface a stronger
-        // error and let the caller retain both allocations until function exit
-        // after the failed synchronization attempt.
+        // Leak one retained ownership reference for each destination allocation
+        // rather than risk freeing device memory still referenced by CUDA.
+        std::mem::forget(Arc::clone(scratch_keys));
+        std::mem::forget(Arc::clone(scratch_values));
         return Err(error.with("synchronization", "failed after compaction staging error"));
     }
-    let _ = (scratch_keys, scratch_values);
     Err(error)
 }
 
@@ -227,8 +225,8 @@ mod tests {
                 &context,
                 &stream,
                 &[
-                    10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0,
-                    110.0, 111.0, 120.0, 121.0, 130.0, 131.0, 140.0, 141.0,
+                    10.0, 11.0, 20.0, 21.0, 30.0, 31.0, 40.0, 41.0, 110.0, 111.0, 120.0,
+                    121.0, 130.0, 131.0, 140.0, 141.0,
                 ],
             )
             .unwrap(),
@@ -238,8 +236,8 @@ mod tests {
                 &context,
                 &stream,
                 &[
-                    1010.0, 1011.0, 1020.0, 1021.0, 1030.0, 1031.0, 1040.0, 1041.0,
-                    1110.0, 1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0,
+                    1010.0, 1011.0, 1020.0, 1021.0, 1030.0, 1031.0, 1040.0, 1041.0, 1110.0,
+                    1111.0, 1120.0, 1121.0, 1130.0, 1131.0, 1140.0, 1141.0,
                 ],
             )
             .unwrap(),
