@@ -60,7 +60,8 @@ jobs:
       - name: Validate local-HF generation process contract
         run: |
           python3 tools/nnis_hub_hf_generate.py --self-test
-          python3 -m py_compile tools/nnis_hub_hf_generate.py
+          python3 -m unittest tools/test_nnis_hub_hf_generate.py -v
+          python3 -m py_compile tools/nnis_hub_hf_generate.py tools/test_nnis_hub_hf_generate.py
 
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
