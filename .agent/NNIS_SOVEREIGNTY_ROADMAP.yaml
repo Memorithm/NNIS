@@ -682,3 +682,33 @@ agent_operating_protocol:
     If the roadmap cannot be read, an autonomous agent must not make a major
     architectural, performance-promotion, representation-format or merge decision.
     It may perform read-only diagnosis and report that the roadmap is unavailable.
+
+research_engine_integrated_consumer_2026_09_16:
+  status: implemented_public_software_candidate_not_release_qualified
+  consumer_pull_request: https://github.com/Memorithm/TDI/pull/413
+  consumer_revision: cabb0b5ab2c6ad2c45121134bbeffa4c822ef028
+  public_software_evidence: 70_actual_process_integration_tests_passed_locally
+  source_build_attestation: false
+  hardware_execution_performed: false
+  final_or_blocked_model_authorization: false
+  exact_head_ci: pending
+  authority: no_existing_stage_default_backend_or_maturity_promotion
+  source_revision: 5436736002834dd6dd7d5ace8c1c044b47aed18f
+  adapter_pull_request: https://github.com/Memorithm/TDI/pull/411
+  adapter_revision: 8424c0dac025b6764b865466ca0b165463abefc2
+  consumed_api: F32Attention_attention_fused
+  local_evidence:
+    - optional_nnis_cuda_feature_compiles_and_passes_Clippy_with_Rust_1_89
+    - no_implicit_CUDA_execution_without_explicit_consent
+    - exact_manifest_and_upstream_validator_git_blobs_verified_before_review
+    - upstream_validator_preserves_unresolved_blocking_status
+  qualification:
+    CUDA_RUST_SIMT_PTX: unresolved_blocking
+    CUDA_device_run: not_performed
+    CUDA_latency_VRAM_energy: not_measured
+    production_readiness: not_assessed
+  invariants:
+    - NNIS_Rust_1_77_MSRV_unchanged_by_isolated_consumer
+    - explicit_standard_softmax_f32_shapes_masks_precision_and_backend
+    - no_CPU_or_composed_fallback_and_no_model_checkpoint_execution
+    - no_existing_R2_R3_R4_plan_default_or_promotion_change
