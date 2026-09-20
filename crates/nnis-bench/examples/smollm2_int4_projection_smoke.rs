@@ -176,8 +176,7 @@ fn run(arguments: Arguments) -> Result<Report> {
     let kernel = F32Int4Gemv::load(&context, &compiler)?;
     let input = DeviceBuffer::from_host(&context, &stream, &input_host)?;
     let output = DeviceBuffer::<f32>::new(&context, cols)?;
-    let projection_plan =
-        Int4ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", rows, cols)?;
+    let projection_plan = Int4ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", rows, cols)?;
     storage.execute_projection(&projection_plan, &kernel, &stream, &input, &output)?;
     let actual = output.to_vec(&stream)?;
 
@@ -190,8 +189,7 @@ fn run(arguments: Arguments) -> Result<Report> {
     let mut max_absolute_output_error = 0.0_f32;
     for (&actual, &expected) in actual.iter().zip(&expected) {
         bitwise_equal &= actual.to_bits() == expected.to_bits();
-        max_absolute_output_error =
-            max_absolute_output_error.max((actual - expected).abs());
+        max_absolute_output_error = max_absolute_output_error.max((actual - expected).abs());
     }
     if !bitwise_equal {
         return Err(NnisError::invalid_input(format!(
