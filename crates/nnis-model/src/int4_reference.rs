@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn symmetric_int4_known_values_pack_and_reconstruct_deterministically() {
-        let values = [-1.0_f32, -0.5, 0.0, 0.5, 1.0];
+        let values = [-1.0_f32, -0.6, 0.0, 0.6, 1.0];
         let quantized = quantize_int4_symmetric_reference_v1(&values).unwrap();
         assert_eq!(quantized.element_count, 5);
         assert_eq!(quantized.packed_values.len(), 3);
