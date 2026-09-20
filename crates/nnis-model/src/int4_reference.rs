@@ -830,9 +830,6 @@ fn visit_weight_tensors(
             ("k_proj", &layer.k_proj),
             ("v_proj", &layer.v_proj),
             ("o_proj", &layer.o_proj),
-            ("gate_proj", &layer.gate_proj),
-            ("up_proj", &layer.up_proj),
-            ("down_proj", &layer.down_proj),
         ] {
             visit(
                 &format!("layers.{index}.{name}"),
@@ -850,6 +847,20 @@ fn visit_weight_tensors(
                 len: layer.post_attention_norm.len(),
             },
         )?;
+        for (name, weight) in [
+            ("gate_proj", &layer.gate_proj),
+            ("up_proj", &layer.up_proj),
+            ("down_proj", &layer.down_proj),
+        ] {
+            visit(
+                &format!("layers.{index}.{name}"),
+                weight.tensor(),
+                Int4ReferenceLogicalShape::Matrix {
+                    rows: weight.rows(),
+                    cols: weight.cols(),
+                },
+            )?;
+        }
     }
     visit(
         "final_norm",
