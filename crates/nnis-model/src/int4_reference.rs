@@ -6,10 +6,11 @@
 //! payload and scale are materialized as real CUDA allocations so resident
 //! bytes are counted from the buffers that actually exist.
 //!
-//! This is not an execution format. No NNIS projection, embedding, attention,
-//! MLP, or LM-head kernel consumes these buffers yet. The type deliberately
-//! exposes accounting and reconstruction evidence but no device-buffer
-//! accessor that could be mistaken for an executable model path.
+//! This remains a non-promoted full-model representation. Packed buffers stay
+//! private; the only executable access is the separately versioned isolated
+//! projection plan, which dequantizes in registers and does not expose raw
+//! device buffers. Embedding, attention, MLP and full-model INT4 execution are
+//! still outside this storage contract.
 
 use crate::{DeviceTensor, ModelWeights};
 use nnis_kernels::F32Int4Gemv;
@@ -410,9 +411,10 @@ struct Int4ReferenceDeviceAllocation {
 
 /// Live CUDA allocations backing the reference INT4 storage.
 ///
-/// The packed buffers are intentionally private. Until a separately qualified
-/// execution contract exists, callers can inspect evidence but cannot ask NNIS
-/// to execute a model with this storage.
+/// The packed buffers are intentionally private. Callers may inspect storage
+/// evidence and invoke only the separately versioned isolated projection plan;
+/// they cannot obtain raw device-buffer access or execute a full INT4 model
+/// through this storage type.
 pub struct Int4ReferenceModelStorageV1 {
     allocations: Vec<Int4ReferenceDeviceAllocation>,
     bindings: BTreeMap<String, Int4ReferenceLogicalBinding>,
