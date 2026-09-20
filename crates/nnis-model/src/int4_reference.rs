@@ -892,6 +892,16 @@ mod tests {
         assert!(!plan.dense_weight_materialization());
         plan.validate().unwrap();
 
+        let encoded = serde_json::to_string(&plan).unwrap();
+        let decoded: Int4ReferenceProjectionPlanV1 = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, plan);
+        let mut unknown: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        unknown
+            .as_object_mut()
+            .unwrap()
+            .insert("future_field".to_string(), serde_json::json!(true));
+        assert!(serde_json::from_value::<Int4ReferenceProjectionPlanV1>(unknown).is_err());
+
         let mut future = plan.clone();
         future.schema_version += 1;
         assert!(future.validate().is_err());
