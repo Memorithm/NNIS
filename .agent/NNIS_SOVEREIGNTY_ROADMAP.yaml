@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_agent_execution_roadmap
 status: active
-last_updated: "2026-09-06"
+last_updated: "2026-09-20"
 repository: Memorithm/NNIS
 intended_consumer: autonomous_agent
 visibility_note: >-
@@ -26,6 +26,29 @@ mission:
     implementations and evidence exist.
 
 recent_verified_updates:
+  int4_reference_storage_v1:
+    pull_request: 152
+    exact_head: 48314a02db905da7b9a66613cf28923ddab50b45
+    merge_commit: 77da24091989f82b507f2cdf181a72258347dae7
+    required_CI: run_35537075372_success_exact_head_including_Rust_1_77
+    smollm2_harness: run_35537075377_success_exact_head
+    guarantees:
+      - deterministic_symmetric_signed_INT4_codes_minus7_through_plus7_with_reserved_minus8
+      - one_F32_scale_per_unique_live_F32_source_allocation
+      - physical_aliases_deduplicated_by_live_source_allocation_identity
+      - packed_payload_and_scale_materialize_as_real_CUDA_DeviceBuffer_allocations
+      - resident_bytes_are_taken_from_live_payload_and_scale_buffers_not_nominal_bit_width
+      - canonical_serialized_header_payload_accounting_and_weight_reconstruction_error_are_versioned
+      - source_F32_owned_bytes_reconcile_exactly_with_WeightAllocationSummaryV1
+      - packed_device_buffers_remain_private_and_execution_qualified_is_false
+      - principal_CI_and_SmolLM2_pull_request_workflows_checkout_the_exact_PR_head
+    limits:
+      - no_INT4_projection_embedding_attention_MLP_or_LM_head_execution_kernel
+      - no_full_model_INT4_execution_NLL_perplexity_latency_or_throughput_evidence
+      - no_conversion_peak_process_VRAM_or_physical_page_residency_claim
+      - no_ElasticBitAllocation_search_or_final_test_authority
+    next: qualify_an_explicit_INT4_execution_plan_consuming_packed_storage_without_a_hidden_full_dense_weight_graph
+
   local_HF_SOUP_F32_entrypoint:
     pull_request: 118
     exact_head: 1b8d37c2c9373b8cbe75c53996c33f7cb8d2ca80
