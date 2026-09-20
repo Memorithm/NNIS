@@ -101,9 +101,12 @@ pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
 pub use int4_reference::{
     dequantize_int4_symmetric_reference_v1, quantize_int4_symmetric_reference_v1,
-    Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1, Int4ReferenceQuantizedTensorV1,
-    Int4ReferenceStorageSummaryV1, NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
-    NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
+    Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1, Int4ReferenceProjectionPlanV1,
+    Int4ReferenceQuantizedTensorV1, Int4ReferenceStorageSummaryV1,
+    NNIS_INT4_REFERENCE_ACCUMULATION_V1, NNIS_INT4_REFERENCE_DEQUANTIZATION_V1,
+    NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION, NNIS_INT4_REFERENCE_QUANT_MAX,
+    NNIS_INT4_REFERENCE_QUANT_MIN, NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES,
+    NNIS_INT4_REFERENCE_STORAGE_VERSION,
 };
 pub use kernels::F32DecoderKernels;
 pub use nnis_rt::KvCacheTelemetry;
