@@ -49,8 +49,11 @@ jobs:
   harness:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
+      - name: Checkout exact source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
