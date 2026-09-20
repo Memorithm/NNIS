@@ -77,10 +77,15 @@ This v1 contract does **not** establish:
 - ElasticBitAllocation allocator/search authorization;
 - final-test access.
 
-The packed device buffers are private to the storage object. NNIS exposes their accounting summary but no execution accessor. A later runtime slice must define explicit kernel semantics, compare against the dense reference on the frozen Stage-B development split, and independently qualify end-to-end execution before this representation can satisfy the Stage-B fixed-4-bit baseline gate.
+The packed device buffers remain private to the storage object. A later isolated-projection slice may consume them only through an explicit versioned plan without exposing raw buffers. Full-model runtime semantics, comparison against the frozen Stage-B development split, and end-to-end execution remain separate qualification gates before this representation can satisfy the Stage-B fixed-4-bit baseline gate.
 
 ## Next gate
 
 The next engineering step is an explicit INT4 execution plan that consumes this versioned representation without silently materializing a second full dense weight graph. It must retain exact resident accounting and report any transient dequantization workspace separately.
 
 Only after real model execution is qualified may ElasticXxx Stage B collect NLL, perplexity and the frozen request-latency protocol for this candidate.
+
+
+## Successor note
+
+The isolated projection contract in `NNML2_INT4_PROJECTION_V1.md` consumes these private buffers through a shape/name-bound plan. It does not change this storage schema, does not set `execution_qualified` to true, and does not establish a full-model INT4 runtime.
