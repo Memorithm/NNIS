@@ -273,7 +273,6 @@ pub struct Int4ReferenceStorageSummaryV1 {
     pub allocations: Vec<Int4ReferenceAllocationSummaryV1>,
 }
 
-
 /// Explicit isolated projection plan over one logical matrix in reference INT4 storage.
 ///
 /// This contract authorizes only one `[1,K] × [K,N] -> [1,N]` primitive. It
@@ -294,11 +293,7 @@ pub struct Int4ReferenceProjectionPlanV1 {
 
 impl Int4ReferenceProjectionPlanV1 {
     /// Bind one exact logical matrix name and orientation to the reference INT4 contract.
-    pub fn for_matrix(
-        logical_weight: impl Into<String>,
-        rows: usize,
-        cols: usize,
-    ) -> Result<Self> {
+    pub fn for_matrix(logical_weight: impl Into<String>, rows: usize, cols: usize) -> Result<Self> {
         let logical_weight = logical_weight.into();
         let rows = u64::try_from(rows)
             .map_err(|_| NnisError::invalid_input("INT4 projection rows exceed u64"))?;
@@ -390,9 +385,9 @@ enum Int4ReferenceLogicalShape {
 impl Int4ReferenceLogicalShape {
     fn element_count(self) -> Result<usize> {
         match self {
-            Self::Matrix { rows, cols } => rows
-                .checked_mul(cols)
-                .ok_or_else(|| NnisError::invalid_input("INT4 logical matrix shape overflows usize")),
+            Self::Matrix { rows, cols } => rows.checked_mul(cols).ok_or_else(|| {
+                NnisError::invalid_input("INT4 logical matrix shape overflows usize")
+            }),
             Self::Vector { len } => Ok(len),
         }
     }
@@ -736,9 +731,12 @@ impl Int4ReferenceModelStorageV1 {
                 plan.logical_weight()
             )));
         }
-        let allocation = self.allocations.get(binding.allocation_index).ok_or_else(|| {
-            NnisError::invalid_input("INT4 projection binding references a missing allocation")
-        })?;
+        let allocation = self
+            .allocations
+            .get(binding.allocation_index)
+            .ok_or_else(|| {
+                NnisError::invalid_input("INT4 projection binding references a missing allocation")
+            })?;
         kernel.project_kn(
             stream,
             input,
