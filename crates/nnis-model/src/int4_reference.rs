@@ -12,12 +12,19 @@
 //! accessor that could be mistaken for an executable model path.
 
 use crate::{DeviceTensor, ModelWeights};
+use nnis_kernels::F32Int4Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the deterministic INT4 reference storage contract.
 pub const NNIS_INT4_REFERENCE_STORAGE_VERSION: u32 = 1;
+/// Version of the isolated packed-INT4 projection execution contract.
+pub const NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION: u32 = 1;
+/// Stable identity of register-local signed-INT4 to F32 dequantization.
+pub const NNIS_INT4_REFERENCE_DEQUANTIZATION_V1: &str = "signed-int4-to-f32-register-v1";
+/// Stable identity of the projection accumulation order.
+pub const NNIS_INT4_REFERENCE_ACCUMULATION_V1: &str = "increasing-k-f32-fma-v1";
 /// Canonical per-allocation serialized header: magic + element count + F32 scale.
 pub const NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES: u64 = 16;
 /// Smallest quantized value emitted by the symmetric reference quantizer.
@@ -265,6 +272,137 @@ pub struct Int4ReferenceStorageSummaryV1 {
     pub allocations: Vec<Int4ReferenceAllocationSummaryV1>,
 }
 
+
+/// Explicit isolated projection plan over one logical matrix in reference INT4 storage.
+///
+/// This contract authorizes only one `[1,K] × [K,N] -> [1,N]` primitive. It
+/// does not promote the storage to a full-model execution format and explicitly
+/// forbids dense weight materialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Int4ReferenceProjectionPlanV1 {
+    schema_version: u32,
+    storage_version: u32,
+    logical_weight: String,
+    rows: u64,
+    cols: u64,
+    dequantization: String,
+    accumulation: String,
+    dense_weight_materialization: bool,
+}
+
+impl Int4ReferenceProjectionPlanV1 {
+    /// Bind one exact logical matrix name and orientation to the reference INT4 contract.
+    pub fn for_matrix(
+        logical_weight: impl Into<String>,
+        rows: usize,
+        cols: usize,
+    ) -> Result<Self> {
+        let logical_weight = logical_weight.into();
+        let rows = u64::try_from(rows)
+            .map_err(|_| NnisError::invalid_input("INT4 projection rows exceed u64"))?;
+        let cols = u64::try_from(cols)
+            .map_err(|_| NnisError::invalid_input("INT4 projection cols exceed u64"))?;
+        let plan = Self {
+            schema_version: NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
+            storage_version: NNIS_INT4_REFERENCE_STORAGE_VERSION,
+            logical_weight,
+            rows,
+            cols,
+            dequantization: NNIS_INT4_REFERENCE_DEQUANTIZATION_V1.to_string(),
+            accumulation: NNIS_INT4_REFERENCE_ACCUMULATION_V1.to_string(),
+            dense_weight_materialization: false,
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+
+    /// Validate every semantic field of the isolated projection plan.
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "INT4 projection plan schema {}; supported version is {}",
+                self.schema_version, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION
+            )));
+        }
+        if self.storage_version != NNIS_INT4_REFERENCE_STORAGE_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "INT4 projection storage version {}; supported version is {}",
+                self.storage_version, NNIS_INT4_REFERENCE_STORAGE_VERSION
+            )));
+        }
+        if self.logical_weight.is_empty() || self.logical_weight.trim() != self.logical_weight {
+            return Err(NnisError::invalid_input(
+                "INT4 projection logical weight must be non-empty and trimmed",
+            ));
+        }
+        if self.rows == 0 || self.cols == 0 {
+            return Err(NnisError::invalid_input(
+                "INT4 projection matrix dimensions must be non-zero",
+            ));
+        }
+        if self.dequantization != NNIS_INT4_REFERENCE_DEQUANTIZATION_V1 {
+            return Err(NnisError::unsupported(
+                "INT4 projection dequantization contract is unsupported",
+            ));
+        }
+        if self.accumulation != NNIS_INT4_REFERENCE_ACCUMULATION_V1 {
+            return Err(NnisError::unsupported(
+                "INT4 projection accumulation contract is unsupported",
+            ));
+        }
+        if self.dense_weight_materialization {
+            return Err(NnisError::unsupported(
+                "INT4 reference projection forbids dense weight materialization",
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn logical_weight(&self) -> &str {
+        &self.logical_weight
+    }
+
+    #[must_use]
+    pub const fn rows(&self) -> u64 {
+        self.rows
+    }
+
+    #[must_use]
+    pub const fn cols(&self) -> u64 {
+        self.cols
+    }
+
+    #[must_use]
+    pub const fn dense_weight_materialization(&self) -> bool {
+        self.dense_weight_materialization
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Int4ReferenceLogicalShape {
+    Matrix { rows: usize, cols: usize },
+    Vector { len: usize },
+}
+
+impl Int4ReferenceLogicalShape {
+    fn element_count(self) -> Result<usize> {
+        match self {
+            Self::Matrix { rows, cols } => rows
+                .checked_mul(cols)
+                .ok_or_else(|| NnisError::invalid_input("INT4 logical matrix shape overflows usize")),
+            Self::Vector { len } => Ok(len),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Int4ReferenceLogicalBinding {
+    allocation_index: usize,
+    shape: Int4ReferenceLogicalShape,
+}
+
 struct Int4ReferenceDeviceAllocation {
     packed_values: DeviceBuffer<u8>,
     scale: DeviceBuffer<f32>,
@@ -277,6 +415,7 @@ struct Int4ReferenceDeviceAllocation {
 /// to execute a model with this storage.
 pub struct Int4ReferenceModelStorageV1 {
     allocations: Vec<Int4ReferenceDeviceAllocation>,
+    bindings: BTreeMap<String, Int4ReferenceLogicalBinding>,
     summary: Int4ReferenceStorageSummaryV1,
 }
 
@@ -287,6 +426,7 @@ impl Int4ReferenceModelStorageV1 {
         let source_summary = weights.weight_allocation_summary_v1()?;
         let mut source_indices = BTreeMap::<u64, usize>::new();
         let mut allocations = Vec::<Int4ReferenceDeviceAllocation>::new();
+        let mut bindings = BTreeMap::<String, Int4ReferenceLogicalBinding>::new();
         let mut summaries = Vec::<Int4ReferenceAllocationSummaryV1>::new();
 
         let mut logical_tensor_references = 0_u64;
@@ -302,7 +442,7 @@ impl Int4ReferenceModelStorageV1 {
         let mut max_abs_error = 0.0_f32;
         let mut weighted_squared_error = 0.0_f64;
 
-        visit_weight_tensors(weights, |name, tensor| {
+        visit_weight_tensors(weights, |name, tensor, shape| {
             let (source_key, source_bytes) = match tensor {
                 DeviceTensor::F32(buffer) => (buffer.device_ptr(), buffer.size_bytes()),
                 DeviceTensor::Bf16(_) => {
@@ -319,6 +459,13 @@ impl Int4ReferenceModelStorageV1 {
             let logical_values = u64::try_from(tensor.len()).map_err(|_| {
                 NnisError::invalid_input(format!("INT4 source weight {name} length exceeds u64"))
             })?;
+            let shape_values = shape.element_count()?;
+            if shape_values != tensor.len() {
+                return Err(NnisError::invalid_input(format!(
+                    "INT4 logical shape for {name} contains {shape_values} values but the source tensor contains {}",
+                    tensor.len()
+                )));
+            }
             checked_add(
                 &mut logical_tensor_references,
                 1,
@@ -345,6 +492,20 @@ impl Int4ReferenceModelStorageV1 {
                     )));
                 }
                 summary.logical_names.push(name.to_string());
+                if bindings
+                    .insert(
+                        name.to_string(),
+                        Int4ReferenceLogicalBinding {
+                            allocation_index: index,
+                            shape,
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(NnisError::invalid_input(format!(
+                        "duplicate INT4 logical binding {name}"
+                    )));
+                }
                 return Ok(());
             }
 
@@ -392,6 +553,20 @@ impl Int4ReferenceModelStorageV1 {
                 packed_values,
                 scale,
             });
+            if bindings
+                .insert(
+                    name.to_string(),
+                    Int4ReferenceLogicalBinding {
+                        allocation_index: summary_index,
+                        shape,
+                    },
+                )
+                .is_some()
+            {
+                return Err(NnisError::invalid_input(format!(
+                    "duplicate INT4 logical binding {name}"
+                )));
+            }
             summaries.push(Int4ReferenceAllocationSummaryV1 {
                 allocation_index,
                 logical_names: vec![name.to_string()],
@@ -482,6 +657,7 @@ impl Int4ReferenceModelStorageV1 {
 
         let storage = Self {
             allocations,
+            bindings,
             summary: Int4ReferenceStorageSummaryV1 {
                 schema_version: NNIS_INT4_REFERENCE_STORAGE_VERSION,
                 representation: "symmetric-signed-int4-reference".to_string(),
@@ -518,8 +694,69 @@ impl Int4ReferenceModelStorageV1 {
         &self.summary
     }
 
+    /// Execute one explicitly bound matrix projection directly from packed INT4 storage.
+    ///
+    /// This is an isolated primitive qualification surface. It does not change
+    /// `summary().execution_qualified`, which remains false until a full-model
+    /// INT4 runtime is independently qualified.
+    pub fn execute_projection(
+        &self,
+        plan: &Int4ReferenceProjectionPlanV1,
+        kernel: &F32Int4Gemv,
+        stream: &Stream,
+        input: &DeviceBuffer<f32>,
+        output: &DeviceBuffer<f32>,
+    ) -> Result<()> {
+        plan.validate()?;
+        self.validate_resident_allocations()?;
+        let binding = self.bindings.get(plan.logical_weight()).ok_or_else(|| {
+            NnisError::invalid_input(format!(
+                "INT4 projection logical weight {:?} is not present in storage",
+                plan.logical_weight()
+            ))
+        })?;
+        let (rows, cols) = match binding.shape {
+            Int4ReferenceLogicalShape::Matrix { rows, cols } => (rows, cols),
+            Int4ReferenceLogicalShape::Vector { .. } => {
+                return Err(NnisError::invalid_input(format!(
+                    "INT4 logical weight {:?} is a vector, not a projection matrix",
+                    plan.logical_weight()
+                )));
+            }
+        };
+        let plan_rows = usize::try_from(plan.rows)
+            .map_err(|_| NnisError::invalid_input("INT4 projection rows do not fit usize"))?;
+        let plan_cols = usize::try_from(plan.cols)
+            .map_err(|_| NnisError::invalid_input("INT4 projection cols do not fit usize"))?;
+        if rows != plan_rows || cols != plan_cols {
+            return Err(NnisError::invalid_input(format!(
+                "INT4 projection plan shape ({plan_rows}, {plan_cols}) does not match logical weight {:?} shape ({rows}, {cols})",
+                plan.logical_weight()
+            )));
+        }
+        let allocation = self.allocations.get(binding.allocation_index).ok_or_else(|| {
+            NnisError::invalid_input("INT4 projection binding references a missing allocation")
+        })?;
+        kernel.project_kn(
+            stream,
+            input,
+            &allocation.packed_values,
+            &allocation.scale,
+            output,
+            rows,
+            cols,
+        )
+    }
+
     /// Reconcile the retained CUDA allocations with the immutable accounting summary.
     pub fn validate_resident_allocations(&self) -> Result<()> {
+        let expected_bindings = usize::try_from(self.summary.logical_tensor_references)
+            .map_err(|_| NnisError::invalid_input("INT4 logical binding count exceeds usize"))?;
+        if self.bindings.len() != expected_bindings {
+            return Err(NnisError::invalid_input(
+                "INT4 logical binding count disagrees with storage summary",
+            ));
+        }
         if self.allocations.len() != self.summary.allocations.len() {
             return Err(NnisError::invalid_input(
                 "INT4 live allocation count disagrees with summary",
@@ -570,39 +807,91 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
 
 fn visit_weight_tensors(
     weights: &ModelWeights,
-    mut visit: impl FnMut(&str, &DeviceTensor) -> Result<()>,
+    mut visit: impl FnMut(&str, &DeviceTensor, Int4ReferenceLogicalShape) -> Result<()>,
 ) -> Result<()> {
-    visit("token_embedding", weights.token_embedding.tensor())?;
+    visit(
+        "token_embedding",
+        weights.token_embedding.tensor(),
+        Int4ReferenceLogicalShape::Matrix {
+            rows: weights.token_embedding.rows(),
+            cols: weights.token_embedding.cols(),
+        },
+    )?;
     for (index, layer) in weights.layers.iter().enumerate() {
         visit(
             &format!("layers.{index}.input_norm"),
             layer.input_norm.tensor(),
+            Int4ReferenceLogicalShape::Vector {
+                len: layer.input_norm.len(),
+            },
         )?;
-        visit(&format!("layers.{index}.q_proj"), layer.q_proj.tensor())?;
-        visit(&format!("layers.{index}.k_proj"), layer.k_proj.tensor())?;
-        visit(&format!("layers.{index}.v_proj"), layer.v_proj.tensor())?;
-        visit(&format!("layers.{index}.o_proj"), layer.o_proj.tensor())?;
+        for (name, weight) in [
+            ("q_proj", &layer.q_proj),
+            ("k_proj", &layer.k_proj),
+            ("v_proj", &layer.v_proj),
+            ("o_proj", &layer.o_proj),
+            ("gate_proj", &layer.gate_proj),
+            ("up_proj", &layer.up_proj),
+            ("down_proj", &layer.down_proj),
+        ] {
+            visit(
+                &format!("layers.{index}.{name}"),
+                weight.tensor(),
+                Int4ReferenceLogicalShape::Matrix {
+                    rows: weight.rows(),
+                    cols: weight.cols(),
+                },
+            )?;
+        }
         visit(
             &format!("layers.{index}.post_attention_norm"),
             layer.post_attention_norm.tensor(),
-        )?;
-        visit(
-            &format!("layers.{index}.gate_proj"),
-            layer.gate_proj.tensor(),
-        )?;
-        visit(&format!("layers.{index}.up_proj"), layer.up_proj.tensor())?;
-        visit(
-            &format!("layers.{index}.down_proj"),
-            layer.down_proj.tensor(),
+            Int4ReferenceLogicalShape::Vector {
+                len: layer.post_attention_norm.len(),
+            },
         )?;
     }
-    visit("final_norm", weights.final_norm.tensor())?;
-    visit("lm_head", weights.lm_head.tensor())
+    visit(
+        "final_norm",
+        weights.final_norm.tensor(),
+        Int4ReferenceLogicalShape::Vector {
+            len: weights.final_norm.len(),
+        },
+    )?;
+    visit(
+        "lm_head",
+        weights.lm_head.tensor(),
+        Int4ReferenceLogicalShape::Matrix {
+            rows: weights.lm_head.rows(),
+            cols: weights.lm_head.cols(),
+        },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projection_plan_is_versioned_shape_bound_and_forbids_dense_materialization() {
+        let plan = Int4ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", 576, 576).unwrap();
+        assert_eq!(plan.logical_weight(), "layers.0.q_proj");
+        assert_eq!(plan.rows(), 576);
+        assert_eq!(plan.cols(), 576);
+        assert!(!plan.dense_weight_materialization());
+        plan.validate().unwrap();
+
+        let mut future = plan.clone();
+        future.schema_version += 1;
+        assert!(future.validate().is_err());
+
+        let mut dense = plan.clone();
+        dense.dense_weight_materialization = true;
+        assert!(dense.validate().is_err());
+
+        assert!(Int4ReferenceProjectionPlanV1::for_matrix(" bad", 1, 1).is_err());
+        assert!(Int4ReferenceProjectionPlanV1::for_matrix("good", 0, 1).is_err());
+    }
 
     #[test]
     fn symmetric_int4_known_values_pack_and_reconstruct_deterministically() {
