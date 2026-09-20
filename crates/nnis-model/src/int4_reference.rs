@@ -449,8 +449,7 @@ impl Int4ReferenceModelStorageV1 {
                 "INT4 resident device bytes",
             )?;
             max_abs_error = max_abs_error.max(quantized.max_abs_error);
-            weighted_squared_error +=
-                quantized.mean_squared_error * logical_values as f64;
+            weighted_squared_error += quantized.mean_squared_error * logical_values as f64;
             Ok(())
         })?;
         stream.synchronize()?;
@@ -463,9 +462,8 @@ impl Int4ReferenceModelStorageV1 {
         if source_summary.logical_tensor_references != logical_tensor_references
             || source_summary.logical_element_references != logical_element_references
             || source_summary.unique_device_allocations
-                != u64::try_from(allocations.len()).map_err(|_| {
-                    NnisError::invalid_input("INT4 allocation count exceeds u64")
-                })?
+                != u64::try_from(allocations.len())
+                    .map_err(|_| NnisError::invalid_input("INT4 allocation count exceeds u64"))?
             || source_summary.unique_device_elements != unique_logical_values
             || source_summary.owned_device_allocation_bytes != source_f32_owned_bytes
         {
@@ -639,14 +637,12 @@ mod tests {
 
     #[test]
     fn canonical_serialization_accounts_header_and_payload_exactly() {
-        let quantized =
-            quantize_int4_symmetric_reference_v1(&[1.0_f32, -1.0, 0.25]).unwrap();
+        let quantized = quantize_int4_symmetric_reference_v1(&[1.0_f32, -1.0, 0.25]).unwrap();
         let encoded = quantized.canonical_serialized_bytes().unwrap();
         assert_eq!(&encoded[..4], b"NI41");
         assert_eq!(
             encoded.len() as u64,
-            NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES
-                + quantized.packed_values.len() as u64
+            NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES + quantized.packed_values.len() as u64
         );
         assert_eq!(
             u64::from_le_bytes(encoded[4..12].try_into().unwrap()),
