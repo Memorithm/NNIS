@@ -97,6 +97,7 @@ impl F32Int4Gemv {
     }
 
     /// Execute one packed-INT4 projection and synchronize.
+    #[allow(clippy::too_many_arguments)]
     pub fn project_kn(
         &self,
         stream: &Stream,
