@@ -1,7 +1,7 @@
 schema_version: 1
 kind: memorithm_ml_maturity_program
 status: active
-last_updated: "2026-09-06"
+last_updated: "2026-09-20"
 repository: Memorithm/NNIS
 objective: >-
   Raise NNIS-owned native NVIDIA inference maturity to evidence-backed 5/5 while
@@ -25,7 +25,7 @@ score_policy:
     - claiming_zero_dequantization_when_scalar_or_register_conversion_occurs
     - claiming_eight_to_sixteen_x_KV_reduction_without_measured_effective_bits_per_value
 current_progress:
-  main_head: 26f4d5ab200501568155d5165bcb05b0c9e7cf61
+  main_head: 77da24091989f82b507f2cdf181a72258347dae7
   NNML0:
     status: software_contract_capability_bound_physical_gate_open
     merged:
@@ -171,6 +171,7 @@ current_progress:
       - pr_125_NVML_process_memory_snapshot_v1
       - pr_126_SmolLM2_NVML_lifecycle_memory_harness_v1
       - pr_127_SmolLM2_NVML_lifecycle_artifact_validation_v1
+      - pr_152_INT4_reference_storage_v1
     verified_software_capabilities:
       - current_F16_execution_plans_explicitly_require_model_rebuild_for_plan_changes
       - source_logical_weights_are_required_to_materialize_the_target_resident_layout
@@ -194,6 +195,8 @@ current_progress:
       - NVML_process_memory_is_not_relabelled_as_physical_page_residency_or_per_allocation_ownership
       - SmolLM2_NVML_lifecycle_harness_records_three_synchronized_process_memory_boundaries_alongside_exact_owned_weight_summaries
       - SmolLM2_NVML_lifecycle_artifacts_are_atomically_persisted_and_fail_closed_validated_before_physical_use
+      - INT4_reference_storage_quantizes_every_unique_F32_weight_allocation_deterministically_and_accounts_live_packed_payload_plus_scale_DeviceBuffer_bytes
+      - INT4_reference_storage_reconciles_source_bytes_to_WeightAllocationSummaryV1_and_persists_reconstruction_error_without_execution_authority
     weight_allocation_accounting_boundary:
       contract_version: nnis_model_WeightAllocationSummaryV1
       pull_request: 119
@@ -274,6 +277,21 @@ current_progress:
       physical_page_residency_claimed: false
       allocator_or_runtime_overhead_attribution_claimed: false
       performance_or_quality_claimed: false
+    int4_reference_storage_boundary:
+      contract_version: nnis_model_Int4ReferenceStorageSummaryV1
+      pull_request: 152
+      exact_head: 48314a02db905da7b9a66613cf28923ddab50b45
+      merge_commit: 77da24091989f82b507f2cdf181a72258347dae7
+      required_CI: run_35537075372_success_exact_head_including_Rust_1_77
+      exact_head_SmolLM2_harness: run_35537075377_success
+      exact_scope: packed_INT4_DeviceBuffer_u8_payload_plus_one_F32_scale_per_unique_source_allocation
+      source_accounting_reconciled_to_WeightAllocationSummaryV1: true
+      execution_qualified: false
+      physical_page_residency_claimed: false
+      process_wide_VRAM_claimed: false
+      conversion_peak_claimed: false
+      performance_or_model_quality_claimed: false
+      next: explicit_INT4_execution_plan_without_hidden_full_dense_weight_graph
     execution_transition_boundary:
       contract_version: nnis_model_F16ExecutionTransitionRequirementsV1
       pull_request: 117
