@@ -108,9 +108,8 @@ impl F32Int4Gemv {
         n: usize,
     ) -> Result<()> {
         // SAFETY: all borrows remain live until synchronization below.
-        let enqueue_result = unsafe {
-            self.enqueue_project_kn(stream, input, packed_weight, scale, output, k, n)
-        };
+        let enqueue_result =
+            unsafe { self.enqueue_project_kn(stream, input, packed_weight, scale, output, k, n) };
         match enqueue_result {
             Ok(()) => stream.synchronize(),
             Err(error) => {
@@ -228,11 +227,7 @@ mod tests {
     use nnis_rt::gpu_context;
 
     fn quantize_reference(values: &[f32]) -> (Vec<u8>, f32, Vec<f32>) {
-        let max_abs = values
-            .iter()
-            .copied()
-            .map(f32::abs)
-            .fold(0.0_f32, f32::max);
+        let max_abs = values.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
         let scale = if max_abs == 0.0 { 1.0 } else { max_abs / 7.0 };
         let mut packed = vec![0_u8; (values.len() + 1) / 2];
         let mut reconstructed = Vec::with_capacity(values.len());
