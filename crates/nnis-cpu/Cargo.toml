@@ -1,0 +1,10 @@
+[package]
+name = "nnis-cpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Deterministic CPU reference backend for the Native Neural Inference Stack"
+
+[dependencies]
+nnis-core.workspace = true
