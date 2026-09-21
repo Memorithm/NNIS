@@ -78,6 +78,23 @@ This slice does not establish:
 - ElasticBitAllocation search/allocator authority;
 - final-test access.
 
+
+## Public facade surface
+
+The `nnis` facade re-exports the isolated projection / reference-storage
+contracts so callers can depend on `nnis` alone:
+
+- `nnis::model` / crate root: `Int4ReferenceModelStorageV1`,
+  `Int4ReferenceProjectionPlanV1`, `Int4ReferenceStorageSummaryV1`,
+  `Int4ReferenceAllocationSummaryV1`, `Int4ReferenceQuantizedTensorV1`,
+  `quantize_int4_symmetric_reference_v1`, `dequantize_int4_symmetric_reference_v1`,
+  and the `NNIS_INT4_REFERENCE_*` version/identity constants;
+- `nnis::kernels` / crate root: `F32Int4Gemv`.
+
+Facade publicity does **not** change the storage or projection schemas, does
+not set `execution_qualified = true`, and does not establish a full-model INT4
+runtime.
+
 ## Next gate
 
 The next engineering gate is a full decoder execution graph that consumes packed INT4 weights for every required weight operation, or explicitly documents and accounts any tensor family that cannot yet use the representation.
