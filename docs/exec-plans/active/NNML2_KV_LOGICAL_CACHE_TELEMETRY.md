@@ -1,7 +1,6 @@
 # NNML2 KV logical cache telemetry surface
 
-Status: **active** (selected next non-physical software slice after PR #137;
-session/facade observer already merged as PR #138).
+Status: **completed** (merged as PR #154 on main `c58ec1c`).
 
 ## Goal
 
