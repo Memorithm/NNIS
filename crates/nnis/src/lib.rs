@@ -63,7 +63,8 @@ pub use kernels::{
 pub use runtime::{
     current_process_gpu_memory, observe_kv_cache, Context, Device, DeviceBuffer, DevicePod,
     DeviceProps, ErrorKind, Event, KvCacheTelemetry, NnisError, NvmlProcessMemorySnapshotV1,
-    PinnedBuffer, ProcessGpuMemoryError, Result, Stream, NNIS_KV_CACHE_TELEMETRY_VERSION, NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
+    PinnedBuffer, ProcessGpuMemoryError, Result, Stream, NNIS_KV_CACHE_TELEMETRY_VERSION,
+    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
 };
 
 pub use model::{
