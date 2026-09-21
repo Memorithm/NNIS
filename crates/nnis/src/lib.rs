@@ -32,8 +32,8 @@ pub mod kernels {
         Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
         F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
-        F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
-        F32TopK, F32TopKWorkspace,
+        F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
+        F32TopKWorkspace,
     };
 }
 
@@ -482,7 +482,10 @@ mod tests {
             NNIS_INT4_REFERENCE_DEQUANTIZATION_V1,
             "signed-int4-to-f32-register-v1"
         );
-        assert_eq!(NNIS_INT4_REFERENCE_ACCUMULATION_V1, "increasing-k-f32-fma-v1");
+        assert_eq!(
+            NNIS_INT4_REFERENCE_ACCUMULATION_V1,
+            "increasing-k-f32-fma-v1"
+        );
         assert_eq!(NNIS_INT4_REFERENCE_QUANT_MIN, -7);
         assert_eq!(NNIS_INT4_REFERENCE_QUANT_MAX, 7);
         assert_eq!(NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, 16);
