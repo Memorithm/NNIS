@@ -13,8 +13,10 @@ Status: **completed** (merged as PR #137 on main `faab2ea`).
 
 ## Follow-on
 
-Next non-physical software selection:
-`docs/exec-plans/active/NNML2_KV_LOGICAL_CACHE_TELEMETRY.md`.
+Library + single-session CLI shipped in #137. Later non-physical software
+selections included NVML process-memory CLI (#155). Next selected:
+`docs/exec-plans/active/NNML1_GENERATE_BATCH_CLI.md` (SampledSessionBatch thin
+CLI).
 
 ## Claim boundary (unchanged)
 
