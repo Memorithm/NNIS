@@ -89,3 +89,9 @@ Only after real model execution is qualified may ElasticXxx Stage B collect NLL,
 ## Successor note
 
 The isolated projection contract in `NNML2_INT4_PROJECTION_V1.md` consumes these private buffers through a shape/name-bound plan. It does not change this storage schema, does not set `execution_qualified` to true, and does not establish a full-model INT4 runtime.
+
+## Facade note
+
+The `nnis` facade re-exports the public INT4 reference storage types and
+version constants (see `docs/memory/int4-reference-facade-v1.md`). This does
+not alter the storage schema or `execution_qualified = false`.

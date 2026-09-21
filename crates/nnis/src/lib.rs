@@ -31,20 +31,27 @@ pub mod kernels {
         Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
         Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
-        F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace, F32RmsNorm,
-        F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
-        F32TopKWorkspace,
+        F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
+        F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace,
+        F32TopK, F32TopKWorkspace,
     };
 }
 
 /// High-level decoder-only model runtime.
 pub mod model {
     pub use nnis_model::{
-        load_model_directory, Activation, DecoderLayerWeights, DeviceTensor, GenerationConfig,
-        GenerationStreamControl, InferenceSession, KvCacheTelemetry, MatrixWeight, Model,
-        ModelConfig, ModelManifest, ModelWeights, SampledBatchRequest, SampledSessionBatch,
-        SamplingConfig, TensorManifest, VectorWeight, WeightDType, NNIS_MODEL_FORMAT,
-        NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+        dequantize_int4_symmetric_reference_v1, load_model_directory,
+        quantize_int4_symmetric_reference_v1, Activation, DecoderLayerWeights, DeviceTensor,
+        GenerationConfig, GenerationStreamControl, InferenceSession,
+        Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1,
+        Int4ReferenceProjectionPlanV1, Int4ReferenceQuantizedTensorV1,
+        Int4ReferenceStorageSummaryV1, KvCacheTelemetry, MatrixWeight, Model, ModelConfig,
+        ModelManifest, ModelWeights, SampledBatchRequest, SampledSessionBatch, SamplingConfig,
+        TensorManifest, VectorWeight, WeightDType, NNIS_INT4_REFERENCE_ACCUMULATION_V1,
+        NNIS_INT4_REFERENCE_DEQUANTIZATION_V1, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
+        NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
+        NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
+        NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     };
 }
 
@@ -56,7 +63,7 @@ pub use kernels::{
     bf16_layer_normalize_rows_dispatched, bf16_rms_normalize_rows_dispatched, AttentionMask,
     Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
     Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
-    F32Gather, F32Gemm, F32Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
+    F32Gather, F32Gemm, F32Gemv, F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
     F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
     F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
@@ -68,10 +75,16 @@ pub use runtime::{
 };
 
 pub use model::{
-    load_model_directory, Activation, GenerationConfig, GenerationStreamControl, InferenceSession,
+    dequantize_int4_symmetric_reference_v1, load_model_directory,
+    quantize_int4_symmetric_reference_v1, Activation, GenerationConfig, GenerationStreamControl,
+    InferenceSession, Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1,
+    Int4ReferenceProjectionPlanV1, Int4ReferenceQuantizedTensorV1, Int4ReferenceStorageSummaryV1,
     Model, ModelConfig, ModelManifest, SampledBatchRequest, SampledSessionBatch, SamplingConfig,
-    TensorManifest, WeightDType, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION,
-    NNIS_SAMPLING_POLICY_VERSION,
+    TensorManifest, WeightDType, NNIS_INT4_REFERENCE_ACCUMULATION_V1,
+    NNIS_INT4_REFERENCE_DEQUANTIZATION_V1, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
+    NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
+    NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
+    NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.
@@ -460,6 +473,28 @@ impl Session {
 mod tests {
     use super::*;
     use nnis_rt::gpu_context;
+
+    #[test]
+    fn int4_facade_reexports_are_versioned() {
+        assert_eq!(NNIS_INT4_REFERENCE_STORAGE_VERSION, 1);
+        assert_eq!(NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION, 1);
+        assert_eq!(
+            NNIS_INT4_REFERENCE_DEQUANTIZATION_V1,
+            "signed-int4-to-f32-register-v1"
+        );
+        assert_eq!(NNIS_INT4_REFERENCE_ACCUMULATION_V1, "increasing-k-f32-fma-v1");
+        assert_eq!(NNIS_INT4_REFERENCE_QUANT_MIN, -7);
+        assert_eq!(NNIS_INT4_REFERENCE_QUANT_MAX, 7);
+        assert_eq!(NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, 16);
+        // Keep the isolated plan constructor reachable through the facade.
+        let plan = Int4ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", 768, 768)
+            .expect("shape-bound INT4 projection plan");
+        assert_eq!(plan.logical_weight(), "layers.0.q_proj");
+        assert_eq!(plan.rows(), 768);
+        assert_eq!(plan.cols(), 768);
+        assert!(!plan.dense_weight_materialization());
+        let _kernel_ty: Option<F32Int4Gemv> = None;
+    }
 
     #[test]
     fn session_executes_standard_kernel_on_gpu() {
