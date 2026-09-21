@@ -230,7 +230,7 @@ mod tests {
     fn quantize_reference(values: &[f32]) -> (Vec<u8>, f32, Vec<f32>) {
         let max_abs = values.iter().copied().map(f32::abs).fold(0.0_f32, f32::max);
         let scale = if max_abs == 0.0 { 1.0 } else { max_abs / 7.0 };
-        let mut packed = vec![0_u8; (values.len() + 1) / 2];
+        let mut packed = vec![0_u8; values.len().div_ceil(2)];
         let mut reconstructed = Vec::with_capacity(values.len());
         for (index, value) in values.iter().copied().enumerate() {
             let q = (value / scale).round().clamp(-7.0, 7.0) as i8;
