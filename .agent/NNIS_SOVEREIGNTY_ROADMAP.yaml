@@ -735,3 +735,34 @@ research_engine_integrated_consumer_2026_09_16:
     - explicit_standard_softmax_f32_shapes_masks_precision_and_backend
     - no_CPU_or_composed_fallback_and_no_model_checkpoint_execution
     - no_existing_R2_R3_R4_plan_default_or_promotion_change
+
+v888_portable_program:
+  status: active_user_directed_2026_09_21
+  source_scope:
+    connectome: FlyWire_BANC_v888_only
+    raw_dataset_in_repository: false
+  strategy:
+    target_name_expansion: Native_Neural_Inference_Stack
+    new_v888_sml_flat_work_requires_nvidia_products: false
+    required_reference_backend: CPU
+    required_portable_gpu_backend: WGPU
+    existing_CUDA_NVRTC_NVML_TensorRT_code: legacy_or_reference_for_this_programme
+  ordered_bootstrap:
+    - NNIS_P0_sovereignty_inventory
+    - NNIS_P1_backend_neutral_core_contracts
+    - NNIS_P2_CPU_reference_backend
+    - NNIS_P3_WGPU_backend
+    - NNIS_P4_portable_kernel_package_contract
+    - NNIS_P5_FLAT_ATTENTION_portable_integration
+    - NNIS_P6_sparse_recurrent_graph_runtime
+    - NNIS_P7_event_driven_execution_planner
+    - NNIS_P8_SML_GENIUS_runtime_surface
+    - NNIS_P9_ElasticXxx_actuation_boundary
+    - NNIS_P10_vendor_neutral_qualification
+    - NNIS_P11_legacy_NVIDIA_quarantine_or_deprecation_decision
+  authoritative_main_document: docs/V888_CONNECTOME_BOOTSTRAP.md
+  conflict_rule: >-
+    For V888, SML sparse-recurrent, event-driven, and FLAT sparse-routing work,
+    an older NVIDIA-only implementation assumption is not an authorized path.
+    Preserve its historical evidence, but fail closed and use the portable
+    CPU/WGPU contract described by the V888 bootstrap.
