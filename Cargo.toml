@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/nnis-core",
+    "crates/nnis-cpu",
     "crates/nnis-sys",
     "crates/nnis-rt",
     "crates/nnis-jit",
@@ -27,6 +28,7 @@ serde_json = "1"
 safetensors = "0.5"
 
 nnis-core = { path = "crates/nnis-core" }
+nnis-cpu = { path = "crates/nnis-cpu" }
 nnis-sys = { path = "crates/nnis-sys" }
 nnis-rt = { path = "crates/nnis-rt" }
 nnis-jit = { path = "crates/nnis-jit" }
