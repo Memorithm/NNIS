@@ -110,3 +110,9 @@ The roadmap is authoritative for current details, but these principles always ap
 - required CI and hardware evidence must correspond to the exact head being promoted.
 
 This file is a bootstrap pointer, not the roadmap itself. The off-main sovereignty roadmap plus the applicable ML maturity, kernel-agent integration, and DA-LUC overlays are the persistent sources of current agent strategy and research priorities.
+
+## Mandatory BANC v888 / portable-runtime bootstrap
+
+For any BANC v888, SML-GENIUS sparse-recurrent, event-driven, FLAT sparse-routing, CPU/WGPU portability, or connectome-derived runtime work, also read [`docs/V888_CONNECTOME_BOOTSTRAP.md`](docs/V888_CONNECTOME_BOOTSTRAP.md).
+
+The explicit programme direction is vendor-neutral: new V888/SML/FLAT work must not depend on CUDA, NVRTC, TensorRT, TensorRT-LLM, NVML, CUBIN, or other NVIDIA-specific runtime facilities. Existing NVIDIA code remains historical/reference capability until a separately reviewed migration changes or removes it. For this programme the target expansion of NNIS is **Native Neural Inference Stack**, with CPU reference and WGPU/open-GPU execution. When an older roadmap item assumes an NVIDIA-only implementation for this programme, fail closed on that implementation choice and follow the portable V888 bootstrap instead; do not silently reinterpret existing scientific or numerical contracts.
