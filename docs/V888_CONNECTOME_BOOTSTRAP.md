@@ -35,6 +35,8 @@ NNIS does not own model science. SciRust owns generic numerical primitives, FLAT
 
 ### NNIS-P0 — sovereignty inventory
 
+Current implementation inventory: [`PORTABLE_RUNTIME_INVENTORY_V1.md`](PORTABLE_RUNTIME_INVENTORY_V1.md).
+
 Classify every public and internal subsystem as:
 - semantic/model-neutral;
 - CUDA-coupled;
