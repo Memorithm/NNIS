@@ -76,6 +76,10 @@ jobs:
         if: always()
         run: cargo check --workspace --all-targets
 
+      - name: Verify portable core dependency boundary
+        if: always()
+        run: bash scripts/check-portable-core.sh
+
       - name: clippy
         if: always()
         run: cargo clippy --workspace --all-targets -- -D warnings
