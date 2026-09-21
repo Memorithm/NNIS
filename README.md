@@ -137,6 +137,17 @@ cargo run --release -p nnis-cli --bin nnis -- generate \
 That checkpoint has random weights and is a structural/numerical fixture, not a
 quality model.
 
+A separate read-only NVML process-memory debug command is available:
+
+```bash
+cargo run --release -p nnis-cli --bin nnis -- nvml-process-memory [--device N] [--json]
+```
+
+It prints the process-scoped NVML `usedGpuMemory` snapshot for this PID on the
+selected CUDA device (default `0`). Human text is the default; `--json` emits
+versioned JSON with `schema_version`. This is software observability only and
+does not claim physical residency, weight-only attribution, or performance.
+
 To compile and launch custom CUDA source through the complete stack, run:
 
 ```bash
@@ -159,7 +170,7 @@ cargo run --release -p nnis-jit --example inspect_kernel
 | Crate | Responsibility |
 | --- | --- |
 | `nnis` | Stable facade, common re-exports, and low-level `Session` |
-| `nnis-cli` | User-facing `nnis generate` text-generation frontend |
+| `nnis-cli` | User-facing `nnis generate` frontend and `nvml-process-memory` debug CLI |
 | `nnis-model` | Decoder-only model config, weights, KV-backed inference sessions, and generation |
 | `nnis-kernels` | Reusable native kernel families and CPU-oracle tests |
 | `nnis-jit` | NVRTC compilation/cache, modules, functions, and launches |

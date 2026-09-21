@@ -1,6 +1,8 @@
 use nnis::{
-    Context, Device, GenerationConfig, GenerationStreamControl, Model, SamplingConfig, Stream,
+    current_process_gpu_memory, Context, Device, GenerationConfig, GenerationStreamControl, Model,
+    NvmlProcessMemorySnapshotV1, SamplingConfig, Stream, NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
 };
+use serde::Serialize;
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -9,7 +11,7 @@ use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n\nDefault decoding is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis nvml-process-memory [--device N] [--json]\n\nDefault decoding is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.";
 
 #[derive(Debug, PartialEq)]
 struct GenerateArgs {
@@ -27,9 +29,25 @@ struct GenerateArgs {
 }
 
 #[derive(Debug, PartialEq)]
+struct NvmlProcessMemoryArgs {
+    device_ordinal: i32,
+    json: bool,
+}
+
+#[derive(Debug, PartialEq)]
 enum Command {
     Help,
     Generate(GenerateArgs),
+    NvmlProcessMemory(NvmlProcessMemoryArgs),
+}
+
+#[derive(Debug, Serialize)]
+struct NvmlProcessMemoryJsonV1<'a> {
+    schema_version: u32,
+    pid: u32,
+    device_ordinal: i32,
+    device_uuid: &'a str,
+    used_gpu_memory_bytes: u64,
 }
 
 fn parse_positive_f32(flag: &str, raw: &str) -> Result<f32, String> {
@@ -69,6 +87,9 @@ where
     };
     if matches!(command.as_str(), "--help" | "-h") {
         return Ok(Command::Help);
+    }
+    if command == "nvml-process-memory" {
+        return parse_nvml_process_memory_args(arguments);
     }
     if command != "generate" {
         return Err(format!("unknown command {command:?}\n\n{USAGE}"));
@@ -211,6 +232,84 @@ where
     }))
 }
 
+fn parse_nvml_process_memory_args<I>(arguments: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut device_ordinal = DEFAULT_DEVICE_ORDINAL;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--device" => {
+                let raw = arguments
+                    .next()
+                    .ok_or_else(|| "--device requires an integer ordinal".to_string())?;
+                device_ordinal = raw
+                    .parse::<i32>()
+                    .map_err(|error| format!("invalid --device {raw:?}: {error}"))?;
+                if device_ordinal < 0 {
+                    return Err("--device must be a non-negative CUDA device ordinal".to_string());
+                }
+            }
+            "--json" => json = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            other => {
+                return Err(format!(
+                    "unknown nvml-process-memory argument {other:?}\n\n{USAGE}"
+                ))
+            }
+        }
+    }
+    Ok(Command::NvmlProcessMemory(NvmlProcessMemoryArgs {
+        device_ordinal,
+        json,
+    }))
+}
+
+fn format_nvml_process_memory_text(snapshot: &NvmlProcessMemorySnapshotV1) -> String {
+    format!(
+        "NNIS NVML process-memory snapshot v{version}\nschema_version: {schema}\npid: {pid}\ndevice_ordinal: {ordinal}\ndevice_uuid: {uuid}\nused_gpu_memory_bytes: {bytes}\n\nClaim boundary: process-scoped NVML usedGpuMemory for this PID/device only. Not physical residency, weight-only attribution, or performance.",
+        version = NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
+        schema = snapshot.schema_version,
+        pid = snapshot.pid,
+        ordinal = snapshot.device_ordinal,
+        uuid = snapshot.device_uuid,
+        bytes = snapshot.used_gpu_memory_bytes,
+    )
+}
+
+fn format_nvml_process_memory_json(
+    snapshot: &NvmlProcessMemorySnapshotV1,
+) -> Result<String, String> {
+    let payload = NvmlProcessMemoryJsonV1 {
+        schema_version: snapshot.schema_version,
+        pid: snapshot.pid,
+        device_ordinal: snapshot.device_ordinal,
+        device_uuid: snapshot.device_uuid.as_str(),
+        used_gpu_memory_bytes: snapshot.used_gpu_memory_bytes,
+    };
+    serde_json::to_string_pretty(&payload)
+        .map_err(|error| format!("failed to serialize NVML snapshot JSON: {error}"))
+}
+
+/// Select CUDA device, retain a primary context so this PID is visible to NVML as
+/// a compute process, then query the public process-memory snapshot API.
+fn probe_nvml_process_memory(
+    arguments: &NvmlProcessMemoryArgs,
+) -> Result<NvmlProcessMemorySnapshotV1, String> {
+    let device = Device::get(arguments.device_ordinal).map_err(|error| {
+        format!(
+            "failed to select CUDA device {}: {error}",
+            arguments.device_ordinal
+        )
+    })?;
+    let _context =
+        Context::new(&device).map_err(|error| format!("failed to create CUDA context: {error}"))?;
+    current_process_gpu_memory(&device)
+        .map_err(|error| format!("NVML process-memory probe failed: {error}"))
+}
+
 fn tokenize_prompt(tokenizer_file: &Path, prompt: &str) -> Result<(Tokenizer, Vec<u32>), String> {
     let tokenizer = Tokenizer::from_file(tokenizer_file).map_err(|error| {
         format!(
@@ -349,6 +448,27 @@ fn main() -> ExitCode {
             Ok(None) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("nnis generate: {error}");
+                ExitCode::FAILURE
+            }
+        },
+        Command::NvmlProcessMemory(arguments) => match probe_nvml_process_memory(&arguments) {
+            Ok(snapshot) => {
+                let rendered = if arguments.json {
+                    match format_nvml_process_memory_json(&snapshot) {
+                        Ok(text) => text,
+                        Err(error) => {
+                            eprintln!("nnis nvml-process-memory: {error}");
+                            return ExitCode::FAILURE;
+                        }
+                    }
+                } else {
+                    format_nvml_process_memory_text(&snapshot)
+                };
+                println!("{rendered}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("nnis nvml-process-memory: {error}");
                 ExitCode::FAILURE
             }
         },
@@ -563,6 +683,68 @@ mod tests {
             "1.5",
         ]))
         .is_err());
+    }
+
+    #[test]
+    fn nvml_process_memory_defaults_without_cuda() {
+        let parsed = parse_args(strings(&["nvml-process-memory"])).unwrap();
+        assert_eq!(
+            parsed,
+            Command::NvmlProcessMemory(NvmlProcessMemoryArgs {
+                device_ordinal: 0,
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn nvml_process_memory_parses_device_and_json_without_cuda() {
+        let parsed =
+            parse_args(strings(&["nvml-process-memory", "--device", "2", "--json"])).unwrap();
+        assert_eq!(
+            parsed,
+            Command::NvmlProcessMemory(NvmlProcessMemoryArgs {
+                device_ordinal: 2,
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn nvml_process_memory_help_and_rejects_without_cuda() {
+        assert_eq!(
+            parse_args(strings(&["nvml-process-memory", "--help"])).unwrap(),
+            Command::Help
+        );
+        assert!(parse_args(strings(&["nvml-process-memory", "--device", "-1"])).is_err());
+        assert!(parse_args(strings(&["nvml-process-memory", "--device", "gpu0"])).is_err());
+        assert!(parse_args(strings(&["nvml-process-memory", "--device"])).is_err());
+        assert!(parse_args(strings(&["nvml-process-memory", "--unknown"])).is_err());
+        assert!(USAGE.contains("nvml-process-memory"));
+        assert!(USAGE.contains("--json"));
+    }
+
+    #[test]
+    fn nvml_process_memory_text_and_json_formatters_are_versioned() {
+        let snapshot = NvmlProcessMemorySnapshotV1 {
+            schema_version: NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
+            pid: 42,
+            device_ordinal: 1,
+            device_uuid: "GPU-test-uuid".to_string(),
+            used_gpu_memory_bytes: 1_024,
+        };
+        let text = format_nvml_process_memory_text(&snapshot);
+        assert!(text.contains("schema_version: 1"));
+        assert!(text.contains("pid: 42"));
+        assert!(text.contains("used_gpu_memory_bytes: 1024"));
+        assert!(text.contains("Not physical residency"));
+        let json = format_nvml_process_memory_json(&snapshot).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["pid"], 42);
+        assert_eq!(value["device_ordinal"], 1);
+        assert_eq!(value["device_uuid"], "GPU-test-uuid");
+        assert_eq!(value["used_gpu_memory_bytes"], 1024);
     }
 
     #[test]

@@ -101,3 +101,14 @@ This v1 evidence does not establish:
 - a low-bit representation baseline.
 
 The purpose is to create a reproducible physical process-memory observation surface that can later be consumed alongside the exact NNIS-owned allocation evidence by the preregistered ElasticBitAllocation Stage B protocol. The software artifact/validator contract by itself is not a Thor measurement.
+
+## Related software CLI
+
+For ad-hoc, fail-closed process-scoped NVML snapshots without running the SmolLM2 lifecycle harness, use:
+
+```bash
+cargo run --release -p nnis-cli --bin nnis -- nvml-process-memory [--device N] [--json]
+```
+
+That command is a read-only software observability surface over `current_process_gpu_memory`. It does not replace this lifecycle harness, does not produce Thor campaign artifacts, and does not claim physical residency, weight-only attribution, or performance.
+

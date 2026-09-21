@@ -35,6 +35,21 @@ This contract is intentionally distinct from `WeightAllocationSummaryV1` and the
 
 A difference between NVML process memory and NNIS-owned buffer accounting is not automatically allocator overhead. It can include memory outside the weight graph and requires separate attribution.
 
+## CLI surface
+
+The main `nnis` binary exposes a fail-closed, read-only debug command:
+
+```bash
+cargo run --release -p nnis-cli --bin nnis -- nvml-process-memory [--device N] [--json]
+```
+
+- `--device N` selects the CUDA device ordinal (default `0`);
+- the command retains a primary CUDA context so this PID is visible to NVML as a compute process, then calls `nnis::current_process_gpu_memory`;
+- human text is the default; `--json` emits pretty-printed versioned JSON with `schema_version` matching `NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION`;
+- library/NVML/CUDA failures exit non-zero without panicking.
+
+This CLI is software observability only. It does not claim physical residency, weight-only attribution, allocator overhead, or performance.
+
 ## Explicit non-claims
 
 V1 does **not** claim:
