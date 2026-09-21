@@ -25,7 +25,7 @@ pub use device::{Device, DeviceProps};
 pub use error::{ErrorKind, NnisError, Result};
 pub use kv_cache::{KvAppend, KvCache, KvCacheConfig};
 pub use kv_compaction::{compact_kv_cache, compact_kv_cache_layer};
-pub use kv_telemetry::{observe_kv_cache, KvCacheTelemetry};
+pub use kv_telemetry::{observe_kv_cache, KvCacheTelemetry, NNIS_KV_CACHE_TELEMETRY_VERSION};
 pub use memory::{DeviceBuffer, DevicePod, PinnedBuffer};
 pub use pool::{PooledBuffer, StreamOrderedAllocator};
 pub use process_memory::{
