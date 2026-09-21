@@ -80,6 +80,10 @@ jobs:
         if: always()
         run: bash scripts/check-portable-core.sh
 
+      - name: Verify portable CPU dependency boundary
+        if: always()
+        run: bash scripts/check-portable-cpu.sh
+
       - name: clippy
         if: always()
         run: cargo clippy --workspace --all-targets -- -D warnings
