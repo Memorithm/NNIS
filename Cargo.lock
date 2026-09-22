@@ -408,6 +408,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nnis-cpu"
+version = "0.1.0"
+dependencies = [
+ "nnis-core",
+]
+
+[[package]]
 name = "nnis-jit"
 version = "0.1.0"
 dependencies = [
