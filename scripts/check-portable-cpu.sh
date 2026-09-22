@@ -15,5 +15,6 @@ done
 cargo check --locked -p nnis-cpu --all-targets
 cargo test --locked -p nnis-cpu --all-targets
 cargo run --locked -p nnis-cpu --example portable_buffers
+cargo run --locked -p nnis-cpu --example portable_f32_graph
 
 echo "nnis-cpu portable dependency boundary: OK"
