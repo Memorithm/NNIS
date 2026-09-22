@@ -59,15 +59,72 @@ completed:
       - numerical_kernel_or_model_graph_execution
       - ElasticXxx_transactional_adapter
       - WGPU_execution_or_cross_hardware_parity
+  P2b_cpu_numerical_reference:
+    pull_request: 163
+    qualified_head: 5604ddc17382449d21607827efe3072b60aeb7c0
+    merge_commit: 56fce770e02be486f620cfb54e9913098f982125
+    status: complete_reference_operations_and_fixed_tiny_graph_only
+    exact_head_ci: {run_id: 35780286613, conclusion: success}
+    quality_job_id: 106923782447
+    Rust_1_77_check: success
+    rustfmt_clippy_workspace_tests: success
+    strict_rustdoc: success
+    CPU_tests:
+      existing_memory_unit: 12
+      numerical_integration_debug: 17
+      numerical_integration_release: 17
+      fixed_graph: 1
+      conditional_GPU_skips_in_new_tests: false
+    numerical_policy: finite-f32-le-ordered-fma-v1
+    scope:
+      - STORAGE_checked_little_endian_F32_byte_buffers
+      - equal_shape_add_multiply_and_ReLU
+      - increasing_index_F32_sum_and_increasing_K_fused_projection
+      - indexed_gather_and_sequential_duplicate_aware_scatter_add
+      - finite_input_and_intermediate_validation
+      - explicit_requested_scratch_payload_ceiling_with_actual_capacity_report
+      - complete_output_staging_before_single_operation_commit
+      - destination_bytes_and_capacity_unchanged_on_returned_errors
+      - reused_P2a_memory_validation_and_fallible_reservation
+      - no_new_dependencies_or_final_CI_write_permissions
+    fixed_graph:
+      execution: actual_host_CPU_example_in_exact_head_CI
+      operations: 7
+      sequence: [project, bias_add, ReLU, project, bias_add, gather, sum]
+      hidden: [5, 0]
+      logits: [11, -3]
+      gathered: [-3, 11, -3]
+      result: 5
+      observed_max_scratch_payload_bytes: 12
+      observed_max_scratch_capacity_bytes: 12
+      memory_scope: operation_output_staging_only_not_total_graph_memory
+      source: hand_chosen_dyadic_fixture_not_trained_model
+    reuse_review:
+      repository: Memorithm/scirust
+      revision: 571154e122c53aa1d8fcbb01d3654526b9ffd459
+      inspected_crates: [scirust-core, scirust-retrieval]
+      inspected_MS​​RV: "1.89"
+      NNIS_MS​​RV: "1.77"
+      decision: no_incompatible_dependency_or_optimized_math_copy
+      generic_math_ownership: SciRust
+      record: docs/PORTABLE_CPU_NUMERICAL_V1.md
+    not_claimed:
+      - general_graph_scheduler_or_portable_kernel_dispatch_contract
+      - trained_model_execution_quality_or_serving_performance
+      - ARM64_or_WGPU_numerical_parity
+      - compressed_weight_execution
+      - global_memory_budget_or_physical_residency
+      - ElasticXxx_transactional_adapter
+      - ElasticBitAllocation_Stage_B_execution
 current:
-  earliest_open_slice: P2_CPU_numerical_operations
-  status: not_implemented_by_memory_slice
+  earliest_open_slice: portable_kernel_and_graph_dispatch_contract
+  status: fixed_CPU_graph_qualified_general_scheduling_and_WGPU_still_open
 next:
-  - define_CPU_numerical_operations_with_explicit_order_rounding_and_failure_contracts
-  - compare_reusable_numerical_ownership_with_SciRust_before_duplicating_math
-  - implement_and_qualify_complete_small_CPU_graph
-  - define_portable_kernel_package_and_WGPU_parity
+  - define_versioned_portable_kernel_package_and_bounded_graph_scheduling
+  - qualify_WGPU_against_explicit_CPU_reference_semantics
+  - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately
   - expose_versioned_executable_plans_to_ElasticXxx_after_backend_verification_exists
+  - retain_SciRust_generic_math_ownership_and_review_compatible_shared_primitives
 research_gates:
   historical_ElasticBitAllocation_Stage_B_protocol_unchanged: true
   portable_model_campaign_requires_reviewed_versioned_preregistration: true
