@@ -1,0 +1,74 @@
+schema_version: 1
+kind: nnis_portable_execution_progress
+repository: Memorithm/NNIS
+last_updated: "2026-09-22"
+status: active
+merge_policy: never_merge_this_file_to_main_without_explicit_user_request
+scope: >-
+  Portable CPU/WGPU implementation supplement to the historical sovereignty
+  roadmap and ML overlay. Read with docs/V888_CONNECTOME_BOOTSTRAP.md.
+direction:
+  portable_name: Native_Neural_Inference_Stack
+  new_work_backends: [CPU, WGPU]
+  new_vendor_dependency_allowed: false
+  legacy_cuda: historical_reference_not_portable_qualification
+  publication_authorized: false
+completed:
+  P0_inventory:
+    pull_request: 159
+    merge_commit: 8fc214704b121e19c81848d8ca57d29073dcc8d6
+    scope: audited_dependency_and_semantic_ownership_inventory
+  P1_memory_contract:
+    pull_request: 160
+    qualified_head: 75f6ea6b5888b63b3f687604a1b1961e467ebbce
+    merge_commit: 73c5a9e4c0113c3dd0e73d3909d13a5939ac4d2b
+    exact_head_ci: {run_id: 35776257558, conclusion: success}
+    exact_head_harness: {run_id: 35776257564, conclusion: success}
+    source_blob: 29a3c0faeb07e8ca80f27e1d1aee2d2eaec25f6c
+    scope:
+      - zero_dependency_nnis_core_without_unsafe
+      - CPU_WGPU_identity_memory_classes_usage_and_capability_contracts
+      - portable_device_buffer_queue_fence_traits
+      - public_descriptor_revalidation_before_allocation
+    not_claimed: [kernel_dispatch, numerical_execution, model_execution, WGPU_backend]
+current:
+  P2a_cpu_memory:
+    pull_request: 161
+    candidate_head: 211d903a1f9b521af5434eaa1462b021896c7f96
+    status: implemented_exact_head_qualification_pending
+    merged: false
+    scope:
+      - actual_zero_initialized_host_buffers_and_synchronous_copies
+      - invalid_literal_descriptors_rejected_before_allocation
+      - explicit_per_buffer_limit_bounded_by_host_isize_MAX
+      - fallible_creation_and_readback_reservation
+      - checked_buffer_copy_without_temporary_payload_allocation
+      - failure_atomicity_for_range_and_usage_rejections
+      - payload_length_separate_from_retained_Vec_capacity
+      - executable_checkpoint_copy_reject_restore_example
+      - normal_build_dev_dependency_boundary_guard
+    remaining_before_merge:
+      - require_all_applicable_CI_green_on_exact_final_head
+      - verify_real_CPU_tests_and_executable_example_success
+      - resolve_any_material_review_findings
+    not_claimed:
+      - global_live_allocation_budget
+      - physical_RAM_residency_or_process_RSS
+      - survival_of_OS_overcommit_termination
+      - fallible_derived_Clone
+      - numerical_kernel_or_model_graph_execution
+      - ElasticXxx_transactional_adapter
+      - WGPU_execution_or_cross_hardware_parity
+next:
+  - finish_and_merge_P2a_only_after_exact_head_qualification
+  - define_CPU_numerical_operations_with_explicit_order_rounding_and_failure_contracts
+  - compare_reusable_numerical_ownership_with_SciRust_before_duplicating_math
+  - implement_and_qualify_complete_small_CPU_graph
+  - define_portable_kernel_package_and_WGPU_parity
+  - expose_versioned_executable_plans_to_ElasticXxx_after_backend_verification_exists
+research_gates:
+  historical_ElasticBitAllocation_Stage_B_protocol_unchanged: true
+  portable_model_campaign_requires_reviewed_versioned_preregistration: true
+  fixed_baseline_model_evidence_complete: false
+  allocator_search_authorized: false
+  final_test_authorized: false
