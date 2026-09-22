@@ -16,22 +16,42 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Format only reviewed numerical files
+      - name: Apply reviewed repairs and format candidate
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/nnis-cpu/src/lib.rs')
+          s = p.read_text()
+          old = '            (0, u64::MAX, 2),\n            (17, 0, 0),'
+          new = '            (0, u64::MAX, 2),\n            (0, 0, u64::MAX),\n            (17, 0, 0),'
+          if old in s:
+              assert s.count(old) == 1
+              p.write_text(s.replace(old, new))
+          else:
+              assert new in s, 'legacy test anchor drift'
+          p = Path('crates/nnis-cpu/src/numerical.rs')
+          s = p.read_text()
+          old = '/// Project [1,K] x row-major [K,N] -> [1,N], without bias or transposition.'
+          new = '/// Project `[1,K] x [K,N] -> [1,N]` with row-major weights, without bias.'
+          if old in s:
+              p.write_text(s.replace(old, new))
+          else:
+              assert new in s, 'documentation anchor drift'
+          PY
           rustup component add rustfmt
           cargo fmt --all
           git diff --name-only > /tmp/p2b-format-paths
           while IFS= read -r path; do
             case "$path" in
               crates/nnis-cpu/src/lib.rs|crates/nnis-cpu/src/numerical.rs|crates/nnis-cpu/tests/numerical_reference.rs|crates/nnis-cpu/examples/portable_f32_graph.rs) ;;
-              *) echo "Unexpected formatting path: $path" >&2; exit 1 ;;
+              *) echo "Unexpected repair path: $path" >&2; exit 1 ;;
             esac
           done < /tmp/p2b-format-paths
           if git diff --quiet; then exit 0; fi
           git add -- crates/nnis-cpu/src/lib.rs crates/nnis-cpu/src/numerical.rs crates/nnis-cpu/tests/numerical_reference.rs crates/nnis-cpu/examples/portable_f32_graph.rs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'style(cpu): apply canonical rustfmt to P2b reference'
+          git commit -m 'fix(cpu): preserve legacy overflow case and escape numerical rustdoc'
           git push origin HEAD:refs/heads/feat/p2b-cpu-numerical-reference
