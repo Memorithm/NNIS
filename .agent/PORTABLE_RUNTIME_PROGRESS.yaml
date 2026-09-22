@@ -116,12 +116,74 @@ completed:
       - global_memory_budget_or_physical_residency
       - ElasticXxx_transactional_adapter
       - ElasticBitAllocation_Stage_B_execution
+  P2c_bounded_graph_execution:
+    pull_request: 164
+    qualified_head: 2c20e25241696ce06543986320e4bbb14ac6902f
+    merge_commit: 83019589ba644f3bbf9f2527ca5264c8422b3b88
+    status: complete_typed_builtin_graph_and_scalar_CPU_executor_only
+    exact_head_ci: {run_id: 35785359071, conclusion: success}
+    quality_job_id: 106940725386
+    Rust_1_77_job_id: 106940725037
+    Rust_1_77_check: success
+    rustfmt_clippy_workspace_tests: success
+    strict_rustdoc_core_and_CPU: success
+    CPU_tests:
+      new_graph_contract_debug: 12
+      new_graph_contract_release: 12
+      new_graph_execution_debug: 8
+      new_graph_execution_release: 8
+      new_runtime_plan_example: 1
+      conditional_GPU_skips_in_new_tests: false
+      previous_core_memory_numerical_and_fixed_graph_tests: preserved_and_passed
+    contract:
+      version: 1
+      numerical_policy: finite-f32-le-ordered-fma-v1
+      representation: borrowed_immutable_typed_in_memory_plan
+      topology: declaration_order_single_assignment_acyclic
+      output: last_node_only_after_all_nodes_succeed
+    scope:
+      - backend_neutral_zero_heap_static_plan_validation_in_nnis_core
+      - exact_vector_matrix_shapes_orientation_and_operand_dependencies
+      - positive_explicit_input_node_tensor_live_payload_scratch_and_work_limits
+      - checked_accounting_overflow_and_index_validation
+      - immutable_validated_handle_prevents_metadata_mutation_during_execution
+      - CPU_binding_usage_shape_finiteness_host_size_and_device_capability_preflight
+      - reused_P2b_arithmetic_without_new_math_or_dependencies
+      - fresh_private_node_outputs_retained_until_complete_success
+      - returned_errors_drop_intermediates_and_preserve_all_caller_inputs
+      - aliased_input_bindings_conservatively_charged_without_address_identity_claim
+      - capacities_and_control_vector_metadata_reported_separately_from_payload
+      - no_added_workflow_or_elevated_CI_write_permission_in_final_diff
+    runtime_plan_example:
+      execution: actual_host_CPU_example_in_exact_head_CI
+      nodes: 7
+      result: 5
+      rebind_test_result: 15
+      input_binding_payload_bytes: 68
+      total_node_payload_bytes: 56
+      max_scratch_payload_bytes: 12
+      conservative_live_payload_bound_bytes: 136
+      rejected_payload_limit_bytes: 135
+      observed_retained_node_capacity_bytes: 56
+      observed_max_scratch_capacity_bytes: 12
+      memory_scope: tensor_payload_bound_not_total_RAM_RSS_or_physical_residency
+      source: hand_chosen_dyadic_fixture_not_trained_model
+    record: docs/PORTABLE_F32_GRAPH_V1.md
+    not_claimed:
+      - serialized_model_or_shader_ABI_or_portable_kernel_artifact_package
+      - optimized_liveness_pooling_parallel_or_dynamic_graph_scheduling
+      - crash_durability_or_rollback_of_external_effects
+      - ARM64_or_WGPU_numerical_parity
+      - trained_model_quality_compressed_weight_execution_or_speedup
+      - total_process_memory_budget_or_OS_overcommit_guarantee
+      - ElasticXxx_transactional_adapter
+      - ElasticBitAllocation_Stage_B_execution
 current:
-  earliest_open_slice: portable_kernel_and_graph_dispatch_contract
-  status: fixed_CPU_graph_qualified_general_scheduling_and_WGPU_still_open
+  earliest_open_slice: portable_kernel_artifact_binding_and_capability_contract
+  status: typed_CPU_graph_execution_qualified_WGPU_and_real_consumers_still_open
 next:
-  - define_versioned_portable_kernel_package_and_bounded_graph_scheduling
-  - qualify_WGPU_against_explicit_CPU_reference_semantics
+  - define_versioned_portable_kernel_artifact_binding_and_capability_identity
+  - qualify_WGPU_against_explicit_CPU_reference_and_graph_semantics
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately
   - expose_versioned_executable_plans_to_ElasticXxx_after_backend_verification_exists
   - retain_SciRust_generic_math_ownership_and_review_compatible_shared_primitives
