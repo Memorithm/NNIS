@@ -187,11 +187,8 @@ impl PortableDevice for CpuDevice {
 
     fn create_buffer(&self, descriptor: BufferDesc) -> Result<Self::Buffer> {
         // Public descriptors may bypass their constructor or be mutated later.
-        let descriptor = BufferDesc::new(
-            descriptor.size_bytes,
-            descriptor.usages,
-            descriptor.memory,
-        )?;
+        let descriptor =
+            BufferDesc::new(descriptor.size_bytes, descriptor.usages, descriptor.memory)?;
         if descriptor.size_bytes > self.capabilities.max_buffer_bytes {
             return Err(PortableError::Unsupported(
                 "buffer exceeds CPU backend capability".to_string(),
@@ -283,10 +280,15 @@ mod tests {
         let mut buffer = device.create_buffer(descriptor(usages)).unwrap();
         let queue = device.create_queue().unwrap();
         assert_eq!(queue.read_buffer(&buffer, 0, 16).unwrap(), vec![0; 16]);
-        let fence = queue.write_buffer(&mut buffer, 5, &[10, 20, 30, 40]).unwrap();
+        let fence = queue
+            .write_buffer(&mut buffer, 5, &[10, 20, 30, 40])
+            .unwrap();
         assert_eq!(fence.status().unwrap(), FenceStatus::Complete);
         fence.wait().unwrap();
-        assert_eq!(queue.read_buffer(&buffer, 5, 4).unwrap(), vec![10, 20, 30, 40]);
+        assert_eq!(
+            queue.read_buffer(&buffer, 5, 4).unwrap(),
+            vec![10, 20, 30, 40]
+        );
         assert_eq!(buffer.len(), 16);
         assert!(buffer.capacity_bytes() >= buffer.len());
         assert!(!buffer.is_empty());
@@ -303,7 +305,10 @@ mod tests {
             queue.write_buffer(&mut write_forbidden, 0, &[1]),
             Err(PortableError::Unsupported(_))
         ));
-        assert_eq!(queue.read_buffer(&write_forbidden, 0, 16).unwrap(), vec![0; 16]);
+        assert_eq!(
+            queue.read_buffer(&write_forbidden, 0, 16).unwrap(),
+            vec![0; 16]
+        );
         let read_forbidden = device
             .create_buffer(descriptor(BufferUsages::COPY_DST))
             .unwrap();
@@ -353,8 +358,14 @@ mod tests {
     fn invalid_literal_descriptors_are_rejected_before_allocation() {
         let device = CpuDevice::new().unwrap();
         for descriptor in [
-            BufferDesc { size_bytes: 0, ..readable_writable() },
-            BufferDesc { usages: BufferUsages::EMPTY, ..readable_writable() },
+            BufferDesc {
+                size_bytes: 0,
+                ..readable_writable()
+            },
+            BufferDesc {
+                usages: BufferUsages::EMPTY,
+                ..readable_writable()
+            },
         ] {
             assert!(matches!(
                 device.create_buffer(descriptor),
@@ -372,9 +383,15 @@ mod tests {
             device.create_buffer(readable_writable()),
             Err(PortableError::Unsupported(_))
         ));
-        let descriptor = BufferDesc { size_bytes: 15, ..readable_writable() };
+        let descriptor = BufferDesc {
+            size_bytes: 15,
+            ..readable_writable()
+        };
         assert_eq!(device.create_buffer(descriptor).unwrap().len(), 15);
-        let impossible = BufferDesc { size_bytes: isize::MAX as u64 + 1, ..readable_writable() };
+        let impossible = BufferDesc {
+            size_bytes: isize::MAX as u64 + 1,
+            ..readable_writable()
+        };
         assert!(matches!(
             CpuDevice::new().unwrap().create_buffer(impossible),
             Err(PortableError::Unsupported(_))
@@ -383,7 +400,10 @@ mod tests {
 
     #[test]
     fn reservation_capacity_overflow_is_an_error_not_a_panic() {
-        assert!(matches!(reserve_bytes(usize::MAX), Err(PortableError::Backend(_))));
+        assert!(matches!(
+            reserve_bytes(usize::MAX),
+            Err(PortableError::Backend(_))
+        ));
     }
 
     #[test]
@@ -392,16 +412,23 @@ mod tests {
         let queue = device.create_queue().unwrap();
         let mut source = device.create_buffer(readable_writable()).unwrap();
         let mut destination = device.create_buffer(readable_writable()).unwrap();
-        queue.write_buffer(&mut source, 0, &[1, 2, 3, 4, 5, 6]).unwrap();
+        queue
+            .write_buffer(&mut source, 0, &[1, 2, 3, 4, 5, 6])
+            .unwrap();
         queue.write_buffer(&mut destination, 0, &[9; 16]).unwrap();
         let capacity = destination.capacity_bytes();
-        let fence = queue.copy_buffer(&source, 1, &mut destination, 4, 3).unwrap();
+        let fence = queue
+            .copy_buffer(&source, 1, &mut destination, 4, 3)
+            .unwrap();
         assert_eq!(fence.status().unwrap(), FenceStatus::Complete);
         let mut expected = vec![9; 16];
         expected[4..7].copy_from_slice(&[2, 3, 4]);
         assert_eq!(queue.read_buffer(&destination, 0, 16).unwrap(), expected);
         assert_eq!(destination.capacity_bytes(), capacity);
-        assert_eq!(queue.read_buffer(&source, 0, 6).unwrap(), vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(
+            queue.read_buffer(&source, 0, 6).unwrap(),
+            vec![1, 2, 3, 4, 5, 6]
+        );
     }
 
     #[test]
@@ -412,16 +439,29 @@ mod tests {
         let mut destination = device.create_buffer(readable_writable()).unwrap();
         queue.write_buffer(&mut destination, 0, &[7; 16]).unwrap();
         for (source_offset, destination_offset, size) in [
-            (15, 0, 2), (0, 15, 2), (u64::MAX, 0, 2), (0, u64::MAX, 2),
-            (0, 0, u64::MAX), (17, 0, 0), (0, 17, 0),
+            (15, 0, 2),
+            (0, 15, 2),
+            (u64::MAX, 0, 2),
+            (0, u64::MAX, 2),
+            (0, 0, u64::MAX),
+            (17, 0, 0),
+            (0, 17, 0),
         ] {
             assert!(matches!(
-                queue.copy_buffer(&source, source_offset, &mut destination, destination_offset, size),
+                queue.copy_buffer(
+                    &source,
+                    source_offset,
+                    &mut destination,
+                    destination_offset,
+                    size
+                ),
                 Err(PortableError::OutOfBounds { .. })
             ));
             assert_eq!(queue.read_buffer(&destination, 0, 16).unwrap(), vec![7; 16]);
         }
-        queue.copy_buffer(&source, 16, &mut destination, 16, 0).unwrap();
+        queue
+            .copy_buffer(&source, 16, &mut destination, 16, 0)
+            .unwrap();
         assert_eq!(queue.read_buffer(&destination, 0, 16).unwrap(), vec![7; 16]);
     }
 
@@ -429,10 +469,14 @@ mod tests {
     fn buffer_copy_requires_both_usage_permissions() {
         let device = CpuDevice::new().unwrap();
         let queue = device.create_queue().unwrap();
-        let source_forbidden = device.create_buffer(descriptor(BufferUsages::COPY_DST)).unwrap();
+        let source_forbidden = device
+            .create_buffer(descriptor(BufferUsages::COPY_DST))
+            .unwrap();
         let source = device.create_buffer(readable_writable()).unwrap();
         let mut destination = device.create_buffer(readable_writable()).unwrap();
-        let mut destination_forbidden = device.create_buffer(descriptor(BufferUsages::COPY_SRC)).unwrap();
+        let mut destination_forbidden = device
+            .create_buffer(descriptor(BufferUsages::COPY_SRC))
+            .unwrap();
         assert!(matches!(
             queue.copy_buffer(&source_forbidden, 0, &mut destination, 0, 1),
             Err(PortableError::Unsupported(_))
@@ -442,6 +486,9 @@ mod tests {
             Err(PortableError::Unsupported(_))
         ));
         assert_eq!(queue.read_buffer(&destination, 0, 16).unwrap(), vec![0; 16]);
-        assert_eq!(queue.read_buffer(&destination_forbidden, 0, 16).unwrap(), vec![0; 16]);
+        assert_eq!(
+            queue.read_buffer(&destination_forbidden, 0, 16).unwrap(),
+            vec![0; 16]
+        );
     }
 }
