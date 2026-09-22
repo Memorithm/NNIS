@@ -138,6 +138,9 @@ impl BitOrAssign for BufferUsages {
 }
 
 /// Backend-neutral buffer allocation descriptor.
+///
+/// Public fields allow literal construction and mutation. Backends must call
+/// [`Self::validate`] immediately before allocating, not trust constructor use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BufferDesc {
     pub size_bytes: u64,
@@ -148,21 +151,30 @@ pub struct BufferDesc {
 impl BufferDesc {
     /// Construct a non-empty buffer descriptor with at least one declared usage.
     pub fn new(size_bytes: u64, usages: BufferUsages, memory: MemoryClass) -> Result<Self> {
-        if size_bytes == 0 {
+        Self {
+            size_bytes,
+            usages,
+            memory,
+        }
+        .validate()
+    }
+
+    /// Revalidate the descriptor at a backend boundary.
+    ///
+    /// This does not prove device support, available memory, or allocation
+    /// success. Each backend must independently enforce those constraints.
+    pub fn validate(self) -> Result<Self> {
+        if self.size_bytes == 0 {
             return Err(PortableError::InvalidDescriptor(
                 "buffer size must be non-zero",
             ));
         }
-        if usages.is_empty() {
+        if self.usages.is_empty() {
             return Err(PortableError::InvalidDescriptor(
                 "buffer usage set must not be empty",
             ));
         }
-        Ok(Self {
-            size_bytes,
-            usages,
-            memory,
-        })
+        Ok(self)
     }
 }
 
@@ -228,6 +240,9 @@ pub trait PortableDevice {
     fn capabilities(&self) -> &CapabilitySet;
 
     /// Allocate one buffer under the portable descriptor contract.
+    ///
+    /// Implementations must revalidate public descriptor fields and backend
+    /// limits before allocation, including descriptors constructed as literals.
     fn create_buffer(&self, descriptor: BufferDesc) -> Result<Self::Buffer>;
 
     /// Create a queue suitable for data movement on this device.
@@ -307,11 +322,13 @@ mod tests {
             .map_err(|_| PortableError::Backend("offset does not fit usize".to_string()))?;
         let length = usize::try_from(size)
             .map_err(|_| PortableError::Backend("size does not fit usize".to_string()))?;
-        let end = start.checked_add(length).ok_or(PortableError::OutOfBounds {
-            offset_bytes: offset,
-            size_bytes: size,
-            buffer_bytes: total as u64,
-        })?;
+        let end = start
+            .checked_add(length)
+            .ok_or(PortableError::OutOfBounds {
+                offset_bytes: offset,
+                size_bytes: size,
+                buffer_bytes: total as u64,
+            })?;
         if end > total {
             return Err(PortableError::OutOfBounds {
                 offset_bytes: offset,
@@ -367,8 +384,10 @@ mod tests {
         }
 
         fn create_buffer(&self, descriptor: BufferDesc) -> Result<Self::Buffer> {
-            let size = usize::try_from(descriptor.size_bytes)
-                .map_err(|_| PortableError::Backend("buffer size does not fit usize".to_string()))?;
+            let descriptor = descriptor.validate()?;
+            let size = usize::try_from(descriptor.size_bytes).map_err(|_| {
+                PortableError::Backend("buffer size does not fit usize".to_string())
+            })?;
             if descriptor.size_bytes > self.capabilities.max_buffer_bytes {
                 return Err(PortableError::Unsupported(
                     "buffer exceeds device capability".to_string(),
@@ -415,6 +434,34 @@ mod tests {
         assert!(descriptor.usages.contains(BufferUsages::STORAGE));
         assert!(descriptor.usages.contains(BufferUsages::COPY_DST));
         assert!(!descriptor.usages.contains(BufferUsages::COPY_SRC));
+    }
+
+    #[test]
+    fn public_descriptor_mutation_is_revalidated() {
+        let device = TestDevice {
+            id: BackendId::new(BackendFamily::Cpu, "test-cpu").unwrap(),
+            capabilities: capabilities(),
+        };
+        let valid = BufferDesc::new(8, BufferUsages::STORAGE, MemoryClass::Host).unwrap();
+        assert_eq!(valid.validate().unwrap(), valid);
+        let invalid_size = BufferDesc {
+            size_bytes: 0,
+            ..valid
+        };
+        let invalid_usage = BufferDesc {
+            usages: BufferUsages::EMPTY,
+            ..valid
+        };
+        for invalid in [invalid_size, invalid_usage] {
+            assert!(matches!(
+                invalid.validate(),
+                Err(PortableError::InvalidDescriptor(_))
+            ));
+            assert!(matches!(
+                device.create_buffer(invalid),
+                Err(PortableError::InvalidDescriptor(_))
+            ));
+        }
     }
 
     #[test]
