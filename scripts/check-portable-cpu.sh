@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-tree="$(cargo tree -p nnis-cpu --edges normal --prefix none)"
+# Include test/example/build dependencies: a normal-only tree could hide a
+# vendor dependency in the very qualification intended to prove portability.
+tree="$(cargo tree --locked -p nnis-cpu --edges normal,build,dev --prefix none)"
 
 for forbidden in nnis-sys nnis-rt nnis-jit nnis-kernels nnis-model nnis-bench; do
   if printf '%s\n' "$tree" | grep -Eq "^$forbidden( |$)"; then
@@ -10,7 +12,8 @@ for forbidden in nnis-sys nnis-rt nnis-jit nnis-kernels nnis-model nnis-bench; d
   fi
 done
 
-cargo check -p nnis-cpu --all-targets
-cargo test -p nnis-cpu --all-targets
+cargo check --locked -p nnis-cpu --all-targets
+cargo test --locked -p nnis-cpu --all-targets
+cargo run --locked -p nnis-cpu --example portable_buffers
 
 echo "nnis-cpu portable dependency boundary: OK"
