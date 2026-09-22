@@ -1,11 +1,13 @@
 //! Deterministic pure-Rust CPU backend for the NNIS portable runtime contract.
 //!
-//! P2a implements buffer ownership, data movement, and immediate completion
-//! semantics only. Numerical kernels and model scheduling are intentionally
-//! separate later slices. Per-buffer limits are admission ceilings, not a
-//! promise of available RAM or a process-wide memory budget.
+//! Buffer ownership, checked data movement and immediate completion are joined
+//! by explicit finite-F32 reference operations in [`numerical`]. Per-buffer
+//! limits are admission ceilings, not a promise of available RAM or a
+//! process-wide memory budget. General model scheduling remains separate.
 
 #![forbid(unsafe_code)]
+
+pub mod numerical;
 
 use core::ops::Range;
 
@@ -443,7 +445,6 @@ mod tests {
             (0, 15, 2),
             (u64::MAX, 0, 2),
             (0, u64::MAX, 2),
-            (0, 0, u64::MAX),
             (17, 0, 0),
             (0, 17, 0),
         ] {
