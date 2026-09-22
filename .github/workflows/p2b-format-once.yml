@@ -1,0 +1,37 @@
+name: P2b bounded formatting repair
+on:
+  pull_request:
+    types: [synchronize]
+permissions:
+  contents: write
+concurrency:
+  group: p2b-format-once
+  cancel-in-progress: false
+jobs:
+  format:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/p2b-cpu-numerical-reference'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Format only reviewed numerical files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt
+          cargo fmt --all
+          git diff --name-only > /tmp/p2b-format-paths
+          while IFS= read -r path; do
+            case "$path" in
+              crates/nnis-cpu/src/lib.rs|crates/nnis-cpu/src/numerical.rs|crates/nnis-cpu/tests/numerical_reference.rs|crates/nnis-cpu/examples/portable_f32_graph.rs) ;;
+              *) echo "Unexpected formatting path: $path" >&2; exit 1 ;;
+            esac
+          done < /tmp/p2b-format-paths
+          if git diff --quiet; then exit 0; fi
+          git add -- crates/nnis-cpu/src/lib.rs crates/nnis-cpu/src/numerical.rs crates/nnis-cpu/tests/numerical_reference.rs crates/nnis-cpu/examples/portable_f32_graph.rs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'style(cpu): apply canonical rustfmt to P2b reference'
+          git push origin HEAD:refs/heads/feat/p2b-cpu-numerical-reference
