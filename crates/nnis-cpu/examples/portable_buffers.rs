@@ -1,8 +1,8 @@
 //! Executable memory smoke, not a model or adaptive-policy benchmark.
 
 use nnis_core::{
-    BufferDesc, BufferUsages, PortableDevice, PortableError, PortableFence, PortableQueue,
-    Result, MemoryClass,
+    BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableError, PortableFence,
+    PortableQueue, Result,
 };
 use nnis_cpu::CpuDevice;
 
@@ -23,10 +23,17 @@ fn main() -> Result<()> {
     let mut candidate = device.create_buffer(descriptor)?;
 
     queue.write_buffer(&mut current, 0, &[11; 16])?.wait()?;
-    queue.copy_buffer(&current, 0, &mut checkpoint, 0, 16)?.wait()?;
+    queue
+        .copy_buffer(&current, 0, &mut checkpoint, 0, 16)?
+        .wait()?;
     queue.write_buffer(&mut candidate, 0, &[22; 16])?.wait()?;
-    queue.copy_buffer(&candidate, 0, &mut current, 0, 16)?.wait()?;
-    require(queue.read_buffer(&current, 0, 16)? == [22; 16], "copy mismatch")?;
+    queue
+        .copy_buffer(&candidate, 0, &mut current, 0, 16)?
+        .wait()?;
+    require(
+        queue.read_buffer(&current, 0, 16)? == [22; 16],
+        "copy mismatch",
+    )?;
 
     let rejected = queue.copy_buffer(&candidate, 0, &mut current, 15, 2);
     require(
@@ -38,14 +45,19 @@ fn main() -> Result<()> {
         "rejected copy changed the destination",
     )?;
 
-    queue.copy_buffer(&checkpoint, 0, &mut current, 0, 16)?.wait()?;
+    queue
+        .copy_buffer(&checkpoint, 0, &mut current, 0, 16)?
+        .wait()?;
     require(
         queue.read_buffer(&current, 0, 16)? == [11; 16],
         "explicit checkpoint restoration failed",
     )?;
     let oversized = BufferDesc::new(65, usage, MemoryClass::Host)?;
     require(
-        matches!(device.create_buffer(oversized), Err(PortableError::Unsupported(_))),
+        matches!(
+            device.create_buffer(oversized),
+            Err(PortableError::Unsupported(_))
+        ),
         "per-buffer admission limit was not enforced",
     )?;
     println!(
