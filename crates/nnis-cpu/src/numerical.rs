@@ -120,7 +120,7 @@ impl CpuF32KernelsV1 {
         })
     }
 
-    /// Project [1,K] x row-major [K,N] -> [1,N], without bias or transposition.
+    /// Project `[1,K] x [K,N] -> [1,N]` with row-major weights, without bias.
     ///
     /// Each output starts at +0 and calls F32 mul_add in increasing K order.
     /// Every intermediate must be finite. K and N must be non-zero.
