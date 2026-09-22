@@ -8,18 +8,30 @@ use nnis_cpu::{CpuBuffer, CpuDevice};
 
 fn tensor(device: &CpuDevice, values: &[f32]) -> Result<CpuBuffer> {
     let usage = BufferUsages::STORAGE | BufferUsages::COPY_SRC | BufferUsages::COPY_DST;
-    let bytes: Vec<u8> = values.iter().flat_map(|value| value.to_le_bytes()).collect();
+    let bytes: Vec<u8> = values
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect();
     let descriptor = BufferDesc::new(bytes.len() as u64, usage, MemoryClass::Host)?;
     let mut buffer = device.create_buffer(descriptor)?;
-    device.create_queue()?.write_buffer(&mut buffer, 0, &bytes)?;
+    device
+        .create_queue()?
+        .write_buffer(&mut buffer, 0, &bytes)?;
     Ok(buffer)
 }
 
 fn check(device: &CpuDevice, buffer: &CpuBuffer, expected: &[f32]) -> Result<()> {
-    let actual = device.create_queue()?.read_buffer(buffer, 0, buffer.len() as u64)?;
-    let expected: Vec<u8> = expected.iter().flat_map(|value| value.to_le_bytes()).collect();
+    let actual = device
+        .create_queue()?
+        .read_buffer(buffer, 0, buffer.len() as u64)?;
+    let expected: Vec<u8> = expected
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect();
     if actual != expected {
-        return Err(PortableError::Backend("fixed CPU graph output mismatch".to_string()));
+        return Err(PortableError::Backend(
+            "fixed CPU graph output mismatch".to_string(),
+        ));
     }
     Ok(())
 }
@@ -53,8 +65,16 @@ fn run() -> Result<()> {
     check(&device, &logits, &[11.0, -3.0])?;
     check(&device, &selected, &[-3.0, 11.0, -3.0])?;
     check(&device, &scalar, &[5.0])?;
-    let largest_scratch = reports.iter().map(|report| report.scratch_payload_bytes).max().unwrap_or(0);
-    let largest_capacity = reports.iter().map(|report| report.scratch_capacity_bytes).max().unwrap_or(0);
+    let largest_scratch = reports
+        .iter()
+        .map(|report| report.scratch_payload_bytes)
+        .max()
+        .unwrap_or(0);
+    let largest_capacity = reports
+        .iter()
+        .map(|report| report.scratch_capacity_bytes)
+        .max()
+        .unwrap_or(0);
     println!(
         "CPU_F32_GRAPH_OK policy={} operations={} logits=[11,-3] result=5 max_scratch_payload_bytes={} max_scratch_capacity_bytes={}",
         CPU_F32_NUMERICAL_POLICY,

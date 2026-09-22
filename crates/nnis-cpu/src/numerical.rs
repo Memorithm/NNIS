@@ -133,7 +133,9 @@ impl CpuF32KernelsV1 {
         n: usize,
     ) -> Result<CpuF32ReportV1> {
         if k == 0 || n == 0 {
-            return Err(PortableError::InvalidDescriptor("CPU F32 matrix dimensions must be positive"));
+            return Err(PortableError::InvalidDescriptor(
+                "CPU F32 matrix dimensions must be positive",
+            ));
         }
         let elements = k.checked_mul(n).ok_or(PortableError::InvalidDescriptor(
             "CPU F32 matrix shape overflows usize",
@@ -256,7 +258,12 @@ fn word_count(buffer: &CpuBuffer) -> Result<usize> {
 // Callers validate buffer lengths and every index before reaching this helper.
 fn value_at(bytes: &[u8], index: usize) -> f32 {
     let offset = index * 4;
-    f32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
+    f32::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+    ])
 }
 
 fn finite(value: f32) -> Result<f32> {
@@ -277,7 +284,9 @@ fn require_equal(actual: usize, expected: usize) -> Result<()> {
 
 fn validate_indices(indices: &[usize], limit: usize) -> Result<()> {
     if indices.is_empty() || indices.iter().any(|&index| index >= limit) {
-        return Err(PortableError::InvalidDescriptor("CPU F32 index list is empty or out of range"));
+        return Err(PortableError::InvalidDescriptor(
+            "CPU F32 index list is empty or out of range",
+        ));
     }
     Ok(())
 }
