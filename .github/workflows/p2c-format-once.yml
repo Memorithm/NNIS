@@ -1,0 +1,55 @@
+name: P2c bounded source preparation
+on:
+  pull_request:
+    types: [opened, synchronize]
+permissions:
+  contents: write
+concurrency:
+  group: p2c-source-preparation
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/p2c-bounded-graph-execution'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Apply exact exports and canonical formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          files = {
+              'crates/nnis-core/src/lib.rs': '29a3c0faeb07e8ca80f27e1d1aee2d2eaec25f6c',
+              'crates/nnis-cpu/src/lib.rs': 'c05d5689b6b31e9a4cc6315070c27a3ac9483cb0',
+          }
+          for name, expected in files.items():
+              p = Path(name)
+              s = p.read_text()
+              if 'pub mod graph;' in s:
+                  continue
+              actual = subprocess.check_output(['git', 'hash-object', name], text=True).strip()
+              assert actual == expected, f'base library changed: {name}'
+              anchor = '#![forbid(unsafe_code)]\n'
+              assert s.count(anchor) == 1
+              p.write_text(s.replace(anchor, anchor + '\npub mod graph;\n'))
+          PY
+          rustup component add rustfmt
+          cargo fmt --all
+          git diff --name-only > /tmp/p2c-paths
+          while IFS= read -r path; do
+            case "$path" in
+              crates/nnis-core/src/lib.rs|crates/nnis-core/src/graph.rs|crates/nnis-core/tests/graph_contract.rs|crates/nnis-cpu/src/lib.rs|crates/nnis-cpu/src/graph.rs|crates/nnis-cpu/tests/graph_execution.rs|crates/nnis-cpu/examples/portable_graph_plan.rs) ;;
+              *) echo "Unexpected source change: $path" >&2; exit 1 ;;
+            esac
+          done < /tmp/p2c-paths
+          if git diff --quiet; then exit 0; fi
+          git add -- crates/nnis-core/src/lib.rs crates/nnis-core/src/graph.rs crates/nnis-core/tests/graph_contract.rs crates/nnis-cpu/src/lib.rs crates/nnis-cpu/src/graph.rs crates/nnis-cpu/tests/graph_execution.rs crates/nnis-cpu/examples/portable_graph_plan.rs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'style(graph): export modules and apply canonical formatting'
+          git push origin HEAD:refs/heads/feat/p2c-bounded-graph-execution
