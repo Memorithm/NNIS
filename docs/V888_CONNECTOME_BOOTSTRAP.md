@@ -1,6 +1,6 @@
 # BANC V888 and portable native-runtime bootstrap for NNIS
 
-Status: strategic bootstrap.
+Status: strategic bootstrap with implemented portable memory slices.
 
 ## Direction change
 
@@ -30,6 +30,38 @@ Rust model/runtime contracts
   -> FLAT-ATTENTION / SML / sparse recurrent kernels
 
 NNIS does not own model science. SciRust owns generic numerical primitives, FLAT owns attention semantics, SML owns its model, and TDI owns scientific evaluation.
+
+## Portable implementation checkpoint
+
+P0 inventory is merged through #159. The minimal P1 memory/queue/fence contract
+is merged through #160, exact qualified head
+`75f6ea6b5888b63b3f687604a1b1961e467ebbce`, merge
+`73c5a9e4c0113c3dd0e73d3909d13a5939ac4d2b`.
+Kernel/module/dispatch and timestamp execution are not implemented by that slice.
+
+P2a implementation in #161 covers real CPU buffer ownership and synchronous
+copies, not numerical execution. See
+[`PORTABLE_CPU_MEMORY_V1.md`](PORTABLE_CPU_MEMORY_V1.md) for admission limits,
+fallible reservation, usage/range validation, accounting boundaries and the
+executable checkpoint/copy/restore smoke.
+
+Before continuing portable implementation, also read the portable execution
+record on the existing agent branch:
+
+```bash
+git fetch origin agent/sovereignty-roadmap
+git show origin/agent/sovereignty-roadmap:.agent/PORTABLE_RUNTIME_PROGRESS.yaml
+```
+
+The record distinguishes merged/qualified slices from in-progress work and
+contains exact source and CI identities. It supplements, not replaces, the
+historical sovereignty roadmap and ML overlay. Do not merge agent records to
+main. Missing qualification is not success.
+
+Next: deterministic CPU numerical operations, explicit numerical/error contracts
+and a complete small graph, before WGPU parity and ElasticXxx actuation. The
+frozen historical ElasticBitAllocation Stage-B protocol is not silently changed
+by portable work; a new backend campaign requires separate reviewed versioning.
 
 ## Bootstrap sequence
 
