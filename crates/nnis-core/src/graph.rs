@@ -48,13 +48,33 @@ impl F32ShapeV1 {
 /// Explicit builtin operation. Indices are borrowed, ordered and immutable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum F32OpV1<'a> {
-    Add { left: usize, right: usize },
-    Multiply { left: usize, right: usize },
-    Relu { input: usize },
-    Sum { input: usize },
-    ProjectKn { input: usize, weights: usize },
-    Gather { input: usize, indices: &'a [usize] },
-    ScatterAdd { base: usize, source: usize, indices: &'a [usize] },
+    Add {
+        left: usize,
+        right: usize,
+    },
+    Multiply {
+        left: usize,
+        right: usize,
+    },
+    Relu {
+        input: usize,
+    },
+    Sum {
+        input: usize,
+    },
+    ProjectKn {
+        input: usize,
+        weights: usize,
+    },
+    Gather {
+        input: usize,
+        indices: &'a [usize],
+    },
+    ScatterAdd {
+        base: usize,
+        source: usize,
+        indices: &'a [usize],
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,16 +142,25 @@ impl<'a> F32GraphV1<'a> {
         if self.schema_version != F32_GRAPH_VERSION || self.numerical_policy != F32_GRAPH_POLICY {
             return Err(invalid("unsupported graph schema or numerical policy"));
         }
-        if limits.max_inputs == 0 || limits.max_nodes == 0 || limits.max_tensor_bytes == 0
-            || limits.max_live_payload_bytes == 0 || limits.max_scratch_bytes == 0
-            || limits.max_work_items == 0 {
+        if limits.max_inputs == 0
+            || limits.max_nodes == 0
+            || limits.max_tensor_bytes == 0
+            || limits.max_live_payload_bytes == 0
+            || limits.max_scratch_bytes == 0
+            || limits.max_work_items == 0
+        {
             return Err(invalid("graph limits must be positive"));
         }
-        if self.inputs.is_empty() || self.inputs.len() > limits.max_inputs
-            || self.nodes.is_empty() || self.nodes.len() > limits.max_nodes {
+        if self.inputs.is_empty()
+            || self.inputs.len() > limits.max_inputs
+            || self.nodes.is_empty()
+            || self.nodes.len() > limits.max_nodes
+        {
             return Err(invalid("graph input/node count exceeds admission contract"));
         }
-        self.inputs.len().checked_add(self.nodes.len())
+        self.inputs
+            .len()
+            .checked_add(self.nodes.len())
             .ok_or_else(|| invalid("graph value count overflows usize"))?;
         let mut budget = F32GraphBudgetV1 {
             input_payload_bytes: 0,
@@ -163,7 +192,9 @@ impl<'a> F32GraphV1<'a> {
             check_work(budget.work_items, limits.max_work_items)?;
             // Charge the scan before performing it, including very large lists.
             for &value in indices {
-                if u64::try_from(value).map_err(|_| invalid("graph index exceeds u64"))? >= index_limit {
+                if u64::try_from(value).map_err(|_| invalid("graph index exceeds u64"))?
+                    >= index_limit
+                {
                     return Err(invalid("graph index is out of range"));
                 }
             }
@@ -184,13 +215,18 @@ impl<'a> F32GraphV1<'a> {
         }
         let producer = value - self.inputs.len();
         if producer >= node_index {
-            return Err(invalid("graph operand is missing, forward, cyclic or in-place"));
+            return Err(invalid(
+                "graph operand is missing, forward, cyclic or in-place",
+            ));
         }
         Ok(self.nodes[producer].output)
     }
 
-    fn infer(&self, operation: F32OpV1<'a>, index: usize)
-        -> Result<(F32ShapeV1, u64, &'a [usize], u64)> {
+    fn infer(
+        &self,
+        operation: F32OpV1<'a>,
+        index: usize,
+    ) -> Result<(F32ShapeV1, u64, &'a [usize], u64)> {
         let shape = |id| self.shape_before(id, index);
         match operation {
             F32OpV1::Add { left, right } | F32OpV1::Multiply { left, right } => {
@@ -227,9 +263,18 @@ impl<'a> F32GraphV1<'a> {
                 if selected == 0 {
                     return Err(invalid("graph gather indices must be non-empty"));
                 }
-                Ok((F32ShapeV1::Vector(selected), add(count, mul(selected, 2)?)?, indices, count))
+                Ok((
+                    F32ShapeV1::Vector(selected),
+                    add(count, mul(selected, 2)?)?,
+                    indices,
+                    count,
+                ))
             }
-            F32OpV1::ScatterAdd { base, source, indices } => {
+            F32OpV1::ScatterAdd {
+                base,
+                source,
+                indices,
+            } => {
                 let count = shape(base)?.vector()?;
                 let source = shape(source)?.vector()?;
                 if u64::try_from(indices.len()).ok() != Some(source) {
@@ -263,9 +308,11 @@ fn invalid(message: &'static str) -> PortableError {
 }
 
 fn add(a: u64, b: u64) -> Result<u64> {
-    a.checked_add(b).ok_or_else(|| invalid("graph accounting overflows u64"))
+    a.checked_add(b)
+        .ok_or_else(|| invalid("graph accounting overflows u64"))
 }
 
 fn mul(a: u64, b: u64) -> Result<u64> {
-    a.checked_mul(b).ok_or_else(|| invalid("graph accounting overflows u64"))
+    a.checked_mul(b)
+        .ok_or_else(|| invalid("graph accounting overflows u64"))
 }

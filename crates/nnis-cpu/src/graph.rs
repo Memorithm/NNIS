@@ -5,12 +5,9 @@
 //! after every node succeeds. This is not durable transaction rollback.
 
 use nnis_core::graph::{
-    F32GraphBudgetV1, F32OpV1, F32ShapeV1, ValidatedF32GraphV1, F32_GRAPH_POLICY,
-    F32_GRAPH_VERSION,
+    F32GraphBudgetV1, F32OpV1, F32ShapeV1, ValidatedF32GraphV1, F32_GRAPH_POLICY, F32_GRAPH_VERSION,
 };
-use nnis_core::{
-    BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableError, Result,
-};
+use nnis_core::{BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableError, Result};
 
 use crate::numerical::{CpuF32BinaryOp, CpuF32KernelsV1, CPU_F32_NUMERICAL_POLICY};
 use crate::{require_usage, CpuBuffer, CpuDevice};
@@ -51,16 +48,24 @@ pub fn execute_f32_graph(
 ) -> Result<CpuF32GraphOutputV1> {
     let plan = graph.plan();
     if plan.numerical_policy != CPU_F32_NUMERICAL_POLICY
-        || CPU_F32_NUMERICAL_POLICY != F32_GRAPH_POLICY {
+        || CPU_F32_NUMERICAL_POLICY != F32_GRAPH_POLICY
+    {
         return Err(invalid("CPU graph numerical policy is unsupported"));
     }
     if inputs.len() != plan.inputs.len() {
         return Err(invalid("CPU graph binding count mismatch"));
     }
-    for shape in plan.inputs.iter().copied().chain(plan.nodes.iter().map(|node| node.output)) {
+    for shape in plan
+        .inputs
+        .iter()
+        .copied()
+        .chain(plan.nodes.iter().map(|node| node.output))
+    {
         let bytes = host_bytes(shape)?;
         if bytes as u64 > device.capabilities().max_buffer_bytes {
-            return Err(invalid("CPU graph tensor exceeds device per-buffer capability"));
+            return Err(invalid(
+                "CPU graph tensor exceeds device per-buffer capability",
+            ));
         }
     }
     for (&shape, buffer) in plan.inputs.iter().zip(inputs) {
@@ -78,9 +83,12 @@ pub fn execute_f32_graph(
         .map_err(|_| invalid("CPU graph scratch does not fit host address space"))?;
     let kernels = CpuF32KernelsV1::new(scratch)?;
     let mut computed = Vec::new();
-    computed.try_reserve_exact(plan.nodes.len())
+    computed
+        .try_reserve_exact(plan.nodes.len())
         .map_err(|_| invalid("CPU graph node-handle reservation failed"))?;
-    let node_handle_capacity_bytes = computed.capacity().checked_mul(core::mem::size_of::<CpuBuffer>())
+    let node_handle_capacity_bytes = computed
+        .capacity()
+        .checked_mul(core::mem::size_of::<CpuBuffer>())
         .ok_or_else(|| invalid("CPU graph node-handle capacity overflows usize"))?;
     let mut retained_node_capacity_bytes = 0_u64;
     let mut max_scratch_capacity_bytes = 0_usize;
@@ -96,9 +104,12 @@ pub fn execute_f32_graph(
             F32OpV1::Add { left, right } => {
                 kernels.binary(CpuF32BinaryOp::Add, get(left)?, get(right)?, &mut output)?
             }
-            F32OpV1::Multiply { left, right } => {
-                kernels.binary(CpuF32BinaryOp::Multiply, get(left)?, get(right)?, &mut output)?
-            }
+            F32OpV1::Multiply { left, right } => kernels.binary(
+                CpuF32BinaryOp::Multiply,
+                get(left)?,
+                get(right)?,
+                &mut output,
+            )?,
             F32OpV1::Relu { input } => kernels.relu(get(input)?, &mut output)?,
             F32OpV1::Sum { input } => kernels.sum(get(input)?, &mut output)?,
             F32OpV1::ProjectKn { input, weights } => {
@@ -109,7 +120,11 @@ pub fn execute_f32_graph(
             F32OpV1::Gather { input, indices } => {
                 kernels.gather(get(input)?, indices, &mut output)?
             }
-            F32OpV1::ScatterAdd { base, source, indices } => {
+            F32OpV1::ScatterAdd {
+                base,
+                source,
+                indices,
+            } => {
                 // New destination, not an in-place mutation of the base binding.
                 output.bytes.copy_from_slice(&get(base)?.bytes);
                 kernels.scatter_add(get(source)?, indices, &mut output)?
@@ -117,12 +132,15 @@ pub fn execute_f32_graph(
         };
         let capacity = u64::try_from(output.capacity_bytes())
             .map_err(|_| invalid("CPU graph capacity exceeds u64"))?;
-        retained_node_capacity_bytes = retained_node_capacity_bytes.checked_add(capacity)
+        retained_node_capacity_bytes = retained_node_capacity_bytes
+            .checked_add(capacity)
             .ok_or_else(|| invalid("CPU graph capacity accounting overflows u64"))?;
         max_scratch_capacity_bytes = max_scratch_capacity_bytes.max(report.scratch_capacity_bytes);
         computed.push(output);
     }
-    let output = computed.pop().ok_or_else(|| invalid("CPU graph has no output"))?;
+    let output = computed
+        .pop()
+        .ok_or_else(|| invalid("CPU graph has no output"))?;
     Ok(CpuF32GraphOutputV1 {
         output,
         report: CpuF32GraphReportV1 {
@@ -136,11 +154,17 @@ pub fn execute_f32_graph(
     })
 }
 
-fn value<'a>(id: usize, inputs: &[&'a CpuBuffer], computed: &'a [CpuBuffer]) -> Result<&'a CpuBuffer> {
+fn value<'a>(
+    id: usize,
+    inputs: &[&'a CpuBuffer],
+    computed: &'a [CpuBuffer],
+) -> Result<&'a CpuBuffer> {
     if id < inputs.len() {
         return Ok(inputs[id]);
     }
-    computed.get(id - inputs.len()).ok_or_else(|| invalid("CPU graph operand is unavailable"))
+    computed
+        .get(id - inputs.len())
+        .ok_or_else(|| invalid("CPU graph operand is unavailable"))
 }
 
 fn host_bytes(shape: F32ShapeV1) -> Result<usize> {
