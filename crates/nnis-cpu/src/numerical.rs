@@ -170,7 +170,7 @@ impl CpuF32KernelsV1 {
         })
     }
 
-    /// Add source[i] to output[indices[i]] in index-list order.
+    /// Add `source[i]` to `output[indices[i]]` in index-list order.
     ///
     /// Repeated indices accumulate serially, not in parallel. Unselected output
     /// values are preserved. The complete old destination must be finite.
