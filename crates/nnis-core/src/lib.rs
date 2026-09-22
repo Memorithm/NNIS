@@ -5,6 +5,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod graph;
+
 use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
 
