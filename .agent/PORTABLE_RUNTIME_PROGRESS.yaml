@@ -103,8 +103,8 @@ completed:
       repository: Memorithm/scirust
       revision: 571154e122c53aa1d8fcbb01d3654526b9ffd459
       inspected_crates: [scirust-core, scirust-retrieval]
-      inspected_MS​​RV: "1.89"
-      NNIS_MS​​RV: "1.77"
+      inspected_minimum_rust: "1.89"
+      nnis_minimum_rust: "1.77"
       decision: no_incompatible_dependency_or_optimized_math_copy
       generic_math_ownership: SciRust
       record: docs/PORTABLE_CPU_NUMERICAL_V1.md
