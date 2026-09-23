@@ -11,8 +11,8 @@ use crate::{
     dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
     DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
     Int2ReferenceProjectionPlanV1, Model, ModelConfig, ModelWeights, WeightDType,
-    WeightRepresentationFamilyV1,
-    NNIS_INT2_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT2_REFERENCE_STORAGE_VERSION,
+    WeightRepresentationFamilyV1, NNIS_INT2_REFERENCE_SERIALIZED_HEADER_BYTES,
+    NNIS_INT2_REFERENCE_STORAGE_VERSION,
 };
 use nnis_kernels::F32Int2Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
