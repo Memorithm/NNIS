@@ -6,10 +6,12 @@
 //! their logical matrix/vector views differ. Full-model execution reconstructs
 //! an alias-preserving dense-F32 graph and uses the standard NNIS decoder.
 
+use crate::dense_weight_materialization::checked_host_payload_bytes;
 use crate::weights::WeightLogicalShapeV1;
 use crate::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1,
-    DenseWeightMaterializationEvidenceV1, DeviceTensor, Model, ModelConfig, ModelWeights,
+    DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
+    Model, ModelConfig, ModelWeights,
     SparseReferenceTensorV1, WeightDType, WeightRepresentationFamilyV1,
     NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
@@ -340,7 +342,7 @@ impl SparseReferenceModelStorageV1 {
         &self,
         config: &ModelConfig,
         stream: &Stream,
-    ) -> Result<ModelWeights> {
+    ) -> Result<(ModelWeights, u64)> {
         self.validate_resident_allocations()?;
         if !Arc::ptr_eq(
             stream.ctx(),
@@ -359,9 +361,16 @@ impl SparseReferenceModelStorageV1 {
 
         let mut dense_allocations =
             Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
+        let mut peak_host_temporary_payload_bytes = 0_u64;
         for (allocation, summary) in self.allocations.iter().zip(&self.summary.allocations) {
             let occupancy_bitmap = allocation.occupancy_bitmap.to_vec(stream)?;
+            let bitmap_host_bytes = u64::try_from(occupancy_bitmap.len())
+                .map_err(|_| NnisError::invalid_input("sparse host bitmap bytes exceed u64"))?;
             let retained_values = allocation.retained_values.to_vec(stream)?;
+            let retained_host_bytes = u64::try_from(retained_values.len())
+                .map_err(|_| NnisError::invalid_input("sparse host retained count exceeds u64"))?
+                .checked_mul(4)
+                .ok_or_else(|| NnisError::invalid_input("sparse host retained bytes overflow u64"))?;
             let sparse = SparseReferenceTensorV1 {
                 element_count: summary.logical_values,
                 threshold: summary.threshold,
@@ -371,6 +380,17 @@ impl SparseReferenceModelStorageV1 {
                 mean_squared_error: summary.mean_squared_error,
             };
             let dense_host = densify_sparse_reference_v1(&sparse)?;
+            let dense_host_bytes = u64::try_from(dense_host.len())
+                .map_err(|_| NnisError::invalid_input("sparse dense host count exceeds u64"))?
+                .checked_mul(4)
+                .ok_or_else(|| NnisError::invalid_input("sparse dense host bytes overflow u64"))?;
+            let host_payload_bytes = checked_host_payload_bytes([
+                bitmap_host_bytes,
+                retained_host_bytes,
+                dense_host_bytes,
+            ])?;
+            peak_host_temporary_payload_bytes =
+                peak_host_temporary_payload_bytes.max(host_payload_bytes);
             let dense = DeviceBuffer::from_host(stream.ctx(), stream, &dense_host)?;
             dense_allocations.push(Arc::new(dense));
         }
@@ -397,7 +417,8 @@ impl SparseReferenceModelStorageV1 {
             }
         }
         stream.synchronize()?;
-        ModelWeights::from_named_logical_tensors(config, logical)
+        let weights = ModelWeights::from_named_logical_tensors(config, logical)?;
+        Ok((weights, peak_host_temporary_payload_bytes))
     }
 
     pub fn validate_resident_allocations(&self) -> Result<()> {
@@ -452,7 +473,7 @@ impl SparseReferenceModelStorageV1 {
 pub struct SparseDenseMaterializedModelV1 {
     compact_storage: SparseReferenceModelStorageV1,
     model: Model,
-    materialization: DenseWeightMaterializationEvidenceV1,
+    materialization: DenseWeightMaterializationEvidenceV2,
 }
 
 impl SparseDenseMaterializedModelV1 {
@@ -475,7 +496,8 @@ impl SparseDenseMaterializedModelV1 {
             stream,
             threshold,
         )?;
-        let dense_weights = compact_storage.materialize_dense_f32_weights(&config, stream)?;
+        let (dense_weights, peak_host_temporary_payload_bytes) =
+            compact_storage.materialize_dense_f32_weights(&config, stream)?;
         stream.synchronize()?;
         let duration_ns = u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
             NnisError::invalid_input(
@@ -492,7 +514,7 @@ impl SparseDenseMaterializedModelV1 {
                 "sparse dense materialization denominator does not reconcile across source, compact and dense graphs",
             ));
         }
-        let materialization = DenseWeightMaterializationEvidenceV1::new(
+        let device_ownership = DenseWeightMaterializationEvidenceV1::new(
             WeightRepresentationFamilyV1::MagnitudeSparse,
             source_summary.unique_device_elements,
             source_summary.owned_device_allocation_bytes,
@@ -500,6 +522,10 @@ impl SparseDenseMaterializedModelV1 {
             dense_summary.owned_device_allocation_bytes,
             0,
             duration_ns,
+        )?;
+        let materialization = DenseWeightMaterializationEvidenceV2::new(
+            device_ownership,
+            peak_host_temporary_payload_bytes,
         )?;
         let model = Model::new(config, dense_weights, stream)?;
         Ok(Self {
@@ -521,6 +547,11 @@ impl SparseDenseMaterializedModelV1 {
 
     #[must_use]
     pub fn materialization_evidence(&self) -> &DenseWeightMaterializationEvidenceV1 {
+        &self.materialization.device_ownership
+    }
+
+    #[must_use]
+    pub fn materialization_evidence_v2(&self) -> &DenseWeightMaterializationEvidenceV2 {
         &self.materialization
     }
 }
