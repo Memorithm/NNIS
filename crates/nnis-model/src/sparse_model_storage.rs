@@ -531,4 +531,3 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
         .ok_or_else(|| NnisError::invalid_input(format!("{label} overflows u64")))?;
     Ok(())
 }
-
