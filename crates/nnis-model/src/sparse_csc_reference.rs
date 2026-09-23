@@ -15,6 +15,99 @@ pub const NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES: u64 = 32;
 
 const SERIALIZED_MAGIC: [u8; 4] = *b"NSC1";
 
+/// Version of the isolated sparse CSC projection contract.
+pub const NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION: u32 = 1;
+/// Stable identity of the sparse projection accumulation order.
+pub const NNIS_SPARSE_CSC_ACCUMULATION_V1: &str = "stored-csc-row-order-f32-fma-v1";
+
+/// Explicit isolated projection plan for one logical sparse CSC matrix.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SparseCscProjectionPlanV1 {
+    schema_version: u32,
+    storage_version: u32,
+    logical_weight: String,
+    rows: u64,
+    cols: u64,
+    accumulation: String,
+    dense_weight_materialization: bool,
+}
+
+impl SparseCscProjectionPlanV1 {
+    pub fn for_matrix(logical_weight: impl Into<String>, rows: usize, cols: usize) -> Result<Self> {
+        let logical_weight = logical_weight.into();
+        let plan = Self {
+            schema_version: NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION,
+            storage_version: NNIS_SPARSE_CSC_REFERENCE_VERSION,
+            logical_weight,
+            rows: u64::try_from(rows)
+                .map_err(|_| NnisError::invalid_input("sparse CSC projection rows exceed u64"))?,
+            cols: u64::try_from(cols)
+                .map_err(|_| NnisError::invalid_input("sparse CSC projection cols exceed u64"))?,
+            accumulation: NNIS_SPARSE_CSC_ACCUMULATION_V1.to_string(),
+            dense_weight_materialization: false,
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "sparse CSC projection plan schema {}; supported version is {}",
+                self.schema_version, NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION
+            )));
+        }
+        if self.storage_version != NNIS_SPARSE_CSC_REFERENCE_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "sparse CSC projection storage version {}; supported version is {}",
+                self.storage_version, NNIS_SPARSE_CSC_REFERENCE_VERSION
+            )));
+        }
+        if self.logical_weight.is_empty() || self.logical_weight.trim() != self.logical_weight {
+            return Err(NnisError::invalid_input(
+                "sparse CSC projection logical weight must be non-empty and trimmed",
+            ));
+        }
+        if self.rows == 0 || self.cols == 0 {
+            return Err(NnisError::invalid_input(
+                "sparse CSC projection dimensions must be non-zero",
+            ));
+        }
+        if self.accumulation != NNIS_SPARSE_CSC_ACCUMULATION_V1 {
+            return Err(NnisError::unsupported(
+                "sparse CSC projection accumulation contract is unsupported",
+            ));
+        }
+        if self.dense_weight_materialization {
+            return Err(NnisError::unsupported(
+                "sparse CSC projection forbids dense weight materialization",
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn logical_weight(&self) -> &str {
+        &self.logical_weight
+    }
+
+    #[must_use]
+    pub const fn rows(&self) -> u64 {
+        self.rows
+    }
+
+    #[must_use]
+    pub const fn cols(&self) -> u64 {
+        self.cols
+    }
+
+    #[must_use]
+    pub const fn dense_weight_materialization(&self) -> bool {
+        self.dense_weight_materialization
+    }
+}
+
 /// Host-side deterministic CSC representation of one row-major F32 matrix.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SparseCscReferenceMatrixV1 {
@@ -278,6 +371,25 @@ pub fn densify_matrix_csc_reference_v1(sparse: &SparseCscReferenceMatrixV1) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projection_plan_is_versioned_shape_bound_and_forbids_dense_materialization() {
+        let plan = SparseCscProjectionPlanV1::for_matrix("layers.0.q_proj", 64, 96).unwrap();
+        assert_eq!(plan.logical_weight(), "layers.0.q_proj");
+        assert_eq!(plan.rows(), 64);
+        assert_eq!(plan.cols(), 96);
+        assert!(!plan.dense_weight_materialization());
+        plan.validate().unwrap();
+
+        assert!(SparseCscProjectionPlanV1::for_matrix("", 64, 96).is_err());
+        assert!(SparseCscProjectionPlanV1::for_matrix(" q_proj", 64, 96).is_err());
+        assert!(SparseCscProjectionPlanV1::for_matrix("q_proj", 0, 96).is_err());
+
+        let mut value = serde_json::to_value(&plan).unwrap();
+        value["dense_weight_materialization"] = serde_json::Value::Bool(true);
+        let invalid: SparseCscProjectionPlanV1 = serde_json::from_value(value).unwrap();
+        assert!(invalid.validate().is_err());
+    }
 
     #[test]
     fn row_major_dense_matrix_converts_to_canonical_csc() {
