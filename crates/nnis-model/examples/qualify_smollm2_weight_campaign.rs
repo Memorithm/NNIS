@@ -161,8 +161,9 @@ fn verify_clean_git_worktree() -> Result<()> {
             output.status
         )));
     }
-    let status = String::from_utf8(output.stdout)
-        .map_err(|error| NnisError::invalid_input(format!("git status output is not UTF-8: {error}")))?;
+    let status = String::from_utf8(output.stdout).map_err(|error| {
+        NnisError::invalid_input(format!("git status output is not UTF-8: {error}"))
+    })?;
     validate_git_status_output(&status)
 }
 
