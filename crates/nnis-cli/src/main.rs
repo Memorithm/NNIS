@@ -3,9 +3,9 @@ use nnis::{
     GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
     QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2, SampledBatchRequest,
     SamplingConfig, Stream, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
-    WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1,
-    WeightRepresentationFamilyV1, NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
-    NNIS_SAMPLING_POLICY_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+    WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
+    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+    NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 use serde::Serialize;
 use std::env;
