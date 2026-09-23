@@ -7,9 +7,7 @@
 //! this module derives comparable bits/value without relying on CUDA free-memory
 //! deltas.
 
-use crate::{
-    WeightAllocationSummaryV1, NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION,
-};
+use crate::{WeightAllocationSummaryV1, NNIS_WEIGHT_ALLOCATION_SUMMARY_VERSION};
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -153,9 +151,8 @@ fn validate_source_summary(source: &WeightAllocationSummaryV1) -> Result<()> {
         )));
     }
     if source.segments.len()
-        != usize::try_from(source.unique_device_allocations).map_err(|_| {
-            NnisError::invalid_input("weight allocation count does not fit usize")
-        })?
+        != usize::try_from(source.unique_device_allocations)
+            .map_err(|_| NnisError::invalid_input("weight allocation count does not fit usize"))?
     {
         return Err(NnisError::invalid_input(
             "weight allocation segment count disagrees with summary",
@@ -168,9 +165,8 @@ fn validate_source_summary(source: &WeightAllocationSummaryV1) -> Result<()> {
     let mut logical_elements = 0_u64;
     for (index, segment) in source.segments.iter().enumerate() {
         if segment.allocation_index
-            != u32::try_from(index).map_err(|_| {
-                NnisError::invalid_input("weight allocation index exceeds u32")
-            })?
+            != u32::try_from(index)
+                .map_err(|_| NnisError::invalid_input("weight allocation index exceeds u32"))?
         {
             return Err(NnisError::invalid_input(
                 "weight allocation indices are not canonical and contiguous",
@@ -181,15 +177,14 @@ fn validate_source_summary(source: &WeightAllocationSummaryV1) -> Result<()> {
                 "weight allocation segment contains a zero count or no logical names",
             ));
         }
-        unique_elements = unique_elements.checked_add(segment.elements).ok_or_else(|| {
-            NnisError::invalid_input("unique device element count overflows u64")
-        })?;
-        unique_bytes = unique_bytes.checked_add(segment.bytes).ok_or_else(|| {
-            NnisError::invalid_input("owned device byte count overflows u64")
-        })?;
-        let aliases = u64::try_from(segment.logical_names.len()).map_err(|_| {
-            NnisError::invalid_input("logical alias count exceeds u64")
-        })?;
+        unique_elements = unique_elements
+            .checked_add(segment.elements)
+            .ok_or_else(|| NnisError::invalid_input("unique device element count overflows u64"))?;
+        unique_bytes = unique_bytes
+            .checked_add(segment.bytes)
+            .ok_or_else(|| NnisError::invalid_input("owned device byte count overflows u64"))?;
+        let aliases = u64::try_from(segment.logical_names.len())
+            .map_err(|_| NnisError::invalid_input("logical alias count exceeds u64"))?;
         logical_tensors = logical_tensors.checked_add(aliases).ok_or_else(|| {
             NnisError::invalid_input("logical tensor reference count overflows u64")
         })?;
@@ -257,10 +252,11 @@ mod tests {
         assert_eq!(denominator.unique_logical_values, 24);
         assert_eq!(denominator.source_owned_bytes, 96);
 
-        let accounting =
-            WeightRepresentationAccountingV1::new(denominator, 12, 16).unwrap();
+        let accounting = WeightRepresentationAccountingV1::new(denominator, 12, 16).unwrap();
         assert_eq!(
-            accounting.serialized_bits_per_unique_logical_value.to_bits(),
+            accounting
+                .serialized_bits_per_unique_logical_value
+                .to_bits(),
             4.0_f64.to_bits()
         );
         assert_eq!(
@@ -274,9 +270,7 @@ mod tests {
     fn inconsistent_source_summary_fails_closed() {
         let mut source = source_summary();
         source.unique_device_elements += 1;
-        assert!(
-            CanonicalWeightDenominatorV1::from_weight_allocation_summary(&source).is_err()
-        );
+        assert!(CanonicalWeightDenominatorV1::from_weight_allocation_summary(&source).is_err());
 
         let mut source = source_summary();
         source.logical_element_references -= 1;
@@ -290,9 +284,7 @@ mod tests {
         let denominator =
             CanonicalWeightDenominatorV1::from_weight_allocation_summary(&source_summary())
                 .unwrap();
-        assert!(
-            WeightRepresentationAccountingV1::new(denominator.clone(), 0, 1).is_err()
-        );
+        assert!(WeightRepresentationAccountingV1::new(denominator.clone(), 0, 1).is_err());
         assert!(WeightRepresentationAccountingV1::new(denominator, 1, 0).is_err());
     }
 }
