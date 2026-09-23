@@ -6,16 +6,67 @@
 //! materialization accounting, and the final resident weight footprint.
 
 use crate::{
-    CanonicalWeightDenominatorV1, DenseWeightMaterializationEvidenceV2,
-    WeightExecutionQualificationLevelV1, WeightRepresentationAccountingV1,
-    WeightRepresentationFamilyV1, WeightRepresentationQualificationRecordV1,
-    NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
+    CanonicalWeightDenominatorV1, DenseWeightMaterializationEvidenceV2, ExactDecoderCheckpointSpec,
+    GeneratedTokenEvidenceV1, WeightExecutionQualificationLevelV1,
+    WeightRepresentationAccountingV1, WeightRepresentationFamilyV1,
+    WeightRepresentationQualificationRecordV1, NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
 };
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 
 /// Version of full-model weight execution evidence.
 pub const NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION: u32 = 1;
+
+/// Version of the physical generation observation consumed by full-model evidence.
+pub const NNIS_PHYSICAL_WEIGHT_EXECUTION_OBSERVATION_VERSION: u32 = 1;
+
+/// Validated physical-generation observation shared by every fixed weight family.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PhysicalWeightExecutionObservationV1 {
+    pub schema_version: u32,
+    pub nnis_commit: String,
+    pub runtime_entrypoint: String,
+    pub generated_tokens: GeneratedTokenEvidenceV1,
+    pub non_finite_output_observed: bool,
+}
+
+impl PhysicalWeightExecutionObservationV1 {
+    pub fn new(
+        nnis_commit: impl Into<String>,
+        runtime_entrypoint: impl Into<String>,
+        generated_tokens: GeneratedTokenEvidenceV1,
+        non_finite_output_observed: bool,
+    ) -> Result<Self> {
+        let observation = Self {
+            schema_version: NNIS_PHYSICAL_WEIGHT_EXECUTION_OBSERVATION_VERSION,
+            nnis_commit: nnis_commit.into(),
+            runtime_entrypoint: runtime_entrypoint.into(),
+            generated_tokens,
+            non_finite_output_observed,
+        };
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_PHYSICAL_WEIGHT_EXECUTION_OBSERVATION_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "physical weight execution observation schema {}; supported version is {}",
+                self.schema_version, NNIS_PHYSICAL_WEIGHT_EXECUTION_OBSERVATION_VERSION
+            )));
+        }
+        validate_lower_hex("NNIS commit", &self.nnis_commit, 40)?;
+        validate_trimmed("runtime entrypoint", &self.runtime_entrypoint)?;
+        self.generated_tokens.validate()?;
+        if self.non_finite_output_observed {
+            return Err(NnisError::invalid_input(
+                "physical weight execution observation rejects non-finite runtime output",
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Physical full-model execution evidence for one fixed representation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,6 +92,45 @@ pub struct WeightFullModelExecutionEvidenceV1 {
 }
 
 impl WeightFullModelExecutionEvidenceV1 {
+    /// Build evidence from the shared exact-checkpoint and physical-generation contracts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_physical_observation(
+        family: WeightRepresentationFamilyV1,
+        representation_version: u32,
+        checkpoint: &ExactDecoderCheckpointSpec,
+        observation: &PhysicalWeightExecutionObservationV1,
+        serialized_representation_bytes: u64,
+        logical_tensor_references: u64,
+        logical_element_references: u64,
+        unique_source_allocations: u64,
+        max_abs_error: f32,
+        mean_squared_error: f64,
+        materialization: DenseWeightMaterializationEvidenceV2,
+    ) -> Result<Self> {
+        observation.validate()?;
+        let evidence = Self {
+            schema_version: NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION,
+            family,
+            representation_version,
+            exact_checkpoint: checkpoint.evidence_key(),
+            nnis_commit: observation.nnis_commit.clone(),
+            runtime_entrypoint: observation.runtime_entrypoint.clone(),
+            physical_execution_observed: true,
+            generated_token_count: observation.generated_tokens.token_count,
+            generated_token_ids_sha256: observation.generated_tokens.token_ids_sha256.clone(),
+            non_finite_output_observed: false,
+            serialized_representation_bytes,
+            logical_tensor_references,
+            logical_element_references,
+            unique_source_allocations,
+            max_abs_error,
+            mean_squared_error,
+            materialization,
+        };
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
     /// Validate every claim-bearing field before a FullModel record is emitted.
     pub fn validate(&self) -> Result<()> {
         if self.schema_version != NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION {
@@ -219,6 +309,57 @@ mod tests {
             mean_squared_error: 0.0625,
             materialization,
         }
+    }
+
+    #[test]
+    fn physical_observation_builder_binds_checkpoint_and_token_evidence() {
+        let generated = GeneratedTokenEvidenceV1::from_token_ids(&[10, 20, 30]).unwrap();
+        let observation = PhysicalWeightExecutionObservationV1::new(
+            "0123456789abcdef0123456789abcdef01234567",
+            "Int4DenseMaterializedModelV1::model",
+            generated.clone(),
+            false,
+        )
+        .unwrap();
+        let base = evidence();
+        let built = WeightFullModelExecutionEvidenceV1::from_physical_observation(
+            WeightRepresentationFamilyV1::Int4Symmetric,
+            1,
+            &crate::SMOLLM2_135M_BF16,
+            &observation,
+            base.serialized_representation_bytes,
+            base.logical_tensor_references,
+            base.logical_element_references,
+            base.unique_source_allocations,
+            base.max_abs_error,
+            base.mean_squared_error,
+            base.materialization,
+        )
+        .unwrap();
+        assert_eq!(built.exact_checkpoint, crate::SMOLLM2_135M_BF16.evidence_key());
+        assert_eq!(built.generated_token_count, generated.token_count);
+        assert_eq!(built.generated_token_ids_sha256, generated.token_ids_sha256);
+        assert!(built.physical_execution_observed);
+        assert!(!built.non_finite_output_observed);
+    }
+
+    #[test]
+    fn physical_observation_rejects_non_finite_flag_and_identity_drift() {
+        let generated = GeneratedTokenEvidenceV1::from_token_ids(&[1]).unwrap();
+        assert!(PhysicalWeightExecutionObservationV1::new(
+            "bad",
+            "runtime",
+            generated.clone(),
+            false,
+        )
+        .is_err());
+        assert!(PhysicalWeightExecutionObservationV1::new(
+            "0123456789abcdef0123456789abcdef01234567",
+            "runtime",
+            generated,
+            true,
+        )
+        .is_err());
     }
 
     #[test]
