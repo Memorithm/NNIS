@@ -2,7 +2,7 @@ use nnis::{
     current_process_gpu_memory, reference_weight_capability_manifest_v1, Context, Device,
     GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
     SampledBatchRequest, SamplingConfig, Stream, WeightCapabilityManifestV1,
-    WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
+    WeightFullModelCampaignArtifactV1, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
     NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
@@ -16,7 +16,7 @@ use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n  nnis weight-capabilities [--json]\n  nnis validate-weight-campaign --input FILE [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.\n\n`weight-capabilities` is CUDA-independent and prints the versioned fixed-baseline capability manifest. It distinguishes storage/accounting and isolated projection support from full-model qualification; the latter remains false until separately evidenced.\n\n`validate-weight-campaign` is CUDA-independent. It reads a versioned WeightFullModelCampaignV1 JSON artifact, revalidates same-commit/same-checkpoint INT4+INT2+sparse evidence, and emits the derived Stage-B qualification bundle only when every contract passes.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n  nnis weight-capabilities [--json]\n  nnis validate-weight-campaign --input FILE [--json]\n  nnis validate-weight-campaign-artifact --input FILE --tokenizer FILE [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.\n\n`weight-capabilities` is CUDA-independent and prints the versioned fixed-baseline capability manifest. It distinguishes storage/accounting and isolated projection support from full-model qualification; the latter remains false until separately evidenced.\n\n`validate-weight-campaign` is CUDA-independent. It reads a versioned WeightFullModelCampaignV1 JSON artifact, revalidates same-commit/same-checkpoint INT4+INT2+sparse evidence, and emits the derived Stage-B qualification bundle only when every contract passes.\n\n`validate-weight-campaign-artifact` additionally validates the frozen recipe and verifies the concrete tokenizer basename and SHA-256 before emitting the Stage-B bundle.";
 
 #[derive(Debug, PartialEq)]
 struct GenerateArgs {
@@ -51,6 +51,13 @@ struct ValidateWeightCampaignArgs {
 }
 
 #[derive(Debug, PartialEq)]
+struct ValidateWeightCampaignArtifactArgs {
+    input: PathBuf,
+    tokenizer: PathBuf,
+    json: bool,
+}
+
+#[derive(Debug, PartialEq)]
 struct GenerateBatchArgs {
     model_dir: PathBuf,
     tokenizer_file: PathBuf,
@@ -72,6 +79,7 @@ enum Command {
     NvmlProcessMemory(NvmlProcessMemoryArgs),
     WeightCapabilities(WeightCapabilitiesArgs),
     ValidateWeightCampaign(ValidateWeightCampaignArgs),
+    ValidateWeightCampaignArtifact(ValidateWeightCampaignArtifactArgs),
 }
 
 #[derive(Debug, Serialize)]
@@ -169,6 +177,9 @@ where
     }
     if command == "validate-weight-campaign" {
         return parse_validate_weight_campaign_args(arguments);
+    }
+    if command == "validate-weight-campaign-artifact" {
+        return parse_validate_weight_campaign_artifact_args(arguments);
     }
     if command == "generate-batch" {
         return parse_generate_batch_args(arguments);
@@ -447,6 +458,48 @@ where
     }))
 }
 
+fn parse_validate_weight_campaign_artifact_args<I>(arguments: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut input = None;
+    let mut tokenizer = None;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.as_str() {
+            "--input" => {
+                input = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--input requires a JSON file".to_string())?,
+                ));
+            }
+            "--tokenizer" => {
+                tokenizer = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--tokenizer requires a file".to_string())?,
+                ));
+            }
+            "--json" => json = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            other => {
+                return Err(format!(
+                    "unknown validate-weight-campaign-artifact argument {other:?}\n\n{USAGE}"
+                ))
+            }
+        }
+    }
+    Ok(Command::ValidateWeightCampaignArtifact(
+        ValidateWeightCampaignArtifactArgs {
+            input: input.ok_or_else(|| "missing --input FILE".to_string())?,
+            tokenizer: tokenizer.ok_or_else(|| "missing --tokenizer FILE".to_string())?,
+            json,
+        },
+    ))
+}
+
 fn parse_validate_weight_campaign_args<I>(arguments: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
@@ -564,6 +617,46 @@ fn validate_weight_campaign(arguments: &ValidateWeightCampaignArgs) -> Result<St
         )
     })?;
     validate_weight_campaign_text(&raw, arguments.json)
+}
+
+fn validate_weight_campaign_artifact(
+    arguments: &ValidateWeightCampaignArtifactArgs,
+) -> Result<String, String> {
+    let raw = fs::read_to_string(&arguments.input).map_err(|error| {
+        format!(
+            "failed to read weight campaign artifact JSON {:?}: {error}",
+            arguments.input
+        )
+    })?;
+    let artifact: WeightFullModelCampaignArtifactV1 =
+        serde_json::from_str(&raw).map_err(|error| {
+            format!("failed to parse WeightFullModelCampaignArtifactV1 JSON: {error}")
+        })?;
+    artifact
+        .validate()
+        .map_err(|error| format!("invalid full-model weight campaign artifact: {error}"))?;
+    artifact
+        .verify_tokenizer_file(&arguments.tokenizer)
+        .map_err(|error| format!("tokenizer verification failed: {error}"))?;
+    let bundle = artifact
+        .campaign
+        .qualification_bundle()
+        .map_err(|error| format!("campaign artifact is not Stage-B ready: {error}"))?;
+    if arguments.json {
+        serde_json::to_string_pretty(&bundle)
+            .map_err(|error| format!("failed to serialize qualification bundle: {error}"))
+    } else {
+        Ok(format!(
+            "NNIS weight campaign artifact valid\nnnis_commit: {}\nexact_checkpoint: {}\ntokenizer_file: {}\ntokenizer_sha256: {}\nprompt_tokens: {}\nmax_new_tokens: {}\nfamily_records: {}\nelastic_stage_b_ready: true",
+            artifact.campaign.nnis_commit,
+            artifact.campaign.exact_checkpoint,
+            artifact.tokenizer_file,
+            artifact.tokenizer_sha256,
+            artifact.recipe.prompt_token_ids.len(),
+            artifact.recipe.max_new_tokens,
+            bundle.records.len()
+        ))
+    }
 }
 
 fn weight_family_name(family: WeightRepresentationFamilyV1) -> &'static str {
@@ -974,6 +1067,18 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::ValidateWeightCampaignArtifact(arguments) => {
+            match validate_weight_campaign_artifact(&arguments) {
+                Ok(rendered) => {
+                    println!("{rendered}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("nnis validate-weight-campaign-artifact: {error}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Command::WeightCapabilities(arguments) => {
             let manifest = reference_weight_capability_manifest_v1();
             if let Err(error) = manifest.validate() {
@@ -1238,6 +1343,38 @@ mod tests {
                 json: false,
             })
         );
+    }
+
+    #[test]
+    fn validate_weight_campaign_artifact_parser_requires_tokenizer() {
+        assert_eq!(
+            parse_args(strings(&[
+                "validate-weight-campaign-artifact",
+                "--input",
+                "/tmp/artifact.json",
+                "--tokenizer",
+                "/tmp/tokenizer.json",
+                "--json",
+            ]))
+            .unwrap(),
+            Command::ValidateWeightCampaignArtifact(ValidateWeightCampaignArtifactArgs {
+                input: PathBuf::from("/tmp/artifact.json"),
+                tokenizer: PathBuf::from("/tmp/tokenizer.json"),
+                json: true,
+            })
+        );
+        assert!(parse_args(strings(&[
+            "validate-weight-campaign-artifact",
+            "--input",
+            "/tmp/artifact.json",
+        ]))
+        .is_err());
+        assert!(parse_args(strings(&[
+            "validate-weight-campaign-artifact",
+            "--tokenizer",
+            "/tmp/tokenizer.json",
+        ]))
+        .is_err());
     }
 
     #[test]
