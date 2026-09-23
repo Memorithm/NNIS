@@ -111,16 +111,8 @@ mod tests {
             WeightRepresentationFamilyV1::Int2Ternary => (1, 8, 20, 0.5, 0.125),
             WeightRepresentationFamilyV1::MagnitudeSparse => (1, 18, 34, 0.2, 0.03),
         };
-        let device = DenseWeightMaterializationEvidenceV1::new(
-            family,
-            16,
-            64,
-            resident,
-            64,
-            0,
-            1,
-        )
-        .unwrap();
+        let device =
+            DenseWeightMaterializationEvidenceV1::new(family, 16, 64, resident, 64, 0, 1).unwrap();
         WeightFullModelExecutionEvidenceV1 {
             schema_version: NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION,
             family,
@@ -131,8 +123,7 @@ mod tests {
             physical_execution_observed: true,
             generated_token_count: 2,
             generated_token_ids_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             non_finite_output_observed: false,
             serialized_representation_bytes: serialized,
             logical_tensor_references: 1,
