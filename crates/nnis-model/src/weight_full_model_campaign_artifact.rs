@@ -4,7 +4,7 @@
 //! execution recipe, and tokenizer artifact identity used by the preregistered
 //! qualification workflow.
 
-use crate::{WeightCampaignRecipeV1, WeightFullModelCampaignV1};
+use crate::{WeightCampaignEnvironmentV1, WeightCampaignRecipeV1, WeightFullModelCampaignV1};
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,6 +14,48 @@ use std::path::Path;
 
 /// Version of the self-contained campaign artifact envelope.
 pub const NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION: u32 = 1;
+/// Version of the environment-bound campaign artifact envelope.
+pub const NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION: u32 = 2;
+
+/// Environment-bound wrapper around one validated V1 campaign artifact.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeightFullModelCampaignArtifactV2 {
+    pub schema_version: u32,
+    pub campaign_artifact: WeightFullModelCampaignArtifactV1,
+    pub environment: WeightCampaignEnvironmentV1,
+}
+
+impl WeightFullModelCampaignArtifactV2 {
+    pub fn new(
+        campaign_artifact: WeightFullModelCampaignArtifactV1,
+        environment: WeightCampaignEnvironmentV1,
+    ) -> Result<Self> {
+        let artifact = Self {
+            schema_version: NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION,
+            campaign_artifact,
+            environment,
+        };
+        artifact.validate()?;
+        Ok(artifact)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "weight campaign artifact v2 schema {}; supported version is {}",
+                self.schema_version, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION
+            )));
+        }
+        self.campaign_artifact.validate()?;
+        self.environment.validate()
+    }
+
+    pub fn verify_tokenizer_file(&self, path: impl AsRef<Path>) -> Result<String> {
+        self.validate()?;
+        self.campaign_artifact.verify_tokenizer_file(path)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -179,6 +221,46 @@ mod tests {
             evidence(WeightRepresentationFamilyV1::MagnitudeSparse),
         ])
         .unwrap()
+    }
+
+    fn environment() -> WeightCampaignEnvironmentV1 {
+        WeightCampaignEnvironmentV1 {
+            schema_version: crate::NNIS_WEIGHT_CAMPAIGN_ENVIRONMENT_VERSION,
+            device_ordinal: 0,
+            device_name: "NVIDIA Test GPU".to_string(),
+            device_uuid: "GPU-CUuuid([0, 1, 2, 3])".to_string(),
+            compute_capability_major: 12,
+            compute_capability_minor: 1,
+            sm_arch: "sm_121".to_string(),
+            multiprocessor_count: 16,
+            clock_khz: 1_000_000,
+            memory_clock_khz: 500_000,
+            integrated: true,
+            cuda_driver_major: 13,
+            cuda_driver_minor: 0,
+        }
+    }
+
+    #[test]
+    fn v2_binds_validated_campaign_artifact_to_physical_environment() {
+        let v1 = WeightFullModelCampaignArtifactV1::new(
+            campaign(),
+            WeightCampaignRecipeV1::new(vec![1, 2], 4, 0.05).unwrap(),
+            "tokenizer.json",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
+        let artifact = WeightFullModelCampaignArtifactV2::new(v1, environment()).unwrap();
+        artifact.validate().unwrap();
+        assert_eq!(artifact.schema_version, 2);
+
+        let encoded = serde_json::to_string(&artifact).unwrap();
+        let decoded: WeightFullModelCampaignArtifactV2 = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, artifact);
+
+        let mut drifted = artifact;
+        drifted.environment.sm_arch = "sm_120".to_string();
+        assert!(drifted.validate().is_err());
     }
 
     #[test]

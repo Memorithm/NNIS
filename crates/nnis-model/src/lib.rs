@@ -200,7 +200,9 @@ pub use weight_full_model_campaign::{
     WeightFullModelCampaignV1, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_VERSION,
 };
 pub use weight_full_model_campaign_artifact::{
-    WeightFullModelCampaignArtifactV1, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION,
+    WeightFullModelCampaignArtifactV1, WeightFullModelCampaignArtifactV2,
+    NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION,
+    NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION,
 };
 pub use weight_full_model_evidence::{
     PhysicalWeightExecutionObservationV1, WeightFullModelExecutionEvidenceV1,
