@@ -35,6 +35,7 @@ pub mod kernels {
         F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
         F32TopKWorkspace,
     };
+    pub use nnis_kernels::{F32Int2Gemv, F32SparseCscGemv};
 }
 
 /// High-level decoder-only model runtime.
@@ -53,6 +54,13 @@ pub mod model {
         NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
         NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     };
+    pub use nnis_model::{
+        reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+        Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
+        WeightCapabilityManifestV1, WeightRepresentationQualificationRecordV1,
+        NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+        NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+    };
 }
 
 pub use jit::{
@@ -67,6 +75,7 @@ pub use kernels::{
     F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
     F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
+pub use nnis_kernels::{F32Int2Gemv, F32SparseCscGemv};
 pub use runtime::{
     current_process_gpu_memory, observe_kv_cache, Context, Device, DeviceBuffer, DevicePod,
     DeviceProps, ErrorKind, Event, KvCacheTelemetry, NnisError, NvmlProcessMemorySnapshotV1,
@@ -85,6 +94,13 @@ pub use model::{
     NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
     NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
     NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+};
+pub use nnis_model::{
+    reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+    Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
+    WeightCapabilityManifestV1, WeightRepresentationQualificationRecordV1,
+    NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+    NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.
