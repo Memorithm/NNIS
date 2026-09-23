@@ -12,6 +12,7 @@
 //! device buffers. Embedding, attention, MLP and full-model INT4 execution are
 //! still outside this storage contract.
 
+use crate::weights::WeightLogicalShapeV1;
 use crate::{DeviceTensor, ModelWeights};
 use nnis_kernels::F32Int4Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
@@ -377,26 +378,9 @@ impl Int4ReferenceProjectionPlanV1 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Int4ReferenceLogicalShape {
-    Matrix { rows: usize, cols: usize },
-    Vector { len: usize },
-}
-
-impl Int4ReferenceLogicalShape {
-    fn element_count(self) -> Result<usize> {
-        match self {
-            Self::Matrix { rows, cols } => rows.checked_mul(cols).ok_or_else(|| {
-                NnisError::invalid_input("INT4 logical matrix shape overflows usize")
-            }),
-            Self::Vector { len } => Ok(len),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Int4ReferenceLogicalBinding {
     allocation_index: usize,
-    shape: Int4ReferenceLogicalShape,
+    shape: WeightLogicalShapeV1,
 }
 
 struct Int4ReferenceDeviceAllocation {
@@ -439,7 +423,7 @@ impl Int4ReferenceModelStorageV1 {
         let mut max_abs_error = 0.0_f32;
         let mut weighted_squared_error = 0.0_f64;
 
-        visit_weight_tensors(weights, |name, tensor, shape| {
+        weights.for_each_logical_tensor(|name, tensor, shape| {
             let (source_key, source_bytes) = match tensor {
                 DeviceTensor::F32(buffer) => (buffer.device_ptr(), buffer.size_bytes()),
                 DeviceTensor::Bf16(_) => {
@@ -713,8 +697,8 @@ impl Int4ReferenceModelStorageV1 {
             ))
         })?;
         let (rows, cols) = match binding.shape {
-            Int4ReferenceLogicalShape::Matrix { rows, cols } => (rows, cols),
-            Int4ReferenceLogicalShape::Vector { .. } => {
+            WeightLogicalShapeV1::Matrix { rows, cols } => (rows, cols),
+            WeightLogicalShapeV1::Vector { .. } => {
                 return Err(NnisError::invalid_input(format!(
                     "INT4 logical weight {:?} is a vector, not a projection matrix",
                     plan.logical_weight()
@@ -803,80 +787,6 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
         .checked_add(value)
         .ok_or_else(|| NnisError::invalid_input(format!("{label} overflows u64")))?;
     Ok(())
-}
-
-fn visit_weight_tensors(
-    weights: &ModelWeights,
-    mut visit: impl FnMut(&str, &DeviceTensor, Int4ReferenceLogicalShape) -> Result<()>,
-) -> Result<()> {
-    visit(
-        "token_embedding",
-        weights.token_embedding.tensor(),
-        Int4ReferenceLogicalShape::Matrix {
-            rows: weights.token_embedding.rows(),
-            cols: weights.token_embedding.cols(),
-        },
-    )?;
-    for (index, layer) in weights.layers.iter().enumerate() {
-        visit(
-            &format!("layers.{index}.input_norm"),
-            layer.input_norm.tensor(),
-            Int4ReferenceLogicalShape::Vector {
-                len: layer.input_norm.len(),
-            },
-        )?;
-        for (name, weight) in [
-            ("q_proj", &layer.q_proj),
-            ("k_proj", &layer.k_proj),
-            ("v_proj", &layer.v_proj),
-            ("o_proj", &layer.o_proj),
-        ] {
-            visit(
-                &format!("layers.{index}.{name}"),
-                weight.tensor(),
-                Int4ReferenceLogicalShape::Matrix {
-                    rows: weight.rows(),
-                    cols: weight.cols(),
-                },
-            )?;
-        }
-        visit(
-            &format!("layers.{index}.post_attention_norm"),
-            layer.post_attention_norm.tensor(),
-            Int4ReferenceLogicalShape::Vector {
-                len: layer.post_attention_norm.len(),
-            },
-        )?;
-        for (name, weight) in [
-            ("gate_proj", &layer.gate_proj),
-            ("up_proj", &layer.up_proj),
-            ("down_proj", &layer.down_proj),
-        ] {
-            visit(
-                &format!("layers.{index}.{name}"),
-                weight.tensor(),
-                Int4ReferenceLogicalShape::Matrix {
-                    rows: weight.rows(),
-                    cols: weight.cols(),
-                },
-            )?;
-        }
-    }
-    visit(
-        "final_norm",
-        weights.final_norm.tensor(),
-        Int4ReferenceLogicalShape::Vector {
-            len: weights.final_norm.len(),
-        },
-    )?;
-    visit(
-        "lm_head",
-        weights.lm_head.tensor(),
-        Int4ReferenceLogicalShape::Matrix {
-            rows: weights.lm_head.rows(),
-            cols: weights.lm_head.cols(),
-        },
-    )
 }
 
 #[cfg(test)]
