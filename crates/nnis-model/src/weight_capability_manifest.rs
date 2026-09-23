@@ -117,9 +117,7 @@ pub fn reference_weight_capability_manifest_v1() -> WeightCapabilityManifestV1 {
                 exact_serialization_available: true,
                 exact_accounting_available: true,
                 isolated_projection_kernel: Some("F32Int4Gemv".to_string()),
-                projection_plan_contract_version: Some(
-                    NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
-                ),
+                projection_plan_contract_version: Some(NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION),
                 full_model_execution_qualified: false,
             },
             WeightRepresentationCapabilityV1 {
@@ -128,9 +126,7 @@ pub fn reference_weight_capability_manifest_v1() -> WeightCapabilityManifestV1 {
                 exact_serialization_available: true,
                 exact_accounting_available: true,
                 isolated_projection_kernel: Some("F32Int2Gemv".to_string()),
-                projection_plan_contract_version: Some(
-                    NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION,
-                ),
+                projection_plan_contract_version: Some(NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION),
                 full_model_execution_qualified: false,
             },
             WeightRepresentationCapabilityV1 {
