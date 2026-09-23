@@ -441,6 +441,92 @@ impl ModelWeights {
         summarize_weight_allocations(observations)
     }
 
+    pub(crate) fn from_named_logical_tensors(
+        config: &ModelConfig,
+        mut tensors: BTreeMap<String, (WeightLogicalShapeV1, DeviceTensor)>,
+    ) -> Result<Self> {
+        config.validate()?;
+        let hidden = config.hidden_size;
+        let intermediate = config.intermediate_size;
+        let kv_width = config.key_value_width()?;
+
+        let token_embedding =
+            take_named_matrix(&mut tensors, "token_embedding", config.vocab_size, hidden)?;
+        let mut layers = Vec::with_capacity(config.num_hidden_layers);
+        for index in 0..config.num_hidden_layers {
+            let prefix = format!("layers.{index}");
+            layers.push(DecoderLayerWeights {
+                input_norm: take_named_vector(
+                    &mut tensors,
+                    &format!("{prefix}.input_norm"),
+                    hidden,
+                )?,
+                q_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.q_proj"),
+                    hidden,
+                    hidden,
+                )?,
+                k_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.k_proj"),
+                    hidden,
+                    kv_width,
+                )?,
+                v_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.v_proj"),
+                    hidden,
+                    kv_width,
+                )?,
+                o_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.o_proj"),
+                    hidden,
+                    hidden,
+                )?,
+                post_attention_norm: take_named_vector(
+                    &mut tensors,
+                    &format!("{prefix}.post_attention_norm"),
+                    hidden,
+                )?,
+                gate_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.gate_proj"),
+                    hidden,
+                    intermediate,
+                )?,
+                up_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.up_proj"),
+                    hidden,
+                    intermediate,
+                )?,
+                down_proj: take_named_matrix(
+                    &mut tensors,
+                    &format!("{prefix}.down_proj"),
+                    intermediate,
+                    hidden,
+                )?,
+            });
+        }
+
+        let weights = Self {
+            token_embedding,
+            layers,
+            final_norm: take_named_vector(&mut tensors, "final_norm", hidden)?,
+            lm_head: take_named_matrix(&mut tensors, "lm_head", hidden, config.vocab_size)?,
+        };
+        if !tensors.is_empty() {
+            return Err(NnisError::invalid_input(format!(
+                "unexpected logical tensors remain while rebuilding model weights: {}",
+                tensors.keys().cloned().collect::<Vec<_>>().join(", ")
+            )));
+        }
+        weights.validate(config)?;
+        Ok(weights)
+    }
+
     fn expect_matrix(name: &str, weight: &MatrixWeight, rows: usize, cols: usize) -> Result<()> {
         if weight.rows() != rows || weight.cols() != cols {
             return Err(NnisError::invalid_input(format!(
@@ -542,6 +628,39 @@ impl ModelWeights {
             },
         )
     }
+}
+
+fn take_named_matrix(
+    tensors: &mut BTreeMap<String, (WeightLogicalShapeV1, DeviceTensor)>,
+    name: &str,
+    rows: usize,
+    cols: usize,
+) -> Result<MatrixWeight> {
+    let (shape, tensor) = tensors
+        .remove(name)
+        .ok_or_else(|| NnisError::invalid_input(format!("logical tensor {name} is missing")))?;
+    if shape != (WeightLogicalShapeV1::Matrix { rows, cols }) {
+        return Err(NnisError::invalid_input(format!(
+            "logical tensor {name} has shape {shape:?}; expected matrix ({rows}, {cols})"
+        )));
+    }
+    MatrixWeight::new(tensor, rows, cols)
+}
+
+fn take_named_vector(
+    tensors: &mut BTreeMap<String, (WeightLogicalShapeV1, DeviceTensor)>,
+    name: &str,
+    len: usize,
+) -> Result<VectorWeight> {
+    let (shape, tensor) = tensors
+        .remove(name)
+        .ok_or_else(|| NnisError::invalid_input(format!("logical tensor {name} is missing")))?;
+    if shape != (WeightLogicalShapeV1::Vector { len }) {
+        return Err(NnisError::invalid_input(format!(
+            "logical tensor {name} has shape {shape:?}; expected vector ({len},)"
+        )));
+    }
+    VectorWeight::new(tensor, len)
 }
 
 #[cfg(test)]
