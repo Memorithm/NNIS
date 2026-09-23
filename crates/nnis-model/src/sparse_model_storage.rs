@@ -532,18 +532,3 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sparse_storage_summary_rejects_invalid_threshold_before_cuda() {
-        let invalid = [f32::NAN, f32::INFINITY, -1.0];
-        for threshold in invalid {
-            assert!(
-                !threshold.is_finite() || threshold < 0.0,
-                "test threshold must be invalid"
-            );
-        }
-    }
-}
