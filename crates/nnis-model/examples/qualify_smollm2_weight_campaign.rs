@@ -140,6 +140,32 @@ fn tokenizer_basename(path: &Path) -> Result<String> {
         .ok_or_else(|| NnisError::invalid_input("tokenizer path has no UTF-8 basename"))
 }
 
+fn validate_git_status_output(status: &str) -> Result<()> {
+    if status.is_empty() {
+        return Ok(());
+    }
+    let preview = status.lines().take(8).collect::<Vec<_>>().join("\n");
+    Err(NnisError::invalid_input(format!(
+        "SmolLM2 weight qualification requires a clean Git worktree; git status --porcelain reported:\n{preview}"
+    )))
+}
+
+fn verify_clean_git_worktree() -> Result<()> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        .output()
+        .map_err(|error| NnisError::io("run git status --porcelain", error))?;
+    if !output.status.success() {
+        return Err(NnisError::invalid_input(format!(
+            "git status --porcelain failed with status {}",
+            output.status
+        )));
+    }
+    let status = String::from_utf8(output.stdout)
+        .map_err(|error| NnisError::invalid_input(format!("git status output is not UTF-8: {error}")))?;
+    validate_git_status_output(&status)
+}
+
 fn current_nnis_commit() -> Result<String> {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -284,6 +310,7 @@ fn run_sparse(
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args = parse_args(std::env::args().skip(1)).map_err(NnisError::invalid_input)?;
+    verify_clean_git_worktree()?;
     let model_payload = args.model_dir.join("model.safetensors");
     SMOLLM2_135M_BF16.verify_model_file_sha256(&model_payload)?;
     let commit = current_nnis_commit()?;
@@ -347,6 +374,14 @@ mod tests {
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn git_status_validation_rejects_any_checkout_drift() {
+        validate_git_status_output("").unwrap();
+        assert!(validate_git_status_output(" M crates/nnis-model/src/lib.rs\n").is_err());
+        assert!(validate_git_status_output("?? local-model/\n").is_err());
+        assert!(validate_git_status_output("A  generated-evidence.json\n").is_err());
     }
 
     #[test]
