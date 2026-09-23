@@ -1,6 +1,9 @@
 use crate::{Activation, DecoderExecutionCapabilities, ModelConfig, WeightDType};
 use nnis_rt::{NnisError, Result};
 use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 pub const NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION: u32 = 1;
 
@@ -113,6 +116,48 @@ impl ExactDecoderCheckpointSpec {
         Ok(capabilities)
     }
 
+    /// Verify one local model payload against the exact checkpoint SHA-256.
+    ///
+    /// The file is hashed incrementally and is never read wholly into memory.
+    /// This verifies bytes only; repository/revision provenance remains a
+    /// separate part of the exact checkpoint identity contract.
+    pub fn verify_model_file_sha256(&self, path: impl AsRef<Path>) -> Result<String> {
+        if self.source_model_sha256.len() != 64
+            || !self
+                .source_model_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(NnisError::invalid_input(format!(
+                "exact checkpoint spec {} contains an invalid source model SHA-256",
+                self.name
+            )));
+        }
+
+        let path = path.as_ref();
+        let mut file = File::open(path)
+            .map_err(|error| NnisError::io("open exact checkpoint model payload", error))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|error| NnisError::io("hash exact checkpoint model payload", error))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        let actual = format!("{:x}", hasher.finalize());
+        if actual != self.source_model_sha256 {
+            return Err(NnisError::invalid_input(format!(
+                "model payload SHA-256 mismatch for {}: got {actual}, expected {}",
+                self.name, self.source_model_sha256
+            )));
+        }
+        Ok(actual)
+    }
+
     /// Compact deterministic key for JSON artifacts and qualification joins.
     ///
     /// The digest covers the complete canonical identity record, including
@@ -217,6 +262,29 @@ pub const TINYLLAMA_1P1B_CHAT_BF16: ExactDecoderCheckpointSpec = ExactDecoderChe
 mod tests {
     use super::*;
     use crate::DecoderAttentionTopology;
+
+    #[test]
+    fn local_model_payload_sha256_verification_is_streaming_and_fail_closed() {
+        let path = std::env::temp_dir().join(format!(
+            "nnis-exact-checkpoint-sha-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        std::fs::write(&path, b"abc").unwrap();
+
+        let mut spec = SMOLLM2_135M_BF16;
+        spec.source_model_sha256 =
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        assert_eq!(
+            spec.verify_model_file_sha256(&path).unwrap(),
+            spec.source_model_sha256
+        );
+
+        spec.source_model_sha256 =
+            "0000000000000000000000000000000000000000000000000000000000000000";
+        assert!(spec.verify_model_file_sha256(&path).is_err());
+        std::fs::remove_file(&path).unwrap();
+    }
 
     #[test]
     fn smollm2_exact_spec_accepts_only_its_decoder_config() {
