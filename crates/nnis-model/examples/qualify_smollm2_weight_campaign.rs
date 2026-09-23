@@ -60,10 +60,11 @@ where
                     })?));
             }
             "--tokenizer" => {
-                tokenizer =
-                    Some(PathBuf::from(arguments.next().ok_or_else(|| {
-                        "--tokenizer requires a file".to_string()
-                    })?));
+                tokenizer = Some(PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "--tokenizer requires a file".to_string())?,
+                ));
             }
             "--prompt-ids" => {
                 let raw = arguments
