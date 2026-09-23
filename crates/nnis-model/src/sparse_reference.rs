@@ -168,7 +168,11 @@ fn validate_sparse_tensor(sparse: &SparseReferenceTensorV1) -> Result<()> {
             "sparse reconstruction evidence is invalid",
         ));
     }
-    if sparse.retained_values.iter().any(|value| !value.is_finite()) {
+    if sparse
+        .retained_values
+        .iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(NnisError::invalid_input(
             "sparse retained values must all be finite",
         ));
@@ -217,7 +221,10 @@ mod tests {
         let source = [-1.0_f32, -0.25, 0.0, 0.5, 1.5, -0.75, 0.1, 2.0, -3.0];
         let sparse = sparsify_magnitude_reference_v1(&source, 0.5).unwrap();
         assert_eq!(sparse.occupancy_bitmap, vec![0b1011_0001, 0b0000_0001]);
-        assert_eq!(sparse.retained_values, vec![-1.0_f32, 1.5, -0.75, 2.0, -3.0]);
+        assert_eq!(
+            sparse.retained_values,
+            vec![-1.0_f32, 1.5, -0.75, 2.0, -3.0]
+        );
         assert_eq!(
             densify_sparse_reference_v1(&sparse).unwrap(),
             vec![-1.0_f32, 0.0, 0.0, 0.0, 1.5, -0.75, 0.0, 2.0, -3.0]
@@ -226,8 +233,7 @@ mod tests {
 
     #[test]
     fn canonical_serialization_accounts_bitmap_and_values_exactly() {
-        let sparse = sparsify_magnitude_reference_v1(&[1.0_f32, 0.0, -2.0, 0.1], 0.25)
-            .unwrap();
+        let sparse = sparsify_magnitude_reference_v1(&[1.0_f32, 0.0, -2.0, 0.1], 0.25).unwrap();
         let serialized = sparse.canonical_serialized_bytes().unwrap();
         let expected = NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES
             + sparse.occupancy_bitmap.len() as u64
