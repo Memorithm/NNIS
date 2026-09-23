@@ -35,6 +35,7 @@ impl WeightCampaignEnvironmentV1 {
         let (cuda_driver_major, cuda_driver_minor) = props.driver_version.ok_or_else(|| {
             NnisError::unsupported("weight campaign environment requires CUDA driver version")
         })?;
+        let sm_arch = props.sm_arch();
         let environment = Self {
             schema_version: NNIS_WEIGHT_CAMPAIGN_ENVIRONMENT_VERSION,
             device_ordinal: props.ordinal,
@@ -42,7 +43,7 @@ impl WeightCampaignEnvironmentV1 {
             device_uuid: format!("GPU-{uuid:?}"),
             compute_capability_major: props.compute_capability.0,
             compute_capability_minor: props.compute_capability.1,
-            sm_arch: props.sm_arch(),
+            sm_arch,
             multiprocessor_count: props.multiprocessor_count,
             clock_khz: props.clock_khz,
             memory_clock_khz: props.memory_clock_khz,
