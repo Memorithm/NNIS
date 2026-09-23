@@ -534,7 +534,7 @@ fn format_generate_batch_text(items: &[GenerateBatchItemJsonV1]) -> String {
     ));
     for item in items {
         out.push_str(&format!(
-            "=== batch_index {} seed {} ===\\n",
+            "=== batch_index {} seed {} ===\n",
             item.batch_index, item.seed
         ));
         if item.ok {
