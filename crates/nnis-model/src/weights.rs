@@ -450,12 +450,8 @@ impl ModelWeights {
         let intermediate = config.intermediate_size;
         let kv_width = config.key_value_width()?;
 
-        let token_embedding = take_named_matrix(
-            &mut tensors,
-            "token_embedding",
-            config.vocab_size,
-            hidden,
-        )?;
+        let token_embedding =
+            take_named_matrix(&mut tensors, "token_embedding", config.vocab_size, hidden)?;
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for index in 0..config.num_hidden_layers {
             let prefix = format!("layers.{index}");
@@ -519,12 +515,7 @@ impl ModelWeights {
             token_embedding,
             layers,
             final_norm: take_named_vector(&mut tensors, "final_norm", hidden)?,
-            lm_head: take_named_matrix(
-                &mut tensors,
-                "lm_head",
-                hidden,
-                config.vocab_size,
-            )?,
+            lm_head: take_named_matrix(&mut tensors, "lm_head", hidden, config.vocab_size)?,
         };
         if !tensors.is_empty() {
             return Err(NnisError::invalid_input(format!(
