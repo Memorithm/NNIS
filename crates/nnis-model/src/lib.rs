@@ -72,7 +72,9 @@ pub use decoder_capabilities::{
     DecoderRopeSemantics, NNIS_DECODER_CAPABILITY_VERSION,
 };
 pub use dense_weight_materialization::{
-    DenseWeightMaterializationEvidenceV1, NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
+    DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2,
+    NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION,
+    NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
 };
 pub use exact_checkpoint_spec::{
     ExactDecoderCheckpointSpec, NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION, SMOLLM2_135M_BF16,
@@ -113,7 +115,8 @@ pub use format::{
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
 pub use int2_model_storage::{
-    Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1, Int2ReferenceStorageSummaryV1,
+    Int2DenseMaterializedModelV1, Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1,
+    Int2ReferenceStorageSummaryV1,
 };
 pub use int2_reference::{
     dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
