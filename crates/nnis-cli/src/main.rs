@@ -574,9 +574,9 @@ fn generate_batch(arguments: &GenerateBatchArgs) -> Result<(String, bool), Strin
 
     let mut tokenized_prompts = Vec::with_capacity(arguments.prompts.len());
     for (index, prompt) in arguments.prompts.iter().enumerate() {
-        let encoding = tokenizer
-            .encode(prompt.as_str(), true)
-            .map_err(|error| format!("failed to tokenize prompt at batch_index {index}: {error}"))?;
+        let encoding = tokenizer.encode(prompt.as_str(), true).map_err(|error| {
+            format!("failed to tokenize prompt at batch_index {index}: {error}")
+        })?;
         let input_ids = encoding.get_ids().to_vec();
         if input_ids.is_empty() {
             return Err(format!(
