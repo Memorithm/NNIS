@@ -60,7 +60,9 @@ impl SparseCscReferenceMatrixV1 {
             .checked_add(offsets_bytes)
             .and_then(|value| value.checked_add(indices_bytes))
             .and_then(|value| value.checked_add(values_bytes))
-            .ok_or_else(|| NnisError::invalid_input("sparse CSC serialized size overflows usize"))?;
+            .ok_or_else(|| {
+                NnisError::invalid_input("sparse CSC serialized size overflows usize")
+            })?;
 
         let mut encoded = Vec::with_capacity(capacity);
         encoded.extend_from_slice(&SERIALIZED_MAGIC);
@@ -250,9 +252,7 @@ pub fn sparsify_matrix_csc_reference_v1(
 }
 
 /// Reconstruct the row-major dense logical matrix.
-pub fn densify_matrix_csc_reference_v1(
-    sparse: &SparseCscReferenceMatrixV1,
-) -> Result<Vec<f32>> {
+pub fn densify_matrix_csc_reference_v1(sparse: &SparseCscReferenceMatrixV1) -> Result<Vec<f32>> {
     sparse.validate()?;
     let rows = usize::try_from(sparse.rows)
         .map_err(|_| NnisError::invalid_input("sparse CSC rows do not fit usize"))?;
@@ -281,11 +281,7 @@ mod tests {
 
     #[test]
     fn row_major_dense_matrix_converts_to_canonical_csc() {
-        let dense = [
-            1.0_f32, 0.1, -2.0,
-            0.0, 3.0, 0.2,
-            -4.0, 0.0, 5.0,
-        ];
+        let dense = [1.0_f32, 0.1, -2.0, 0.0, 3.0, 0.2, -4.0, 0.0, 5.0];
         let sparse = sparsify_matrix_csc_reference_v1(&dense, 3, 3, 0.25).unwrap();
         assert_eq!(sparse.column_offsets, vec![0, 2, 3, 5]);
         assert_eq!(sparse.row_indices, vec![0, 2, 1, 0, 2]);
