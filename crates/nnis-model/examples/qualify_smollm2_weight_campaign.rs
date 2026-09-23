@@ -2,16 +2,20 @@ use nnis_model::{
     load_model_from_safetensors_f32, validate_finite_runtime_output, GeneratedTokenEvidenceV1,
     GenerationConfig, Int2DenseMaterializedModelV1, Int4DenseMaterializedModelV1,
     PhysicalWeightExecutionObservationV1, SafetensorsLoadConfig, SparseDenseMaterializedModelV1,
-    WeightFullModelCampaignV1, WeightFullModelExecutionEvidenceV1, SMOLLM2_135M_BF16,
+    WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1, WeightFullModelCampaignV1,
+    WeightFullModelExecutionEvidenceV1, SMOLLM2_135M_BF16,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
-use std::fs;
+use sha2::{Digest, Sha256};
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, PartialEq)]
 struct Args {
     model_dir: PathBuf,
+    tokenizer: PathBuf,
     prompt_ids: Vec<u32>,
     max_new_tokens: usize,
     sparse_threshold: f32,
@@ -41,6 +45,7 @@ where
 {
     let mut arguments = arguments.into_iter();
     let mut model_dir = None;
+    let mut tokenizer = None;
     let mut prompt_ids = None;
     let mut max_new_tokens = 8_usize;
     let mut sparse_threshold = 0.05_f32;
@@ -52,6 +57,12 @@ where
                 model_dir =
                     Some(PathBuf::from(arguments.next().ok_or_else(|| {
                         "--model-dir requires a directory".to_string()
+                    })?));
+            }
+            "--tokenizer" => {
+                tokenizer =
+                    Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                        "--tokenizer requires a file".to_string()
                     })?));
             }
             "--prompt-ids" => {
@@ -94,11 +105,37 @@ where
 
     Ok(Args {
         model_dir: model_dir.ok_or_else(|| "missing --model-dir DIR".to_string())?,
+        tokenizer: tokenizer.ok_or_else(|| "missing --tokenizer FILE".to_string())?,
         prompt_ids: prompt_ids.ok_or_else(|| "missing --prompt-ids IDS".to_string())?,
         max_new_tokens,
         sparse_threshold,
         output: output.ok_or_else(|| "missing --output FILE".to_string())?,
     })
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let mut file =
+        File::open(path).map_err(|error| NnisError::io("open tokenizer artifact", error))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| NnisError::io("hash tokenizer artifact", error))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn tokenizer_basename(path: &Path) -> Result<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| NnisError::invalid_input("tokenizer path has no UTF-8 basename"))
 }
 
 fn current_nnis_commit() -> Result<String> {
@@ -281,7 +318,19 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let campaign = WeightFullModelCampaignV1::new(vec![int4, int2, sparse])?;
     campaign.qualification_bundle()?;
-    let json = serde_json::to_string_pretty(&campaign)?;
+    let recipe = WeightCampaignRecipeV1::new(
+        args.prompt_ids.clone(),
+        args.max_new_tokens,
+        args.sparse_threshold,
+    )?;
+    let artifact = WeightFullModelCampaignArtifactV1::new(
+        campaign,
+        recipe,
+        tokenizer_basename(&args.tokenizer)?,
+        sha256_file(&args.tokenizer)?,
+    )?;
+    artifact.validate()?;
+    let json = serde_json::to_string_pretty(&artifact)?;
     fs::write(&args.output, format!("{json}\n"))?;
     println!("{}", args.output.display());
     Ok(())
@@ -308,6 +357,8 @@ mod tests {
         let args = parse_args(strings(&[
             "--model-dir",
             "/tmp/model",
+            "--tokenizer",
+            "/tmp/tokenizer.json",
             "--prompt-ids",
             "1,2",
             "--max-new-tokens",
@@ -319,6 +370,7 @@ mod tests {
         ]))
         .unwrap();
         assert_eq!(args.model_dir, PathBuf::from("/tmp/model"));
+        assert_eq!(args.tokenizer, PathBuf::from("/tmp/tokenizer.json"));
         assert_eq!(args.prompt_ids, vec![1, 2]);
         assert_eq!(args.max_new_tokens, 4);
         assert_eq!(args.sparse_threshold.to_bits(), 0.125_f32.to_bits());
@@ -327,6 +379,8 @@ mod tests {
         assert!(parse_args(strings(&[
             "--model-dir",
             "/tmp/model",
+            "--tokenizer",
+            "/tmp/tokenizer.json",
             "--prompt-ids",
             "1",
             "--max-new-tokens",
