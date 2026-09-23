@@ -13,11 +13,16 @@
 //! still outside this storage contract.
 
 use crate::weights::WeightLogicalShapeV1;
-use crate::{DeviceTensor, ModelWeights};
+use crate::{
+    DenseWeightMaterializationEvidenceV1, DeviceTensor, Model, ModelConfig, ModelWeights,
+    WeightRepresentationFamilyV1,
+};
 use nnis_kernels::F32Int4Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Version of the deterministic INT4 reference storage contract.
 pub const NNIS_INT4_REFERENCE_STORAGE_VERSION: u32 = 1;
@@ -400,6 +405,82 @@ pub struct Int4ReferenceModelStorageV1 {
     summary: Int4ReferenceStorageSummaryV1,
 }
 
+/// Full-model INT4 reference path with an explicit dense-F32 execution boundary.
+///
+/// The compact INT4 storage remains resident and owned by this wrapper while a
+/// separately materialized F32 weight graph feeds the standard NNIS decoder.
+/// This is therefore not low-bit compute. Physical qualification still requires
+/// exact-checkpoint generation evidence.
+pub struct Int4DenseMaterializedModelV1 {
+    compact_storage: Int4ReferenceModelStorageV1,
+    model: Model,
+    materialization: DenseWeightMaterializationEvidenceV1,
+}
+
+impl Int4DenseMaterializedModelV1 {
+    pub fn from_f32_model_weights(
+        config: ModelConfig,
+        source_weights: ModelWeights,
+        stream: &Stream,
+    ) -> Result<Self> {
+        if config.weight_dtype != crate::WeightDType::F32 {
+            return Err(NnisError::unsupported(
+                "INT4 dense materialization requires an F32 execution source graph",
+            ));
+        }
+        source_weights.validate(&config)?;
+        let source_summary = source_weights.weight_allocation_summary_v1()?;
+        let started = Instant::now();
+        let compact_storage =
+            Int4ReferenceModelStorageV1::from_f32_model_weights(&source_weights, stream)?;
+        let dense_weights = compact_storage.materialize_dense_f32_weights(&config, stream)?;
+        stream.synchronize()?;
+        let duration_ns = u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
+            NnisError::invalid_input("INT4 dense materialization duration exceeds u64 nanoseconds")
+        })?;
+        let dense_summary = dense_weights.weight_allocation_summary_v1()?;
+        if source_summary.unique_device_elements != compact_storage.summary.unique_logical_values
+            || source_summary.unique_device_elements != dense_summary.unique_device_elements
+            || source_summary.owned_device_allocation_bytes
+                != compact_storage.summary.source_f32_owned_bytes
+        {
+            return Err(NnisError::invalid_input(
+                "INT4 dense materialization denominator does not reconcile across source, compact and dense graphs",
+            ));
+        }
+        let materialization = DenseWeightMaterializationEvidenceV1::new(
+            WeightRepresentationFamilyV1::Int4Symmetric,
+            source_summary.unique_device_elements,
+            source_summary.owned_device_allocation_bytes,
+            compact_storage.summary.resident_device_bytes,
+            dense_summary.owned_device_allocation_bytes,
+            0,
+            duration_ns,
+        )?;
+        let model = Model::new(config, dense_weights, stream)?;
+        Ok(Self {
+            compact_storage,
+            model,
+            materialization,
+        })
+    }
+
+    #[must_use]
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    #[must_use]
+    pub fn compact_storage_summary(&self) -> &Int4ReferenceStorageSummaryV1 {
+        self.compact_storage.summary()
+    }
+
+    #[must_use]
+    pub fn materialization_evidence(&self) -> &DenseWeightMaterializationEvidenceV1 {
+        &self.materialization
+    }
+}
+
 impl Int4ReferenceModelStorageV1 {
     /// Quantize every unique F32 model-weight allocation and materialize the
     /// packed payload plus one F32 scale as real CUDA allocations.
@@ -675,6 +756,69 @@ impl Int4ReferenceModelStorageV1 {
         &self.summary
     }
 
+    fn materialize_dense_f32_weights(
+        &self,
+        config: &ModelConfig,
+        stream: &Stream,
+    ) -> Result<ModelWeights> {
+        self.validate_resident_allocations()?;
+        if !Arc::ptr_eq(stream.ctx(), self.allocations.first().ok_or_else(|| {
+            NnisError::invalid_input("INT4 reference storage has no resident allocations")
+        })?.packed_values.ctx()) {
+            return Err(NnisError::invalid_input(
+                "INT4 dense materialization stream must share the compact-storage CUDA context",
+            ));
+        }
+
+        let mut dense_allocations = Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
+        for (allocation, summary) in self.allocations.iter().zip(&self.summary.allocations) {
+            let packed_values = allocation.packed_values.to_vec(stream)?;
+            let scale_values = allocation.scale.to_vec(stream)?;
+            if scale_values.len() != 1 || scale_values[0].to_bits() != summary.scale.to_bits() {
+                return Err(NnisError::invalid_input(
+                    "INT4 live scale disagrees with immutable storage summary",
+                ));
+            }
+            let quantized = Int4ReferenceQuantizedTensorV1 {
+                element_count: summary.logical_values,
+                scale: summary.scale,
+                packed_values,
+                max_abs_error: summary.max_abs_error,
+                mean_squared_error: summary.mean_squared_error,
+            };
+            let dense_host = dequantize_int4_symmetric_reference_v1(&quantized)?;
+            let dense = DeviceBuffer::from_host(stream.ctx(), stream, &dense_host)?;
+            dense_allocations.push(Arc::new(dense));
+        }
+
+        let mut logical = BTreeMap::new();
+        for (name, binding) in &self.bindings {
+            let allocation = dense_allocations
+                .get(binding.allocation_index)
+                .ok_or_else(|| {
+                    NnisError::invalid_input(
+                        "INT4 dense logical binding references a missing allocation",
+                    )
+                })?;
+            if logical
+                .insert(
+                    name.clone(),
+                    (
+                        binding.shape,
+                        DeviceTensor::F32(Arc::clone(allocation)),
+                    ),
+                )
+                .is_some()
+            {
+                return Err(NnisError::invalid_input(format!(
+                    "duplicate INT4 dense logical binding {name}"
+                )));
+            }
+        }
+        stream.synchronize()?;
+        ModelWeights::from_named_logical_tensors(config, logical)
+    }
+
     /// Execute one explicitly bound matrix projection directly from packed INT4 storage.
     ///
     /// This is an isolated primitive qualification surface. It does not change
@@ -791,6 +935,128 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::{
+        Activation, DecoderLayerWeights, MatrixWeight, VectorWeight, WeightDType,
+    };
+    use nnis_rt::{gpu_context, Context};
+
+    fn tiny_config() -> ModelConfig {
+        ModelConfig {
+            vocab_size: 8,
+            eos_token_id: Some(2),
+            hidden_size: 4,
+            intermediate_size: 8,
+            num_hidden_layers: 1,
+            num_attention_heads: 2,
+            num_key_value_heads: 1,
+            max_position_embeddings: 16,
+            rms_norm_eps: 1.0e-5,
+            rope_theta: 10_000.0,
+            activation: Activation::Silu,
+            weight_dtype: WeightDType::F32,
+        }
+    }
+
+    fn upload(
+        context: &Arc<Context>,
+        stream: &Stream,
+        len: usize,
+        seed: usize,
+    ) -> DeviceTensor {
+        let host = (0..len)
+            .map(|index| (((index + seed) * 17 % 31) as f32 - 15.0) * 0.03125)
+            .collect::<Vec<_>>();
+        DeviceTensor::F32(Arc::new(
+            DeviceBuffer::from_host(context, stream, &host).unwrap(),
+        ))
+    }
+
+    fn tiny_weights(context: &Arc<Context>, stream: &Stream) -> ModelWeights {
+        let config = tiny_config();
+        let hidden = config.hidden_size;
+        let intermediate = config.intermediate_size;
+        let kv = config.key_value_width().unwrap();
+        ModelWeights {
+            token_embedding: MatrixWeight::new(
+                upload(context, stream, config.vocab_size * hidden, 1),
+                config.vocab_size,
+                hidden,
+            )
+            .unwrap(),
+            layers: vec![DecoderLayerWeights {
+                input_norm: VectorWeight::new(upload(context, stream, hidden, 2), hidden).unwrap(),
+                q_proj: MatrixWeight::new(upload(context, stream, hidden * hidden, 3), hidden, hidden)
+                    .unwrap(),
+                k_proj: MatrixWeight::new(upload(context, stream, hidden * kv, 4), hidden, kv)
+                    .unwrap(),
+                v_proj: MatrixWeight::new(upload(context, stream, hidden * kv, 5), hidden, kv)
+                    .unwrap(),
+                o_proj: MatrixWeight::new(upload(context, stream, hidden * hidden, 6), hidden, hidden)
+                    .unwrap(),
+                post_attention_norm: VectorWeight::new(
+                    upload(context, stream, hidden, 7),
+                    hidden,
+                )
+                .unwrap(),
+                gate_proj: MatrixWeight::new(
+                    upload(context, stream, hidden * intermediate, 8),
+                    hidden,
+                    intermediate,
+                )
+                .unwrap(),
+                up_proj: MatrixWeight::new(
+                    upload(context, stream, hidden * intermediate, 9),
+                    hidden,
+                    intermediate,
+                )
+                .unwrap(),
+                down_proj: MatrixWeight::new(
+                    upload(context, stream, intermediate * hidden, 10),
+                    intermediate,
+                    hidden,
+                )
+                .unwrap(),
+            }],
+            final_norm: VectorWeight::new(upload(context, stream, hidden, 11), hidden).unwrap(),
+            lm_head: MatrixWeight::new(
+                upload(context, stream, hidden * config.vocab_size, 12),
+                hidden,
+                config.vocab_size,
+            )
+            .unwrap(),
+        }
+    }
+
+    #[test]
+    fn dense_full_model_materialization_is_explicitly_not_low_bit_compute() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let config = tiny_config();
+        let source = tiny_weights(&context, &stream);
+        source.validate(&config).unwrap();
+        let model =
+            Int4DenseMaterializedModelV1::from_f32_model_weights(config, source, &stream).unwrap();
+        model.materialization_evidence().validate().unwrap();
+        assert!(!model.materialization_evidence().low_bit_compute);
+        assert_eq!(
+            model
+                .materialization_evidence()
+                .dense_execution_bits_per_unique_logical_value
+                .to_bits(),
+            32.0_f64.to_bits()
+        );
+        assert!(model
+            .materialization_evidence()
+            .final_resident_bits_per_unique_logical_value
+            > 32.0);
+        model.model().new_session().unwrap();
+    }
+
+
     use super::*;
 
     #[test]
