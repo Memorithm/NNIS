@@ -66,6 +66,12 @@ jobs:
           python3 -m unittest tools/test_nnis_hub_hf_generate.py -v
           python3 -m py_compile tools/nnis_hub_hf_generate.py tools/test_nnis_hub_hf_generate.py
 
+      - name: Validate license provenance audit tooling
+        run: |
+          python3 tools/audit_license_provenance.py --self-test
+          python3 tools/audit_license_provenance.py --root . --output /tmp/nnis-license-provenance.json
+          python3 -m py_compile tools/audit_license_provenance.py
+
       - name: Install stable Rust components
         run: rustup component add rustfmt clippy
 
