@@ -150,7 +150,9 @@ pub fn int4_storage_qualification_record_v1(
         summary.serialized_total_bytes,
         summary.resident_device_bytes,
     )?;
-    if accounting.serialized_bits_per_unique_logical_value.to_bits()
+    if accounting
+        .serialized_bits_per_unique_logical_value
+        .to_bits()
         != summary.serialized_bits_per_unique_logical_value.to_bits()
         || accounting.resident_bits_per_unique_logical_value.to_bits()
             != summary.resident_bits_per_unique_logical_value.to_bits()
