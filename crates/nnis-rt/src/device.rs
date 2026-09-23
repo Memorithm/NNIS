@@ -10,6 +10,7 @@ pub struct DeviceProps {
     pub ordinal: i32,
     pub name: String,
     pub uuid: Option<nnis_sys::CUuuid>,
+    pub driver_version: Option<(i32, i32)>,
     pub compute_capability: (i32, i32),
     pub multiprocessor_count: u32,
     pub warp_size: u32,
@@ -138,6 +139,7 @@ impl Device {
             ordinal: self.ordinal,
             name: self.name()?,
             uuid: self.uuid(),
+            driver_version: driver::driver_version(),
             compute_capability: (
                 self.attribute(cu::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR)?,
                 self.attribute(cu::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR)?,
