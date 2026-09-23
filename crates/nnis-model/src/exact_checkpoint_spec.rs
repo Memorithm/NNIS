@@ -1,5 +1,6 @@
 use crate::{Activation, DecoderExecutionCapabilities, ModelConfig, WeightDType};
 use nnis_rt::{NnisError, Result};
+use sha2::{Digest, Sha256};
 
 pub const NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION: u32 = 1;
 
@@ -110,6 +111,16 @@ impl ExactDecoderCheckpointSpec {
             )));
         }
         Ok(capabilities)
+    }
+
+    /// Compact deterministic key for JSON artifacts and qualification joins.
+    ///
+    /// The digest covers the complete canonical identity record, including
+    /// repository, revision, model SHA-256, geometry and numeric policy.
+    pub fn evidence_key(&self) -> String {
+        let canonical = self.canonical_identity();
+        let digest = Sha256::digest(canonical.as_bytes());
+        format!("{}@sha256:{digest:x}", self.name)
     }
 
     /// Deterministic source/config identity for provenance and evidence keys.
@@ -239,6 +250,21 @@ mod tests {
         );
         assert_eq!(config.head_dim(), 64);
         assert_eq!(config.key_value_width().unwrap(), 256);
+    }
+
+    #[test]
+    fn evidence_key_is_compact_deterministic_and_spec_sensitive() {
+        let first = SMOLLM2_135M_BF16.evidence_key();
+        let second = SMOLLM2_135M_BF16.evidence_key();
+        assert_eq!(first, second);
+        assert!(first.starts_with("smollm2-135m-bf16@sha256:"));
+        let digest = first.split_once("@sha256:").unwrap().1;
+        assert_eq!(digest.len(), 64);
+        assert!(digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+
+        assert_ne!(first, TINYLLAMA_1P1B_CHAT_BF16.evidence_key());
     }
 
     #[test]
