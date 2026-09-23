@@ -358,7 +358,8 @@ mod tests {
 
     #[test]
     fn qualified_record_v2_preserves_physical_environment() {
-        let artifact_v2 = WeightFullModelCampaignArtifactV2::new(artifact(), environment()).unwrap();
+        let artifact_v2 =
+            WeightFullModelCampaignArtifactV2::new(artifact(), environment()).unwrap();
         let record = QualifiedWeightCapabilityRecordV2::from_artifact(&artifact_v2).unwrap();
         record.validate().unwrap();
         assert!(record.capability.elastic_stage_b_backend_ready);
