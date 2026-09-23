@@ -45,6 +45,28 @@ pub struct WeightAllocationSummaryV1 {
     pub segments: Vec<WeightAllocationSegmentV1>,
 }
 
+/// Logical geometry associated with one named decoder weight.
+///
+/// This crate-private contract is shared by representation experiments so
+/// INT4, INT2 and structural formats cannot silently disagree on matrix/vector
+/// orientation or logical element counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WeightLogicalShapeV1 {
+    Matrix { rows: usize, cols: usize },
+    Vector { len: usize },
+}
+
+impl WeightLogicalShapeV1 {
+    pub(crate) fn element_count(self) -> Result<usize> {
+        match self {
+            Self::Matrix { rows, cols } => rows.checked_mul(cols).ok_or_else(|| {
+                NnisError::invalid_input("logical matrix weight shape overflows usize")
+            }),
+            Self::Vector { len } => Ok(len),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct WeightAllocationObservation {
     pub(crate) logical_name: String,
@@ -444,32 +466,81 @@ impl ModelWeights {
         &self,
         mut visit: impl FnMut(&str, &DeviceTensor) -> Result<()>,
     ) -> Result<()> {
-        visit("token_embedding", self.token_embedding.tensor())?;
+        self.for_each_logical_tensor(|name, tensor, _| visit(name, tensor))
+    }
+
+    pub(crate) fn for_each_logical_tensor(
+        &self,
+        mut visit: impl FnMut(&str, &DeviceTensor, WeightLogicalShapeV1) -> Result<()>,
+    ) -> Result<()> {
+        visit(
+            "token_embedding",
+            self.token_embedding.tensor(),
+            WeightLogicalShapeV1::Matrix {
+                rows: self.token_embedding.rows(),
+                cols: self.token_embedding.cols(),
+            },
+        )?;
         for (index, layer) in self.layers.iter().enumerate() {
             visit(
                 &format!("layers.{index}.input_norm"),
                 layer.input_norm.tensor(),
+                WeightLogicalShapeV1::Vector {
+                    len: layer.input_norm.len(),
+                },
             )?;
-            visit(&format!("layers.{index}.q_proj"), layer.q_proj.tensor())?;
-            visit(&format!("layers.{index}.k_proj"), layer.k_proj.tensor())?;
-            visit(&format!("layers.{index}.v_proj"), layer.v_proj.tensor())?;
-            visit(&format!("layers.{index}.o_proj"), layer.o_proj.tensor())?;
+            for (name, weight) in [
+                ("q_proj", &layer.q_proj),
+                ("k_proj", &layer.k_proj),
+                ("v_proj", &layer.v_proj),
+                ("o_proj", &layer.o_proj),
+            ] {
+                visit(
+                    &format!("layers.{index}.{name}"),
+                    weight.tensor(),
+                    WeightLogicalShapeV1::Matrix {
+                        rows: weight.rows(),
+                        cols: weight.cols(),
+                    },
+                )?;
+            }
             visit(
                 &format!("layers.{index}.post_attention_norm"),
                 layer.post_attention_norm.tensor(),
+                WeightLogicalShapeV1::Vector {
+                    len: layer.post_attention_norm.len(),
+                },
             )?;
-            visit(
-                &format!("layers.{index}.gate_proj"),
-                layer.gate_proj.tensor(),
-            )?;
-            visit(&format!("layers.{index}.up_proj"), layer.up_proj.tensor())?;
-            visit(
-                &format!("layers.{index}.down_proj"),
-                layer.down_proj.tensor(),
-            )?;
+            for (name, weight) in [
+                ("gate_proj", &layer.gate_proj),
+                ("up_proj", &layer.up_proj),
+                ("down_proj", &layer.down_proj),
+            ] {
+                visit(
+                    &format!("layers.{index}.{name}"),
+                    weight.tensor(),
+                    WeightLogicalShapeV1::Matrix {
+                        rows: weight.rows(),
+                        cols: weight.cols(),
+                    },
+                )?;
+            }
         }
-        visit("final_norm", self.final_norm.tensor())?;
-        visit("lm_head", self.lm_head.tensor())
+        visit(
+            "final_norm",
+            self.final_norm.tensor(),
+            WeightLogicalShapeV1::Vector {
+                len: self.final_norm.len(),
+            },
+        )?;
+        visit(
+            "lm_head",
+            self.lm_head.tensor(),
+            WeightLogicalShapeV1::Matrix {
+                rows: self.lm_head.rows(),
+                cols: self.lm_head.cols(),
+            },
+        )
     }
 }
 
