@@ -36,8 +36,8 @@ mod safetensors_loader;
 mod safetensors_preflight;
 mod sampling;
 mod session_batch;
-mod streaming;
 mod sparse_reference;
+mod streaming;
 mod weighted_rmsnorm_candidate;
 mod weights;
 
