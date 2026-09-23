@@ -45,8 +45,8 @@ mod sparse_csc_reference;
 mod sparse_model_storage;
 mod sparse_reference;
 mod streaming;
-mod weight_campaign_recipe;
 mod weight_campaign_environment;
+mod weight_campaign_recipe;
 mod weight_capability_manifest;
 mod weight_full_model_campaign;
 mod weight_full_model_campaign_artifact;
@@ -186,11 +186,11 @@ pub use sparse_reference::{
     NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
 pub use streaming::GenerationStreamControl;
-pub use weight_campaign_recipe::{
-    WeightCampaignDecodingV1, WeightCampaignRecipeV1, NNIS_WEIGHT_CAMPAIGN_RECIPE_VERSION,
-};
 pub use weight_campaign_environment::{
     WeightCampaignEnvironmentV1, NNIS_WEIGHT_CAMPAIGN_ENVIRONMENT_VERSION,
+};
+pub use weight_campaign_recipe::{
+    WeightCampaignDecodingV1, WeightCampaignRecipeV1, NNIS_WEIGHT_CAMPAIGN_RECIPE_VERSION,
 };
 pub use weight_capability_manifest::{
     reference_weight_capability_manifest_v1, WeightCapabilityManifestV1,
