@@ -40,6 +40,7 @@ mod session_batch;
 mod sparse_reference;
 mod streaming;
 mod weight_representation_accounting;
+mod weight_representation_qualification;
 mod weighted_rmsnorm_candidate;
 mod weights;
 
@@ -145,6 +146,10 @@ pub use streaming::GenerationStreamControl;
 pub use weight_representation_accounting::{
     CanonicalWeightDenominatorV1, WeightRepresentationAccountingV1,
     NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
+};
+pub use weight_representation_qualification::{
+    WeightExecutionQualificationLevelV1, WeightRepresentationFamilyV1,
+    WeightRepresentationQualificationRecordV1, NNIS_WEIGHT_REPRESENTATION_QUALIFICATION_VERSION,
 };
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{
