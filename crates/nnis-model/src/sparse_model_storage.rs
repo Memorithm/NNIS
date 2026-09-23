@@ -11,9 +11,10 @@ use crate::weights::WeightLogicalShapeV1;
 use crate::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1,
     DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
-    Model, ModelConfig, ModelWeights, SparseReferenceTensorV1, WeightDType,
-    WeightRepresentationFamilyV1, NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES,
-    NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
+    ExactDecoderCheckpointSpec, Model, ModelConfig, ModelWeights,
+    PhysicalWeightExecutionObservationV1, SparseReferenceTensorV1, WeightDType,
+    WeightFullModelExecutionEvidenceV1, WeightRepresentationFamilyV1,
+    NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
@@ -478,6 +479,45 @@ pub struct SparseDenseMaterializedModelV1 {
     materialization: DenseWeightMaterializationEvidenceV2,
 }
 
+/// Build full-model evidence from exact sparse storage/materialization state.
+pub fn sparse_dense_full_model_evidence_v1(
+    checkpoint: &ExactDecoderCheckpointSpec,
+    observation: &PhysicalWeightExecutionObservationV1,
+    summary: &SparseReferenceModelStorageSummaryV1,
+    materialization: &DenseWeightMaterializationEvidenceV2,
+) -> Result<WeightFullModelExecutionEvidenceV1> {
+    if summary.schema_version != NNIS_SPARSE_MODEL_STORAGE_VERSION {
+        return Err(NnisError::unsupported(format!(
+            "sparse model storage summary schema {}; supported version is {}",
+            summary.schema_version, NNIS_SPARSE_MODEL_STORAGE_VERSION
+        )));
+    }
+    materialization.validate()?;
+    let device = &materialization.device_ownership;
+    if device.family != WeightRepresentationFamilyV1::MagnitudeSparse
+        || device.unique_logical_values != summary.unique_logical_values
+        || device.source_f32_weight_bytes != summary.source_f32_owned_bytes
+        || device.representation_resident_bytes != summary.resident_device_bytes
+    {
+        return Err(NnisError::invalid_input(
+            "sparse full-model evidence inputs do not reconcile with compact storage",
+        ));
+    }
+    WeightFullModelExecutionEvidenceV1::from_physical_observation(
+        WeightRepresentationFamilyV1::MagnitudeSparse,
+        NNIS_SPARSE_MODEL_STORAGE_VERSION,
+        checkpoint,
+        observation,
+        summary.serialized_total_bytes,
+        summary.logical_tensor_references,
+        summary.logical_element_references,
+        summary.unique_source_allocations,
+        summary.max_abs_error,
+        summary.mean_squared_error,
+        materialization.clone(),
+    )
+}
+
 impl SparseDenseMaterializedModelV1 {
     pub fn from_f32_model_weights(
         config: ModelConfig,
@@ -556,6 +596,19 @@ impl SparseDenseMaterializedModelV1 {
     pub fn materialization_evidence_v2(&self) -> &DenseWeightMaterializationEvidenceV2 {
         &self.materialization
     }
+
+    pub fn full_model_evidence(
+        &self,
+        checkpoint: &ExactDecoderCheckpointSpec,
+        observation: &PhysicalWeightExecutionObservationV1,
+    ) -> Result<WeightFullModelExecutionEvidenceV1> {
+        sparse_dense_full_model_evidence_v1(
+            checkpoint,
+            observation,
+            self.compact_storage.summary(),
+            &self.materialization,
+        )
+    }
 }
 
 fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
@@ -563,4 +616,74 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
         .checked_add(value)
         .ok_or_else(|| NnisError::invalid_input(format!("{label} overflows u64")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_model_evidence_adapter_rejects_storage_materialization_mismatch() {
+        let mut summary = SparseReferenceModelStorageSummaryV1 {
+            schema_version: NNIS_SPARSE_MODEL_STORAGE_VERSION,
+            tensor_storage_version: NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
+            representation: "magnitude-sparse-bitmap-f32-reference".to_string(),
+            threshold: 0.25,
+            execution_qualified: false,
+            logical_tensor_references: 1,
+            logical_element_references: 16,
+            unique_source_allocations: 1,
+            unique_logical_values: 16,
+            retained_values: 4,
+            source_f32_owned_bytes: 64,
+            serialized_total_bytes: 34,
+            resident_device_bytes: 18,
+            serialized_bits_per_unique_logical_value: 17.0,
+            resident_bits_per_unique_logical_value: 9.0,
+            retained_fraction: 0.25,
+            max_abs_error: 0.2,
+            mean_squared_error: 0.03,
+            allocations: Vec::new(),
+        };
+        let device = DenseWeightMaterializationEvidenceV1::new(
+            WeightRepresentationFamilyV1::MagnitudeSparse,
+            16,
+            64,
+            18,
+            64,
+            0,
+            1,
+        )
+        .unwrap();
+        let materialization = DenseWeightMaterializationEvidenceV2::new(device, 82).unwrap();
+        let tokens = crate::GeneratedTokenEvidenceV1::from_token_ids(&[5, 6]).unwrap();
+        let observation = PhysicalWeightExecutionObservationV1::new(
+            "0123456789abcdef0123456789abcdef01234567",
+            "SparseDenseMaterializedModelV1::model",
+            tokens,
+            false,
+        )
+        .unwrap();
+        let evidence = sparse_dense_full_model_evidence_v1(
+            &crate::SMOLLM2_135M_BF16,
+            &observation,
+            &summary,
+            &materialization,
+        )
+        .unwrap();
+        assert_eq!(
+            evidence.exact_checkpoint,
+            crate::SMOLLM2_135M_BF16.evidence_key()
+        );
+        assert_eq!(evidence.serialized_representation_bytes, 34);
+
+        summary.resident_device_bytes += 1;
+        assert!(sparse_dense_full_model_evidence_v1(
+            &crate::SMOLLM2_135M_BF16,
+            &observation,
+            &summary,
+            &materialization,
+        )
+        .is_err());
+    }
 }
