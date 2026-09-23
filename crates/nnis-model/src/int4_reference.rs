@@ -762,15 +762,23 @@ impl Int4ReferenceModelStorageV1 {
         stream: &Stream,
     ) -> Result<ModelWeights> {
         self.validate_resident_allocations()?;
-        if !Arc::ptr_eq(stream.ctx(), self.allocations.first().ok_or_else(|| {
-            NnisError::invalid_input("INT4 reference storage has no resident allocations")
-        })?.packed_values.ctx()) {
+        if !Arc::ptr_eq(
+            stream.ctx(),
+            self.allocations
+                .first()
+                .ok_or_else(|| {
+                    NnisError::invalid_input("INT4 reference storage has no resident allocations")
+                })?
+                .packed_values
+                .ctx(),
+        ) {
             return Err(NnisError::invalid_input(
                 "INT4 dense materialization stream must share the compact-storage CUDA context",
             ));
         }
 
-        let mut dense_allocations = Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
+        let mut dense_allocations =
+            Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
         for (allocation, summary) in self.allocations.iter().zip(&self.summary.allocations) {
             let packed_values = allocation.packed_values.to_vec(stream)?;
             let scale_values = allocation.scale.to_vec(stream)?;
@@ -803,10 +811,7 @@ impl Int4ReferenceModelStorageV1 {
             if logical
                 .insert(
                     name.clone(),
-                    (
-                        binding.shape,
-                        DeviceTensor::F32(Arc::clone(allocation)),
-                    ),
+                    (binding.shape, DeviceTensor::F32(Arc::clone(allocation))),
                 )
                 .is_some()
             {
@@ -936,9 +941,7 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        Activation, DecoderLayerWeights, MatrixWeight, VectorWeight, WeightDType,
-    };
+    use crate::{Activation, DecoderLayerWeights, MatrixWeight, VectorWeight, WeightDType};
     use nnis_rt::{gpu_context, Context};
 
     fn tiny_config() -> ModelConfig {
@@ -958,12 +961,7 @@ mod tests {
         }
     }
 
-    fn upload(
-        context: &Arc<Context>,
-        stream: &Stream,
-        len: usize,
-        seed: usize,
-    ) -> DeviceTensor {
+    fn upload(context: &Arc<Context>, stream: &Stream, len: usize, seed: usize) -> DeviceTensor {
         let host = (0..len)
             .map(|index| (((index + seed) * 17 % 31) as f32 - 15.0) * 0.03125)
             .collect::<Vec<_>>();
@@ -986,19 +984,24 @@ mod tests {
             .unwrap(),
             layers: vec![DecoderLayerWeights {
                 input_norm: VectorWeight::new(upload(context, stream, hidden, 2), hidden).unwrap(),
-                q_proj: MatrixWeight::new(upload(context, stream, hidden * hidden, 3), hidden, hidden)
-                    .unwrap(),
+                q_proj: MatrixWeight::new(
+                    upload(context, stream, hidden * hidden, 3),
+                    hidden,
+                    hidden,
+                )
+                .unwrap(),
                 k_proj: MatrixWeight::new(upload(context, stream, hidden * kv, 4), hidden, kv)
                     .unwrap(),
                 v_proj: MatrixWeight::new(upload(context, stream, hidden * kv, 5), hidden, kv)
                     .unwrap(),
-                o_proj: MatrixWeight::new(upload(context, stream, hidden * hidden, 6), hidden, hidden)
-                    .unwrap(),
-                post_attention_norm: VectorWeight::new(
-                    upload(context, stream, hidden, 7),
+                o_proj: MatrixWeight::new(
+                    upload(context, stream, hidden * hidden, 6),
+                    hidden,
                     hidden,
                 )
                 .unwrap(),
+                post_attention_norm: VectorWeight::new(upload(context, stream, hidden, 7), hidden)
+                    .unwrap(),
                 gate_proj: MatrixWeight::new(
                     upload(context, stream, hidden * intermediate, 8),
                     hidden,
@@ -1049,15 +1052,15 @@ mod tests {
                 .to_bits(),
             32.0_f64.to_bits()
         );
-        assert!(model
-            .materialization_evidence()
-            .final_resident_bits_per_unique_logical_value
-            > 32.0);
+        assert!(
+            model
+                .materialization_evidence()
+                .final_resident_bits_per_unique_logical_value
+                > 32.0
+        );
         model.model().new_session().unwrap();
     }
 
-
-    use super::*;
 
     #[test]
     fn projection_plan_is_versioned_shape_bound_and_forbids_dense_materialization() {
