@@ -40,6 +40,7 @@ mod safetensors_preflight;
 mod sampling;
 mod session_batch;
 mod sparse_csc_reference;
+mod sparse_model_storage;
 mod sparse_reference;
 mod streaming;
 mod weight_capability_manifest;
@@ -159,6 +160,11 @@ pub use sparse_csc_reference::{
     SparseCscReferenceMatrixV1, NNIS_SPARSE_CSC_ACCUMULATION_V1,
     NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
     NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES,
+};
+pub use sparse_model_storage::{
+    SparseDenseMaterializedModelV1, SparseReferenceAllocationSummaryV1,
+    SparseReferenceModelStorageSummaryV1, SparseReferenceModelStorageV1,
+    NNIS_SPARSE_MODEL_STORAGE_VERSION,
 };
 pub use sparse_reference::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
