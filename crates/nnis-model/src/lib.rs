@@ -71,7 +71,9 @@ pub use decoder_capabilities::{
     DecoderRopeSemantics, NNIS_DECODER_CAPABILITY_VERSION,
 };
 pub use dense_weight_materialization::{
-    DenseWeightMaterializationEvidenceV1, NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
+    DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2,
+    NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION,
+    NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
 };
 pub use exact_checkpoint_spec::{
     ExactDecoderCheckpointSpec, NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION, SMOLLM2_135M_BF16,
