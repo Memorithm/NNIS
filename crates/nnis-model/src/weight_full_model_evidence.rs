@@ -336,7 +336,10 @@ mod tests {
             base.materialization,
         )
         .unwrap();
-        assert_eq!(built.exact_checkpoint, crate::SMOLLM2_135M_BF16.evidence_key());
+        assert_eq!(
+            built.exact_checkpoint,
+            crate::SMOLLM2_135M_BF16.evidence_key()
+        );
         assert_eq!(built.generated_token_count, generated.token_count);
         assert_eq!(built.generated_token_ids_sha256, generated.token_ids_sha256);
         assert!(built.physical_execution_observed);
