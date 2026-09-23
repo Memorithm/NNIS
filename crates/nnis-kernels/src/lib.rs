@@ -23,6 +23,7 @@ mod rope;
 mod row_softmax;
 mod scatter;
 mod softmax;
+mod sparse_csc_gemv;
 mod top_k;
 
 pub use attention::{AttentionMask, F32Attention};
@@ -44,6 +45,7 @@ pub use rope::F32Rope;
 pub use row_softmax::{F32Softmax2D, F32Softmax2DWorkspace};
 pub use scatter::{Bf16Scatter, F32Scatter};
 pub use softmax::F32Softmax;
+pub use sparse_csc_gemv::F32SparseCscGemv;
 pub use top_k::{F32TopK, F32TopKWorkspace};
 
 use nnis_jit::{
