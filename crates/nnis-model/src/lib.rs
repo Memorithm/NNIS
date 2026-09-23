@@ -32,6 +32,7 @@ mod int2_reference;
 mod int4_reference;
 mod kernels;
 mod projection_plan;
+mod qualified_weight_capability_record;
 mod representation_plan;
 #[path = "runtime/mod.rs"]
 mod runtime;
@@ -148,6 +149,10 @@ pub use int4_reference::{
 pub use kernels::F32DecoderKernels;
 pub use nnis_rt::KvCacheTelemetry;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
+pub use qualified_weight_capability_record::{
+    QualifiedWeightCapabilityRecordV1, QualifiedWeightFamilyCapabilityV1,
+    NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_VERSION,
+};
 pub use representation_plan::{
     load_model_directory_with_representation_plan, PhysicalWeightRepresentation,
     WeightRepresentationPlan, WEIGHT_REPRESENTATION_PLAN_VERSION,
