@@ -107,8 +107,7 @@ pub use format::{
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
 pub use int2_model_storage::{
-    Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1,
-    Int2ReferenceStorageSummaryV1,
+    Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1, Int2ReferenceStorageSummaryV1,
 };
 pub use int2_reference::{
     dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
