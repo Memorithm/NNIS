@@ -42,6 +42,7 @@ mod sparse_csc_reference;
 mod sparse_reference;
 mod streaming;
 mod weight_capability_manifest;
+mod weight_qualification_bundle;
 mod weight_representation_accounting;
 mod weight_representation_qualification;
 mod weighted_rmsnorm_candidate;
@@ -160,6 +161,9 @@ pub use streaming::GenerationStreamControl;
 pub use weight_capability_manifest::{
     reference_weight_capability_manifest_v1, WeightCapabilityManifestV1,
     WeightRepresentationCapabilityV1, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+};
+pub use weight_qualification_bundle::{
+    WeightQualificationBundleV1, NNIS_WEIGHT_QUALIFICATION_BUNDLE_VERSION,
 };
 pub use weight_representation_accounting::{
     CanonicalWeightDenominatorV1, WeightRepresentationAccountingV1,
