@@ -10,6 +10,7 @@ mod config;
 mod da_luc_evidence;
 mod da_luc_plan;
 mod decoder_capabilities;
+mod dense_weight_materialization;
 mod exact_checkpoint_spec;
 mod execution_transition;
 mod f16_attention_plan;
@@ -68,6 +69,9 @@ pub use da_luc_plan::{
 pub use decoder_capabilities::{
     DecoderAttentionTopology, DecoderExecutionCapabilities, DecoderMlpSemantics,
     DecoderRopeSemantics, NNIS_DECODER_CAPABILITY_VERSION,
+};
+pub use dense_weight_materialization::{
+    DenseWeightMaterializationEvidenceV1, NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
 };
 pub use exact_checkpoint_spec::{
     ExactDecoderCheckpointSpec, NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION, SMOLLM2_135M_BF16,
