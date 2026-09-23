@@ -7,7 +7,8 @@
 use crate::{
     WeightRepresentationFamilyV1, NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION,
     NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
-    NNIS_INT4_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+    NNIS_INT4_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION,
+    NNIS_SPARSE_CSC_REFERENCE_VERSION,
 };
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
@@ -89,12 +90,9 @@ impl WeightCapabilityManifestV1 {
                     "weight capability projection-plan version must be non-zero",
                 ));
             }
-            if entry.full_model_execution_qualified
-                && (entry.isolated_projection_kernel.is_none()
-                    || entry.projection_plan_contract_version.is_none())
-            {
-                return Err(NnisError::invalid_input(
-                    "full-model qualification requires an isolated kernel and projection-plan contract",
+            if entry.full_model_execution_qualified {
+                return Err(NnisError::unsupported(
+                    "weight capability manifest v1 never authorizes full-model execution; use a future evidence-bound manifest version after E2E qualification",
                 ));
             }
         }
@@ -135,7 +133,7 @@ pub fn reference_weight_capability_manifest_v1() -> WeightCapabilityManifestV1 {
                 exact_serialization_available: true,
                 exact_accounting_available: true,
                 isolated_projection_kernel: Some("F32SparseCscGemv".to_string()),
-                projection_plan_contract_version: None,
+                projection_plan_contract_version: Some(NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION),
                 full_model_execution_qualified: false,
             },
         ],
@@ -177,6 +175,10 @@ mod tests {
             .iter_mut()
             .find(|entry| entry.family == WeightRepresentationFamilyV1::MagnitudeSparse)
             .unwrap();
+        assert_eq!(
+            sparse.projection_plan_contract_version,
+            Some(NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION)
+        );
         sparse.full_model_execution_qualified = true;
         assert!(manifest.validate().is_err());
     }
