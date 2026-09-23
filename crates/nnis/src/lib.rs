@@ -31,19 +31,19 @@ pub mod kernels {
         Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction,
         Bf16ReductionWorkspace, Bf16Scatter, F32Attention, F32Elementwise,
         F32ElementwiseActiveBlocks, F32ElementwiseOccupancy, F32Gather, F32Gemm, F32Gemv,
-        F32Int2Gemv, F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
-        F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
-        F32Softmax2DWorkspace, F32SparseCscGemv, F32TopK, F32TopKWorkspace,
+        F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction, F32ReductionWorkspace,
+        F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D, F32Softmax2DWorkspace, F32TopK,
+        F32TopKWorkspace,
     };
+    pub use nnis_kernels::{F32Int2Gemv, F32SparseCscGemv};
 }
 
 /// High-level decoder-only model runtime.
 pub mod model {
     pub use nnis_model::{
         dequantize_int4_symmetric_reference_v1, load_model_directory,
-        quantize_int4_symmetric_reference_v1, reference_weight_capability_manifest_v1, Activation, DecoderLayerWeights, DeviceTensor,
+        quantize_int4_symmetric_reference_v1, Activation, DecoderLayerWeights, DeviceTensor,
         GenerationConfig, GenerationStreamControl, InferenceSession,
-        Int2ReferenceModelStorageV1, Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1,
         Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1,
         Int4ReferenceProjectionPlanV1, Int4ReferenceQuantizedTensorV1,
         Int4ReferenceStorageSummaryV1, KvCacheTelemetry, MatrixWeight, Model, ModelConfig,
@@ -51,8 +51,15 @@ pub mod model {
         TensorManifest, VectorWeight, WeightDType, NNIS_INT4_REFERENCE_ACCUMULATION_V1,
         NNIS_INT4_REFERENCE_DEQUANTIZATION_V1, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
         NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
-        NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES,
-        NNIS_INT4_REFERENCE_STORAGE_VERSION, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+        NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
+        NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+    };
+    pub use nnis_model::{
+        reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+        Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
+        WeightCapabilityManifestV1, WeightRepresentationQualificationRecordV1,
+        NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+        NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
     };
 }
 
@@ -64,11 +71,11 @@ pub use kernels::{
     bf16_layer_normalize_rows_dispatched, bf16_rms_normalize_rows_dispatched, AttentionMask,
     Bf16Attention, Bf16Elementwise, Bf16Gather, Bf16Gemm, Bf16Reduction, Bf16ReductionWorkspace,
     Bf16Scatter, F32Attention, F32Elementwise, F32ElementwiseActiveBlocks, F32ElementwiseOccupancy,
-    F32Gather, F32Gemm, F32Gemv, F32Int2Gemv, F32Int4Gemv, F32LayerNorm,
-    F32LayerNormWorkspace, F32Reduction,
+    F32Gather, F32Gemm, F32Gemv, F32Int4Gemv, F32LayerNorm, F32LayerNormWorkspace, F32Reduction,
     F32ReductionWorkspace, F32RmsNorm, F32Rope, F32Scatter, F32Softmax, F32Softmax2D,
-    F32Softmax2DWorkspace, F32SparseCscGemv, F32TopK, F32TopKWorkspace,
+    F32Softmax2DWorkspace, F32TopK, F32TopKWorkspace,
 };
+pub use nnis_kernels::{F32Int2Gemv, F32SparseCscGemv};
 pub use runtime::{
     current_process_gpu_memory, observe_kv_cache, Context, Device, DeviceBuffer, DevicePod,
     DeviceProps, ErrorKind, Event, KvCacheTelemetry, NnisError, NvmlProcessMemorySnapshotV1,
@@ -78,17 +85,22 @@ pub use runtime::{
 
 pub use model::{
     dequantize_int4_symmetric_reference_v1, load_model_directory,
-    quantize_int4_symmetric_reference_v1, reference_weight_capability_manifest_v1, Activation,
-    GenerationConfig, GenerationStreamControl, InferenceSession, Int2ReferenceModelStorageV1,
-    Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1,
+    quantize_int4_symmetric_reference_v1, Activation, GenerationConfig, GenerationStreamControl,
+    InferenceSession, Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1,
     Int4ReferenceProjectionPlanV1, Int4ReferenceQuantizedTensorV1, Int4ReferenceStorageSummaryV1,
     Model, ModelConfig, ModelManifest, SampledBatchRequest, SampledSessionBatch, SamplingConfig,
-    SparseCscReferenceMatrixV1, TensorManifest, WeightCapabilityManifestV1, WeightDType,
-    WeightRepresentationQualificationRecordV1, NNIS_INT4_REFERENCE_ACCUMULATION_V1,
+    TensorManifest, WeightDType, NNIS_INT4_REFERENCE_ACCUMULATION_V1,
     NNIS_INT4_REFERENCE_DEQUANTIZATION_V1, NNIS_INT4_REFERENCE_PROJECTION_PLAN_VERSION,
     NNIS_INT4_REFERENCE_QUANT_MAX, NNIS_INT4_REFERENCE_QUANT_MIN,
-    NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES,
-    NNIS_INT4_REFERENCE_STORAGE_VERSION, NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+    NNIS_INT4_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT4_REFERENCE_STORAGE_VERSION,
+    NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+};
+pub use nnis_model::{
+    reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+    Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
+    WeightCapabilityManifestV1, WeightRepresentationQualificationRecordV1,
+    NNIS_INT2_REFERENCE_STORAGE_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+    NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.
