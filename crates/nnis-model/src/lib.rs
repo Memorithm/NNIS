@@ -120,8 +120,8 @@ pub use generated_token_evidence::{
     validate_finite_runtime_output, GeneratedTokenEvidenceV1, NNIS_GENERATED_TOKEN_EVIDENCE_VERSION,
 };
 pub use int2_model_storage::{
-    Int2DenseMaterializedModelV1, Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1,
-    Int2ReferenceStorageSummaryV1,
+    int2_dense_full_model_evidence_v1, Int2DenseMaterializedModelV1,
+    Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1, Int2ReferenceStorageSummaryV1,
 };
 pub use int2_reference::{
     dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
