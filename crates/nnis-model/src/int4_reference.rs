@@ -1061,7 +1061,6 @@ mod tests {
         model.model().new_session().unwrap();
     }
 
-
     #[test]
     fn projection_plan_is_versioned_shape_bound_and_forbids_dense_materialization() {
         let plan = Int4ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", 576, 576).unwrap();
