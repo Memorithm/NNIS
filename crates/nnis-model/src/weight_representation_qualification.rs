@@ -89,8 +89,7 @@ impl WeightRepresentationQualificationRecordV1 {
                 "weight representation version must be non-zero",
             ));
         }
-        if self.exact_checkpoint.is_empty()
-            || self.exact_checkpoint.trim() != self.exact_checkpoint
+        if self.exact_checkpoint.is_empty() || self.exact_checkpoint.trim() != self.exact_checkpoint
         {
             return Err(NnisError::invalid_input(
                 "weight qualification checkpoint identity must be non-empty and trimmed",
