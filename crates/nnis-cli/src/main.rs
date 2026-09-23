@@ -458,9 +458,7 @@ where
     }))
 }
 
-fn parse_validate_weight_campaign_artifact_args<I>(
-    arguments: I,
-) -> Result<Command, String>
+fn parse_validate_weight_campaign_artifact_args<I>(arguments: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
 {
@@ -630,8 +628,10 @@ fn validate_weight_campaign_artifact(
             arguments.input
         )
     })?;
-    let artifact: WeightFullModelCampaignArtifactV1 = serde_json::from_str(&raw)
-        .map_err(|error| format!("failed to parse WeightFullModelCampaignArtifactV1 JSON: {error}"))?;
+    let artifact: WeightFullModelCampaignArtifactV1 =
+        serde_json::from_str(&raw).map_err(|error| {
+            format!("failed to parse WeightFullModelCampaignArtifactV1 JSON: {error}")
+        })?;
     artifact
         .validate()
         .map_err(|error| format!("invalid full-model weight campaign artifact: {error}"))?;
