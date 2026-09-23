@@ -217,9 +217,85 @@ impl DenseWeightMaterializationEvidenceV1 {
     }
 }
 
+/// Version of materialization evidence that also accounts host temporary payloads.
+pub const NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION: u32 = 2;
+
+/// Full materialization evidence across device ownership and host conversion payloads.
+///
+/// Host and device memory remain separate dimensions. `peak_host_temporary_payload_bytes`
+/// counts the maximum simultaneously live logical payload bytes in NNIS-owned host
+/// vectors during one allocation conversion; it is not allocator RSS or capacity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DenseWeightMaterializationEvidenceV2 {
+    pub schema_version: u32,
+    pub device_ownership: DenseWeightMaterializationEvidenceV1,
+    pub peak_host_temporary_payload_bytes: u64,
+    pub host_temporary_scope: String,
+}
+
+impl DenseWeightMaterializationEvidenceV2 {
+    pub fn new(
+        device_ownership: DenseWeightMaterializationEvidenceV1,
+        peak_host_temporary_payload_bytes: u64,
+    ) -> Result<Self> {
+        device_ownership.validate()?;
+        let evidence = Self {
+            schema_version: NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION,
+            device_ownership,
+            peak_host_temporary_payload_bytes,
+            host_temporary_scope:
+                "nnis-owned-host-payload-bytes-during-one-allocation-materialization".to_string(),
+        };
+        evidence.validate()?;
+        Ok(evidence)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "dense weight materialization evidence v2 schema {}; supported version is {}",
+                self.schema_version, NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION
+            )));
+        }
+        if self.host_temporary_scope
+            != "nnis-owned-host-payload-bytes-during-one-allocation-materialization"
+        {
+            return Err(NnisError::unsupported(
+                "dense materialization host temporary scope is unsupported",
+            ));
+        }
+        self.device_ownership.validate()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v2_preserves_device_evidence_and_separates_host_peak() {
+        let device = DenseWeightMaterializationEvidenceV1::new(
+            WeightRepresentationFamilyV1::Int2Ternary,
+            16,
+            64,
+            8,
+            64,
+            0,
+            55,
+        )
+        .unwrap();
+        let evidence = DenseWeightMaterializationEvidenceV2::new(device, 76).unwrap();
+        assert_eq!(evidence.schema_version, 2);
+        assert_eq!(evidence.peak_host_temporary_payload_bytes, 76);
+        assert_eq!(evidence.device_ownership.materialization_duration_ns, 55);
+        assert!(!evidence.device_ownership.low_bit_compute);
+        evidence.validate().unwrap();
+
+        let mut malformed = evidence;
+        malformed.host_temporary_scope = "process-rss".to_string();
+        assert!(malformed.validate().is_err());
+    }
 
     #[test]
     fn dense_materialization_counts_compact_and_dense_residence() {
