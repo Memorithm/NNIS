@@ -151,7 +151,8 @@ pub use kernels::F32DecoderKernels;
 pub use nnis_rt::KvCacheTelemetry;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
 pub use qualified_weight_capability_record::{
-    QualifiedWeightCapabilityRecordV1, QualifiedWeightFamilyCapabilityV1,
+    QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2,
+    QualifiedWeightFamilyCapabilityV1, NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION,
     NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_VERSION,
 };
 pub use representation_plan::{
