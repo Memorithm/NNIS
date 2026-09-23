@@ -217,6 +217,14 @@ impl DenseWeightMaterializationEvidenceV1 {
     }
 }
 
+pub(crate) fn checked_host_payload_bytes(parts: impl IntoIterator<Item = u64>) -> Result<u64> {
+    parts.into_iter().try_fold(0_u64, |total, part| {
+        total.checked_add(part).ok_or_else(|| {
+            NnisError::invalid_input("host materialization payload bytes overflow u64")
+        })
+    })
+}
+
 /// Version of materialization evidence that also accounts host temporary payloads.
 pub const NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION: u32 = 2;
 

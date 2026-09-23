@@ -12,10 +12,11 @@
 //! device buffers. Embedding, attention, MLP and full-model INT4 execution are
 //! still outside this storage contract.
 
+use crate::dense_weight_materialization::checked_host_payload_bytes;
 use crate::weights::WeightLogicalShapeV1;
 use crate::{
-    DenseWeightMaterializationEvidenceV1, DeviceTensor, Model, ModelConfig, ModelWeights,
-    WeightRepresentationFamilyV1,
+    DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
+    Model, ModelConfig, ModelWeights, WeightRepresentationFamilyV1,
 };
 use nnis_kernels::F32Int4Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
@@ -414,7 +415,7 @@ pub struct Int4ReferenceModelStorageV1 {
 pub struct Int4DenseMaterializedModelV1 {
     compact_storage: Int4ReferenceModelStorageV1,
     model: Model,
-    materialization: DenseWeightMaterializationEvidenceV1,
+    materialization: DenseWeightMaterializationEvidenceV2,
 }
 
 impl Int4DenseMaterializedModelV1 {
@@ -433,7 +434,8 @@ impl Int4DenseMaterializedModelV1 {
         let started = Instant::now();
         let compact_storage =
             Int4ReferenceModelStorageV1::from_f32_model_weights(&source_weights, stream)?;
-        let dense_weights = compact_storage.materialize_dense_f32_weights(&config, stream)?;
+        let (dense_weights, peak_host_temporary_payload_bytes) =
+            compact_storage.materialize_dense_f32_weights(&config, stream)?;
         stream.synchronize()?;
         let duration_ns = u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
             NnisError::invalid_input("INT4 dense materialization duration exceeds u64 nanoseconds")
@@ -448,7 +450,7 @@ impl Int4DenseMaterializedModelV1 {
                 "INT4 dense materialization denominator does not reconcile across source, compact and dense graphs",
             ));
         }
-        let materialization = DenseWeightMaterializationEvidenceV1::new(
+        let device_ownership = DenseWeightMaterializationEvidenceV1::new(
             WeightRepresentationFamilyV1::Int4Symmetric,
             source_summary.unique_device_elements,
             source_summary.owned_device_allocation_bytes,
@@ -456,6 +458,10 @@ impl Int4DenseMaterializedModelV1 {
             dense_summary.owned_device_allocation_bytes,
             0,
             duration_ns,
+        )?;
+        let materialization = DenseWeightMaterializationEvidenceV2::new(
+            device_ownership,
+            peak_host_temporary_payload_bytes,
         )?;
         let model = Model::new(config, dense_weights, stream)?;
         Ok(Self {
@@ -477,6 +483,11 @@ impl Int4DenseMaterializedModelV1 {
 
     #[must_use]
     pub fn materialization_evidence(&self) -> &DenseWeightMaterializationEvidenceV1 {
+        &self.materialization.device_ownership
+    }
+
+    #[must_use]
+    pub fn materialization_evidence_v2(&self) -> &DenseWeightMaterializationEvidenceV2 {
         &self.materialization
     }
 }
@@ -760,7 +771,7 @@ impl Int4ReferenceModelStorageV1 {
         &self,
         config: &ModelConfig,
         stream: &Stream,
-    ) -> Result<ModelWeights> {
+    ) -> Result<(ModelWeights, u64)> {
         self.validate_resident_allocations()?;
         if !Arc::ptr_eq(
             stream.ctx(),
@@ -779,9 +790,16 @@ impl Int4ReferenceModelStorageV1 {
 
         let mut dense_allocations =
             Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
+        let mut peak_host_temporary_payload_bytes = 0_u64;
         for (allocation, summary) in self.allocations.iter().zip(&self.summary.allocations) {
             let packed_values = allocation.packed_values.to_vec(stream)?;
+            let packed_host_bytes = u64::try_from(packed_values.len())
+                .map_err(|_| NnisError::invalid_input("INT4 host packed bytes exceed u64"))?;
             let scale_values = allocation.scale.to_vec(stream)?;
+            let scale_host_bytes = u64::try_from(scale_values.len())
+                .map_err(|_| NnisError::invalid_input("INT4 host scale count exceeds u64"))?
+                .checked_mul(4)
+                .ok_or_else(|| NnisError::invalid_input("INT4 host scale bytes overflow u64"))?;
             if scale_values.len() != 1 || scale_values[0].to_bits() != summary.scale.to_bits() {
                 return Err(NnisError::invalid_input(
                     "INT4 live scale disagrees with immutable storage summary",
@@ -795,6 +813,17 @@ impl Int4ReferenceModelStorageV1 {
                 mean_squared_error: summary.mean_squared_error,
             };
             let dense_host = dequantize_int4_symmetric_reference_v1(&quantized)?;
+            let dense_host_bytes = u64::try_from(dense_host.len())
+                .map_err(|_| NnisError::invalid_input("INT4 dense host value count exceeds u64"))?
+                .checked_mul(4)
+                .ok_or_else(|| NnisError::invalid_input("INT4 dense host bytes overflow u64"))?;
+            let host_payload_bytes = checked_host_payload_bytes([
+                packed_host_bytes,
+                scale_host_bytes,
+                dense_host_bytes,
+            ])?;
+            peak_host_temporary_payload_bytes =
+                peak_host_temporary_payload_bytes.max(host_payload_bytes);
             let dense = DeviceBuffer::from_host(stream.ctx(), stream, &dense_host)?;
             dense_allocations.push(Arc::new(dense));
         }
@@ -821,7 +850,8 @@ impl Int4ReferenceModelStorageV1 {
             }
         }
         stream.synchronize()?;
-        ModelWeights::from_named_logical_tensors(config, logical)
+        let weights = ModelWeights::from_named_logical_tensors(config, logical)?;
+        Ok((weights, peak_host_temporary_payload_bytes))
     }
 
     /// Execute one explicitly bound matrix projection directly from packed INT4 storage.
