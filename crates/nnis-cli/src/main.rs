@@ -3,8 +3,8 @@ use nnis::{
     GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
     SampledBatchRequest, SamplingConfig, Stream, WeightCapabilityManifestV1,
     WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
-    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
-    NNIS_SAMPLING_POLICY_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+    NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 use serde::Serialize;
 use std::env;
@@ -472,10 +472,12 @@ where
             }
         }
     }
-    Ok(Command::ValidateWeightCampaign(ValidateWeightCampaignArgs {
-        input: input.ok_or_else(|| "missing --input FILE".to_string())?,
-        json,
-    }))
+    Ok(Command::ValidateWeightCampaign(
+        ValidateWeightCampaignArgs {
+            input: input.ok_or_else(|| "missing --input FILE".to_string())?,
+            json,
+        },
+    ))
 }
 
 fn parse_weight_capabilities_args<I>(arguments: I) -> Result<Command, String>
@@ -962,18 +964,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Command::ValidateWeightCampaign(arguments) => {
-            match validate_weight_campaign(&arguments) {
-                Ok(rendered) => {
-                    println!("{rendered}");
-                    ExitCode::SUCCESS
-                }
-                Err(error) => {
-                    eprintln!("nnis validate-weight-campaign: {error}");
-                    ExitCode::FAILURE
-                }
+        Command::ValidateWeightCampaign(arguments) => match validate_weight_campaign(&arguments) {
+            Ok(rendered) => {
+                println!("{rendered}");
+                ExitCode::SUCCESS
             }
-        }
+            Err(error) => {
+                eprintln!("nnis validate-weight-campaign: {error}");
+                ExitCode::FAILURE
+            }
+        },
         Command::WeightCapabilities(arguments) => {
             let manifest = reference_weight_capability_manifest_v1();
             if let Err(error) = manifest.validate() {
