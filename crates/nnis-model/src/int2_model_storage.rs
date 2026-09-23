@@ -10,7 +10,8 @@ use crate::weights::WeightLogicalShapeV1;
 use crate::{
     dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
     DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
-    Int2ReferenceProjectionPlanV1, Model, ModelConfig, ModelWeights, WeightDType,
+    ExactDecoderCheckpointSpec, Int2ReferenceProjectionPlanV1, Model, ModelConfig, ModelWeights,
+    PhysicalWeightExecutionObservationV1, WeightDType, WeightFullModelExecutionEvidenceV1,
     WeightRepresentationFamilyV1, NNIS_INT2_REFERENCE_SERIALIZED_HEADER_BYTES,
     NNIS_INT2_REFERENCE_STORAGE_VERSION,
 };
@@ -96,6 +97,45 @@ pub struct Int2DenseMaterializedModelV1 {
     materialization: DenseWeightMaterializationEvidenceV2,
 }
 
+/// Build full-model evidence from exact INT2 storage/materialization state.
+pub fn int2_dense_full_model_evidence_v1(
+    checkpoint: &ExactDecoderCheckpointSpec,
+    observation: &PhysicalWeightExecutionObservationV1,
+    summary: &Int2ReferenceStorageSummaryV1,
+    materialization: &DenseWeightMaterializationEvidenceV2,
+) -> Result<WeightFullModelExecutionEvidenceV1> {
+    if summary.schema_version != NNIS_INT2_REFERENCE_STORAGE_VERSION {
+        return Err(NnisError::unsupported(format!(
+            "INT2 storage summary schema {}; supported version is {}",
+            summary.schema_version, NNIS_INT2_REFERENCE_STORAGE_VERSION
+        )));
+    }
+    materialization.validate()?;
+    let device = &materialization.device_ownership;
+    if device.family != WeightRepresentationFamilyV1::Int2Ternary
+        || device.unique_logical_values != summary.unique_logical_values
+        || device.source_f32_weight_bytes != summary.source_f32_owned_bytes
+        || device.representation_resident_bytes != summary.resident_device_bytes
+    {
+        return Err(NnisError::invalid_input(
+            "INT2 full-model evidence inputs do not reconcile with compact storage",
+        ));
+    }
+    WeightFullModelExecutionEvidenceV1::from_physical_observation(
+        WeightRepresentationFamilyV1::Int2Ternary,
+        NNIS_INT2_REFERENCE_STORAGE_VERSION,
+        checkpoint,
+        observation,
+        summary.serialized_total_bytes,
+        summary.logical_tensor_references,
+        summary.logical_element_references,
+        summary.unique_source_allocations,
+        summary.max_abs_error,
+        summary.mean_squared_error,
+        materialization.clone(),
+    )
+}
+
 impl Int2DenseMaterializedModelV1 {
     pub fn from_f32_model_weights(
         config: ModelConfig,
@@ -167,6 +207,19 @@ impl Int2DenseMaterializedModelV1 {
     #[must_use]
     pub fn materialization_evidence_v2(&self) -> &DenseWeightMaterializationEvidenceV2 {
         &self.materialization
+    }
+
+    pub fn full_model_evidence(
+        &self,
+        checkpoint: &ExactDecoderCheckpointSpec,
+        observation: &PhysicalWeightExecutionObservationV1,
+    ) -> Result<WeightFullModelExecutionEvidenceV1> {
+        int2_dense_full_model_evidence_v1(
+            checkpoint,
+            observation,
+            self.compact_storage.summary(),
+            &self.materialization,
+        )
     }
 }
 
@@ -637,4 +690,77 @@ fn checked_add(counter: &mut u64, value: u64, label: &str) -> Result<()> {
         .checked_add(value)
         .ok_or_else(|| NnisError::invalid_input(format!("{label} overflows u64")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn full_model_evidence_adapter_rejects_storage_materialization_mismatch() {
+        let mut summary = Int2ReferenceStorageSummaryV1 {
+            schema_version: NNIS_INT2_REFERENCE_STORAGE_VERSION,
+            representation: "ternary-int2-reference".to_string(),
+            quantization: "test".to_string(),
+            scale_scope: "test".to_string(),
+            execution_qualified: false,
+            logical_tensor_references: 1,
+            logical_element_references: 16,
+            unique_source_allocations: 1,
+            unique_logical_values: 16,
+            source_f32_owned_bytes: 64,
+            serialized_header_bytes: 16,
+            serialized_payload_bytes: 4,
+            serialized_total_bytes: 20,
+            resident_payload_bytes: 4,
+            resident_scale_bytes: 4,
+            resident_device_bytes: 8,
+            serialized_bits_per_unique_logical_value: 10.0,
+            resident_bits_per_unique_logical_value: 4.0,
+            source_f32_to_resident_int2_byte_ratio: 8.0,
+            max_abs_error: 0.5,
+            mean_squared_error: 0.125,
+            allocations: Vec::new(),
+        };
+        let device = DenseWeightMaterializationEvidenceV1::new(
+            WeightRepresentationFamilyV1::Int2Ternary,
+            16,
+            64,
+            8,
+            64,
+            0,
+            1,
+        )
+        .unwrap();
+        let materialization = DenseWeightMaterializationEvidenceV2::new(device, 76).unwrap();
+        let tokens = crate::GeneratedTokenEvidenceV1::from_token_ids(&[3, 4]).unwrap();
+        let observation = PhysicalWeightExecutionObservationV1::new(
+            "0123456789abcdef0123456789abcdef01234567",
+            "Int2DenseMaterializedModelV1::model",
+            tokens,
+            false,
+        )
+        .unwrap();
+        let evidence = int2_dense_full_model_evidence_v1(
+            &crate::SMOLLM2_135M_BF16,
+            &observation,
+            &summary,
+            &materialization,
+        )
+        .unwrap();
+        assert_eq!(
+            evidence.exact_checkpoint,
+            crate::SMOLLM2_135M_BF16.evidence_key()
+        );
+        assert_eq!(evidence.serialized_representation_bytes, 20);
+
+        summary.resident_device_bytes += 1;
+        assert!(int2_dense_full_model_evidence_v1(
+            &crate::SMOLLM2_135M_BF16,
+            &observation,
+            &summary,
+            &materialization,
+        )
+        .is_err());
+    }
 }
