@@ -2,7 +2,8 @@ use nnis_model::{
     load_model_from_safetensors_f32, validate_finite_runtime_output, GeneratedTokenEvidenceV1,
     GenerationConfig, Int2DenseMaterializedModelV1, Int4DenseMaterializedModelV1,
     PhysicalWeightExecutionObservationV1, SafetensorsLoadConfig, SparseDenseMaterializedModelV1,
-    WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1, WeightFullModelCampaignV1,
+    WeightCampaignEnvironmentV1, WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1,
+    WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1,
     WeightFullModelExecutionEvidenceV1, SMOLLM2_135M_BF16,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
@@ -288,6 +289,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let commit = current_nnis_commit()?;
 
     let device = Device::first()?;
+    let environment = WeightCampaignEnvironmentV1::capture(&device)?;
     let context = Context::new(&device)?;
     let stream = Stream::new(&context)?;
 
@@ -324,12 +326,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         args.max_new_tokens,
         args.sparse_threshold,
     )?;
-    let artifact = WeightFullModelCampaignArtifactV1::new(
+    let artifact_v1 = WeightFullModelCampaignArtifactV1::new(
         campaign,
         recipe,
         tokenizer_basename(&args.tokenizer)?,
         sha256_file(&args.tokenizer)?,
     )?;
+    artifact_v1.verify_tokenizer_file(&args.tokenizer)?;
+    let artifact = WeightFullModelCampaignArtifactV2::new(artifact_v1, environment)?;
     artifact.validate()?;
     let json = serde_json::to_string_pretty(&artifact)?;
     fs::write(&args.output, format!("{json}\n"))?;
