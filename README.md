@@ -137,6 +137,26 @@ cargo run --release -p nnis-cli --bin nnis -- generate \
 That checkpoint has random weights and is a structural/numerical fixture, not a
 quality model.
 
+A separate fail-closed `generate-batch` command exposes the existing
+`SampledSessionBatch` / `SampledBatchRequest` library surface (already on the
+`nnis` facade from PR #137). Provide one `--seed` per `--prompt` (no silent seed
+reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every
+request. Human text is the default; `--json` emits a versioned CLI envelope:
+
+```bash
+cargo run --release -p nnis-cli --bin nnis -- generate-batch \
+  --model /path/to/nnis-model \
+  --tokenizer /path/to/tokenizer.json \
+  --prompt "Hello" --seed 1 \
+  --prompt "World" --seed 2 \
+  --max-new-tokens 8
+```
+
+This is host-orchestrated independent sessions in deterministic index order. It
+does **not** claim fused batched kernels, overlapping CUDA streams, concurrent
+multi-session overlap, serving performance, or physical Thor parity. Single
+`generate` remains greedy-by-default.
+
 A separate read-only NVML process-memory debug command is available:
 
 ```bash
@@ -170,7 +190,7 @@ cargo run --release -p nnis-jit --example inspect_kernel
 | Crate | Responsibility |
 | --- | --- |
 | `nnis` | Stable facade, common re-exports, and low-level `Session` |
-| `nnis-cli` | User-facing `nnis generate` frontend and `nvml-process-memory` debug CLI |
+| `nnis-cli` | User-facing `nnis generate` / `generate-batch` frontend and `nvml-process-memory` debug CLI |
 | `nnis-model` | Decoder-only model config, weights, KV-backed inference sessions, and generation |
 | `nnis-kernels` | Reusable native kernel families and CPU-oracle tests |
 | `nnis-jit` | NVRTC compilation/cache, modules, functions, and launches |
