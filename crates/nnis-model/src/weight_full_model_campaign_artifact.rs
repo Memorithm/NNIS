@@ -7,6 +7,10 @@
 use crate::{WeightCampaignRecipeV1, WeightFullModelCampaignV1};
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 
 /// Version of the self-contained campaign artifact envelope.
 pub const NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION: u32 = 1;
@@ -37,6 +41,49 @@ impl WeightFullModelCampaignArtifactV1 {
         };
         artifact.validate()?;
         Ok(artifact)
+    }
+
+    /// Verify the concrete tokenizer file bound by this campaign artifact.
+    ///
+    /// The basename must match the recorded tokenizer file and the bytes are
+    /// hashed incrementally to avoid whole-file buffering.
+    pub fn verify_tokenizer_file(&self, path: impl AsRef<Path>) -> Result<String> {
+        self.validate()?;
+        let path = path.as_ref();
+        let basename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                NnisError::invalid_input("weight campaign tokenizer path has no UTF-8 basename")
+            })?;
+        if basename != self.tokenizer_file {
+            return Err(NnisError::invalid_input(format!(
+                "weight campaign tokenizer basename mismatch: got {basename:?}, expected {:?}",
+                self.tokenizer_file
+            )));
+        }
+
+        let mut file = File::open(path)
+            .map_err(|error| NnisError::io("open weight campaign tokenizer file", error))?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|error| NnisError::io("hash weight campaign tokenizer file", error))?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        let actual = format!("{:x}", hasher.finalize());
+        if actual != self.tokenizer_sha256 {
+            return Err(NnisError::invalid_input(format!(
+                "weight campaign tokenizer SHA-256 mismatch: got {actual}, expected {}",
+                self.tokenizer_sha256
+            )));
+        }
+        Ok(actual)
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -132,6 +179,38 @@ mod tests {
             evidence(WeightRepresentationFamilyV1::MagnitudeSparse),
         ])
         .unwrap()
+    }
+
+    #[test]
+    fn tokenizer_file_verification_binds_basename_and_bytes() {
+        let directory = std::env::temp_dir().join(format!(
+            "nnis-weight-campaign-tokenizer-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("tokenizer.json");
+        std::fs::write(&path, b"abc").unwrap();
+
+        let artifact = WeightFullModelCampaignArtifactV1::new(
+            campaign(),
+            WeightCampaignRecipeV1::new(vec![1], 4, 0.05).unwrap(),
+            "tokenizer.json",
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        )
+        .unwrap();
+        assert_eq!(
+            artifact.verify_tokenizer_file(&path).unwrap(),
+            artifact.tokenizer_sha256
+        );
+
+        let wrong_name = directory.join("other.json");
+        std::fs::write(&wrong_name, b"abc").unwrap();
+        assert!(artifact.verify_tokenizer_file(&wrong_name).is_err());
+
+        std::fs::write(&path, b"abd").unwrap();
+        assert!(artifact.verify_tokenizer_file(&path).is_err());
+
+        std::fs::remove_dir_all(&directory).unwrap();
     }
 
     #[test]
