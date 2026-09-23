@@ -320,8 +320,7 @@ impl SparseReferenceModelStorageV1 {
                 resident_device_bytes,
                 serialized_bits_per_unique_logical_value: serialized_total_bytes as f64 * 8.0
                     / values,
-                resident_bits_per_unique_logical_value: resident_device_bytes as f64 * 8.0
-                    / values,
+                resident_bits_per_unique_logical_value: resident_device_bytes as f64 * 8.0 / values,
                 retained_fraction: retained_values as f64 / values,
                 max_abs_error,
                 mean_squared_error: weighted_squared_error / values,
@@ -471,12 +470,17 @@ impl SparseDenseMaterializedModelV1 {
         source_weights.validate(&config)?;
         let source_summary = source_weights.weight_allocation_summary_v1()?;
         let started = Instant::now();
-        let compact_storage =
-            SparseReferenceModelStorageV1::from_f32_model_weights(&source_weights, stream, threshold)?;
+        let compact_storage = SparseReferenceModelStorageV1::from_f32_model_weights(
+            &source_weights,
+            stream,
+            threshold,
+        )?;
         let dense_weights = compact_storage.materialize_dense_f32_weights(&config, stream)?;
         stream.synchronize()?;
         let duration_ns = u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
-            NnisError::invalid_input("sparse dense materialization duration exceeds u64 nanoseconds")
+            NnisError::invalid_input(
+                "sparse dense materialization duration exceeds u64 nanoseconds",
+            )
         })?;
         let dense_summary = dense_weights.weight_allocation_summary_v1()?;
         if source_summary.unique_device_elements != compact_storage.summary.unique_logical_values
