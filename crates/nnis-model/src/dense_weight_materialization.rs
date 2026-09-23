@@ -156,31 +156,62 @@ impl DenseWeightMaterializationEvidenceV1 {
                 "dense materialization evidence must never claim low-bit compute",
             ));
         }
-        let rebuilt = Self::new(
-            self.family,
-            self.unique_logical_values,
-            self.source_f32_weight_bytes,
-            self.representation_resident_bytes,
-            self.dense_f32_execution_weight_bytes,
-            self.peak_additional_temporary_device_bytes,
-            self.materialization_duration_ns,
-        )?;
-        if self.final_scoped_owned_device_bytes != rebuilt.final_scoped_owned_device_bytes
-            || self.peak_scoped_owned_device_bytes != rebuilt.peak_scoped_owned_device_bytes
+        if self.unique_logical_values == 0 {
+            return Err(NnisError::invalid_input(
+                "dense materialization requires at least one unique logical value",
+            ));
+        }
+        let expected_dense_bytes = self
+            .unique_logical_values
+            .checked_mul(4)
+            .ok_or_else(|| {
+                NnisError::invalid_input("dense F32 execution byte count overflows u64")
+            })?;
+        if self.source_f32_weight_bytes != expected_dense_bytes
+            || self.dense_f32_execution_weight_bytes != expected_dense_bytes
+        {
+            return Err(NnisError::invalid_input(
+                "dense materialization F32 byte counts disagree with the canonical denominator",
+            ));
+        }
+        if self.representation_resident_bytes == 0 {
+            return Err(NnisError::invalid_input(
+                "dense materialization representation resident bytes must be non-zero",
+            ));
+        }
+
+        let expected_final = self
+            .representation_resident_bytes
+            .checked_add(self.dense_f32_execution_weight_bytes)
+            .ok_or_else(|| {
+                NnisError::invalid_input("final dense-materialization device bytes overflow u64")
+            })?;
+        let expected_peak = self
+            .source_f32_weight_bytes
+            .checked_add(expected_final)
+            .and_then(|value| value.checked_add(self.peak_additional_temporary_device_bytes))
+            .ok_or_else(|| {
+                NnisError::invalid_input("peak dense-materialization device bytes overflow u64")
+            })?;
+        let values = self.unique_logical_values as f64;
+        let expected_representation_bits =
+            self.representation_resident_bytes as f64 * 8.0 / values;
+        let expected_dense_bits = self.dense_f32_execution_weight_bytes as f64 * 8.0 / values;
+        let expected_final_bits = expected_final as f64 * 8.0 / values;
+        if !expected_representation_bits.is_finite()
+            || !expected_dense_bits.is_finite()
+            || !expected_final_bits.is_finite()
+            || expected_dense_bits.to_bits() != 32.0_f64.to_bits()
+            || self.final_scoped_owned_device_bytes != expected_final
+            || self.peak_scoped_owned_device_bytes != expected_peak
             || self
                 .representation_resident_bits_per_unique_logical_value
                 .to_bits()
-                != rebuilt
-                    .representation_resident_bits_per_unique_logical_value
-                    .to_bits()
+                != expected_representation_bits.to_bits()
             || self.dense_execution_bits_per_unique_logical_value.to_bits()
-                != rebuilt
-                    .dense_execution_bits_per_unique_logical_value
-                    .to_bits()
+                != expected_dense_bits.to_bits()
             || self.final_resident_bits_per_unique_logical_value.to_bits()
-                != rebuilt
-                    .final_resident_bits_per_unique_logical_value
-                    .to_bits()
+                != expected_final_bits.to_bits()
         {
             return Err(NnisError::invalid_input(
                 "dense materialization cached accounting disagrees with exact integer byte totals",
