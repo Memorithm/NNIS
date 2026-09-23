@@ -38,6 +38,7 @@ mod sampling;
 mod session_batch;
 mod streaming;
 mod weighted_rmsnorm_candidate;
+mod weight_representation_accounting;
 mod weights;
 
 pub use attention_plan::{F32AttentionPlan, F32CachedAttentionKernel, F32_ATTENTION_PLAN_VERSION};
@@ -129,6 +130,10 @@ pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
 pub use streaming::GenerationStreamControl;
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
+pub use weight_representation_accounting::{
+    CanonicalWeightDenominatorV1, WeightRepresentationAccountingV1,
+    NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
+};
 pub use weights::{
     DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight,
     WeightAllocationDTypeV1, WeightAllocationSegmentV1, WeightAllocationSummaryV1,
