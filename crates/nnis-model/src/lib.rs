@@ -40,6 +40,7 @@ mod session_batch;
 mod sparse_csc_reference;
 mod sparse_reference;
 mod streaming;
+mod weight_capability_manifest;
 mod weight_representation_accounting;
 mod weight_representation_qualification;
 mod weighted_rmsnorm_candidate;
@@ -150,6 +151,10 @@ pub use sparse_reference::{
     NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
 pub use streaming::GenerationStreamControl;
+pub use weight_capability_manifest::{
+    reference_weight_capability_manifest_v1, WeightCapabilityManifestV1,
+    WeightRepresentationCapabilityV1, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+};
 pub use weight_representation_accounting::{
     CanonicalWeightDenominatorV1, WeightRepresentationAccountingV1,
     NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
