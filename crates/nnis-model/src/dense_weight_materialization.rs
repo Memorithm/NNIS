@@ -161,12 +161,9 @@ impl DenseWeightMaterializationEvidenceV1 {
                 "dense materialization requires at least one unique logical value",
             ));
         }
-        let expected_dense_bytes = self
-            .unique_logical_values
-            .checked_mul(4)
-            .ok_or_else(|| {
-                NnisError::invalid_input("dense F32 execution byte count overflows u64")
-            })?;
+        let expected_dense_bytes = self.unique_logical_values.checked_mul(4).ok_or_else(|| {
+            NnisError::invalid_input("dense F32 execution byte count overflows u64")
+        })?;
         if self.source_f32_weight_bytes != expected_dense_bytes
             || self.dense_f32_execution_weight_bytes != expected_dense_bytes
         {
@@ -194,8 +191,7 @@ impl DenseWeightMaterializationEvidenceV1 {
                 NnisError::invalid_input("peak dense-materialization device bytes overflow u64")
             })?;
         let values = self.unique_logical_values as f64;
-        let expected_representation_bits =
-            self.representation_resident_bytes as f64 * 8.0 / values;
+        let expected_representation_bits = self.representation_resident_bytes as f64 * 8.0 / values;
         let expected_dense_bits = self.dense_f32_execution_weight_bytes as f64 * 8.0 / values;
         let expected_final_bits = expected_final as f64 * 8.0 / values;
         if !expected_representation_bits.is_finite()
