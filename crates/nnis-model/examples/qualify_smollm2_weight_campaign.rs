@@ -49,11 +49,10 @@ where
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--model-dir" => {
-                model_dir = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .ok_or_else(|| "--model-dir requires a directory".to_string())?,
-                ));
+                model_dir =
+                    Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                        "--model-dir requires a directory".to_string()
+                    })?));
             }
             "--prompt-ids" => {
                 let raw = arguments
@@ -80,17 +79,14 @@ where
                     .parse::<f32>()
                     .map_err(|error| format!("invalid --sparse-threshold {raw:?}: {error}"))?;
                 if !sparse_threshold.is_finite() || sparse_threshold < 0.0 {
-                    return Err(
-                        "--sparse-threshold must be finite and non-negative".to_string(),
-                    );
+                    return Err("--sparse-threshold must be finite and non-negative".to_string());
                 }
             }
             "--output" => {
-                output = Some(PathBuf::from(
-                    arguments
-                        .next()
-                        .ok_or_else(|| "--output requires a JSON file".to_string())?,
-                ));
+                output =
+                    Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                        "--output requires a JSON file".to_string()
+                    })?));
             }
             other => return Err(format!("unknown argument {other:?}")),
         }
