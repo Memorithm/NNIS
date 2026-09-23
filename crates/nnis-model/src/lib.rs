@@ -38,6 +38,7 @@ mod safetensors_preflight;
 mod sampling;
 mod session_batch;
 mod streaming;
+mod weight_representation_accounting;
 mod weighted_rmsnorm_candidate;
 mod weights;
 
@@ -136,6 +137,10 @@ pub use safetensors_preflight::{
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
 pub use streaming::GenerationStreamControl;
+pub use weight_representation_accounting::{
+    CanonicalWeightDenominatorV1, WeightRepresentationAccountingV1,
+    NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
+};
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{
     DecoderLayerWeights, DeviceTensor, MatrixWeight, ModelWeights, VectorWeight,
