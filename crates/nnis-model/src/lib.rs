@@ -45,6 +45,7 @@ mod sparse_model_storage;
 mod sparse_reference;
 mod streaming;
 mod weight_capability_manifest;
+mod weight_full_model_campaign;
 mod weight_full_model_evidence;
 mod weight_qualification_bundle;
 mod weight_representation_accounting;
@@ -180,6 +181,9 @@ pub use streaming::GenerationStreamControl;
 pub use weight_capability_manifest::{
     reference_weight_capability_manifest_v1, WeightCapabilityManifestV1,
     WeightRepresentationCapabilityV1, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+};
+pub use weight_full_model_campaign::{
+    WeightFullModelCampaignV1, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_VERSION,
 };
 pub use weight_full_model_evidence::{
     PhysicalWeightExecutionObservationV1, WeightFullModelExecutionEvidenceV1,
