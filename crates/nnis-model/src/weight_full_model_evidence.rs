@@ -209,8 +209,7 @@ mod tests {
             physical_execution_observed: true,
             generated_token_count: 4,
             generated_token_ids_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             non_finite_output_observed: false,
             serialized_representation_bytes: 24,
             logical_tensor_references: 2,
@@ -236,7 +235,10 @@ mod tests {
         assert_eq!(record.accounting.serialized_bytes, 24);
         assert_eq!(record.accounting.resident_bytes, 76);
         assert_eq!(
-            record.accounting.resident_bits_per_unique_logical_value.to_bits(),
+            record
+                .accounting
+                .resident_bits_per_unique_logical_value
+                .to_bits(),
             38.0_f64.to_bits()
         );
     }
