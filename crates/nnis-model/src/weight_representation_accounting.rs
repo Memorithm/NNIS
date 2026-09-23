@@ -274,9 +274,7 @@ mod tests {
 
         let mut source = source_summary();
         source.logical_element_references -= 1;
-        assert!(
-            CanonicalWeightDenominatorV1::from_weight_allocation_summary(&source).is_err()
-        );
+        assert!(CanonicalWeightDenominatorV1::from_weight_allocation_summary(&source).is_err());
     }
 
     #[test]
