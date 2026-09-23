@@ -25,6 +25,7 @@ mod f16_transposed_projection_candidate;
 mod format;
 mod fused_swiglu;
 mod fusion_plan;
+mod int2_reference;
 mod int4_reference;
 mod kernels;
 mod projection_plan;
@@ -99,6 +100,13 @@ pub use format::{
 };
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
+pub use int2_reference::{
+    dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
+    Int2ReferenceQuantizedTensorV1, NNIS_INT2_REFERENCE_CODE_NEGATIVE,
+    NNIS_INT2_REFERENCE_CODE_POSITIVE, NNIS_INT2_REFERENCE_CODE_RESERVED,
+    NNIS_INT2_REFERENCE_CODE_ZERO, NNIS_INT2_REFERENCE_SERIALIZED_HEADER_BYTES,
+    NNIS_INT2_REFERENCE_STORAGE_VERSION,
+};
 pub use int4_reference::{
     dequantize_int4_symmetric_reference_v1, quantize_int4_symmetric_reference_v1,
     Int4ReferenceAllocationSummaryV1, Int4ReferenceModelStorageV1, Int4ReferenceProjectionPlanV1,
