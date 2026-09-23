@@ -147,8 +147,10 @@ pub use safetensors_preflight::{
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
 pub use sparse_csc_reference::{
-    densify_matrix_csc_reference_v1, sparsify_matrix_csc_reference_v1, SparseCscReferenceMatrixV1,
-    NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES,
+    densify_matrix_csc_reference_v1, sparsify_matrix_csc_reference_v1, SparseCscProjectionPlanV1,
+    SparseCscReferenceMatrixV1, NNIS_SPARSE_CSC_ACCUMULATION_V1,
+    NNIS_SPARSE_CSC_PROJECTION_PLAN_VERSION, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+    NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES,
 };
 pub use sparse_reference::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
