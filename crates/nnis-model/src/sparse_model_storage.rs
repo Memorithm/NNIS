@@ -11,9 +11,9 @@ use crate::weights::WeightLogicalShapeV1;
 use crate::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1,
     DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2, DeviceTensor,
-    Model, ModelConfig, ModelWeights,
-    SparseReferenceTensorV1, WeightDType, WeightRepresentationFamilyV1,
-    NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
+    Model, ModelConfig, ModelWeights, SparseReferenceTensorV1, WeightDType,
+    WeightRepresentationFamilyV1, NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES,
+    NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
@@ -370,7 +370,9 @@ impl SparseReferenceModelStorageV1 {
             let retained_host_bytes = u64::try_from(retained_values.len())
                 .map_err(|_| NnisError::invalid_input("sparse host retained count exceeds u64"))?
                 .checked_mul(4)
-                .ok_or_else(|| NnisError::invalid_input("sparse host retained bytes overflow u64"))?;
+                .ok_or_else(|| {
+                    NnisError::invalid_input("sparse host retained bytes overflow u64")
+                })?;
             let sparse = SparseReferenceTensorV1 {
                 element_count: summary.logical_values,
                 threshold: summary.threshold,
