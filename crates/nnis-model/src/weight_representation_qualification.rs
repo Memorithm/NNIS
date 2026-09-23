@@ -101,7 +101,9 @@ pub fn int2_storage_qualification_record_v1(
         summary.serialized_total_bytes,
         summary.resident_device_bytes,
     )?;
-    if accounting.serialized_bits_per_unique_logical_value.to_bits()
+    if accounting
+        .serialized_bits_per_unique_logical_value
+        .to_bits()
         != summary.serialized_bits_per_unique_logical_value.to_bits()
         || accounting.resident_bits_per_unique_logical_value.to_bits()
             != summary.resident_bits_per_unique_logical_value.to_bits()
@@ -344,21 +346,27 @@ mod tests {
 
     #[test]
     fn storage_summary_builders_recompute_exact_accounting() {
-        let int2 = int2_storage_qualification_record_v1("checkpoint/int2", &int2_summary()).unwrap();
+        let int2 =
+            int2_storage_qualification_record_v1("checkpoint/int2", &int2_summary()).unwrap();
         assert_eq!(int2.family, WeightRepresentationFamilyV1::Int2Ternary);
         assert_eq!(
             int2.execution_level,
             WeightExecutionQualificationLevelV1::StorageOnly
         );
         assert_eq!(
-            int2.accounting.resident_bits_per_unique_logical_value.to_bits(),
+            int2.accounting
+                .resident_bits_per_unique_logical_value
+                .to_bits(),
             4.0_f64.to_bits()
         );
 
-        let int4 = int4_storage_qualification_record_v1("checkpoint/int4", &int4_summary()).unwrap();
+        let int4 =
+            int4_storage_qualification_record_v1("checkpoint/int4", &int4_summary()).unwrap();
         assert_eq!(int4.family, WeightRepresentationFamilyV1::Int4Symmetric);
         assert_eq!(
-            int4.accounting.serialized_bits_per_unique_logical_value.to_bits(),
+            int4.accounting
+                .serialized_bits_per_unique_logical_value
+                .to_bits(),
             12.0_f64.to_bits()
         );
     }
