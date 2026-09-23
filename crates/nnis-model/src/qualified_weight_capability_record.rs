@@ -292,8 +292,8 @@ mod tests {
             .unwrap(),
             recipe: WeightCampaignRecipeV1::new(vec![1, 2], 4, 0.05).unwrap(),
             tokenizer_file: "tokenizer.json".to_string(),
-            tokenizer_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
+            tokenizer_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
         }
     }
 
@@ -303,10 +303,7 @@ mod tests {
         record.validate().unwrap();
         assert!(record.elastic_stage_b_backend_ready);
         assert_eq!(record.families.len(), 3);
-        assert!(record
-            .families
-            .iter()
-            .all(|family| !family.low_bit_compute));
+        assert!(record.families.iter().all(|family| !family.low_bit_compute));
     }
 
     #[test]
