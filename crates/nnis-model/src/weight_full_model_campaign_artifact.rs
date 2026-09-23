@@ -65,9 +65,7 @@ impl WeightFullModelCampaignArtifactV1 {
             if evidence.generated_token_count != self.recipe.max_new_tokens {
                 return Err(NnisError::invalid_input(format!(
                     "weight campaign {:?} generated {} tokens but recipe requires {}",
-                    evidence.family,
-                    evidence.generated_token_count,
-                    self.recipe.max_new_tokens
+                    evidence.family, evidence.generated_token_count, self.recipe.max_new_tokens
                 )));
             }
         }
@@ -115,8 +113,7 @@ mod tests {
             physical_execution_observed: true,
             generated_token_count: 4,
             generated_token_ids_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             non_finite_output_observed: false,
             serialized_representation_bytes: 24,
             logical_tensor_references: 1,
