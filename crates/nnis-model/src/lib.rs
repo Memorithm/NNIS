@@ -37,6 +37,7 @@ mod safetensors_loader;
 mod safetensors_preflight;
 mod sampling;
 mod session_batch;
+mod sparse_csc_reference;
 mod sparse_reference;
 mod streaming;
 mod weight_representation_accounting;
@@ -137,6 +138,11 @@ pub use safetensors_preflight::{
 };
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
+pub use sparse_csc_reference::{
+    densify_matrix_csc_reference_v1, sparsify_matrix_csc_reference_v1,
+    SparseCscReferenceMatrixV1, NNIS_SPARSE_CSC_REFERENCE_VERSION,
+    NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES,
+};
 pub use sparse_reference::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
     NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
