@@ -168,9 +168,9 @@ pub use sparse_csc_reference::{
     NNIS_SPARSE_CSC_SERIALIZED_HEADER_BYTES,
 };
 pub use sparse_model_storage::{
-    SparseDenseMaterializedModelV1, SparseReferenceAllocationSummaryV1,
-    SparseReferenceModelStorageSummaryV1, SparseReferenceModelStorageV1,
-    NNIS_SPARSE_MODEL_STORAGE_VERSION,
+    sparse_dense_full_model_evidence_v1, SparseDenseMaterializedModelV1,
+    SparseReferenceAllocationSummaryV1, SparseReferenceModelStorageSummaryV1,
+    SparseReferenceModelStorageV1, NNIS_SPARSE_MODEL_STORAGE_VERSION,
 };
 pub use sparse_reference::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
