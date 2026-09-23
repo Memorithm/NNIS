@@ -47,6 +47,7 @@ mod streaming;
 mod weight_campaign_recipe;
 mod weight_capability_manifest;
 mod weight_full_model_campaign;
+mod weight_full_model_campaign_artifact;
 mod weight_full_model_evidence;
 mod weight_qualification_bundle;
 mod weight_representation_accounting;
@@ -188,6 +189,9 @@ pub use weight_capability_manifest::{
 };
 pub use weight_full_model_campaign::{
     WeightFullModelCampaignV1, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_VERSION,
+};
+pub use weight_full_model_campaign_artifact::{
+    WeightFullModelCampaignArtifactV1, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION,
 };
 pub use weight_full_model_evidence::{
     PhysicalWeightExecutionObservationV1, WeightFullModelExecutionEvidenceV1,
