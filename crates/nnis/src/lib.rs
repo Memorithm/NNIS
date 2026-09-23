@@ -59,8 +59,7 @@ pub mod model {
         Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
         WeightCapabilityManifestV1, WeightRepresentationFamilyV1,
         WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
-        NNIS_SPARSE_CSC_REFERENCE_VERSION,
-        NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+        NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
     };
 }
 
@@ -101,8 +100,7 @@ pub use nnis_model::{
     Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1, SparseCscReferenceMatrixV1,
     WeightCapabilityManifestV1, WeightRepresentationFamilyV1,
     WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
-    NNIS_SPARSE_CSC_REFERENCE_VERSION,
-    NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+    NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.
