@@ -37,6 +37,7 @@ mod safetensors_preflight;
 mod sampling;
 mod session_batch;
 mod streaming;
+mod sparse_reference;
 mod weighted_rmsnorm_candidate;
 mod weights;
 
@@ -127,6 +128,10 @@ pub use safetensors_preflight::{
 };
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
+pub use sparse_reference::{
+    densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
+    NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
+};
 pub use streaming::GenerationStreamControl;
 pub use weighted_rmsnorm_candidate::F32WeightedRmsNormCandidate;
 pub use weights::{
