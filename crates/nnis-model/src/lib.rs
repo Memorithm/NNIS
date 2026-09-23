@@ -181,7 +181,8 @@ pub use weight_capability_manifest::{
     WeightRepresentationCapabilityV1, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 pub use weight_full_model_evidence::{
-    WeightFullModelExecutionEvidenceV1, NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION,
+    PhysicalWeightExecutionObservationV1, WeightFullModelExecutionEvidenceV1,
+    NNIS_PHYSICAL_WEIGHT_EXECUTION_OBSERVATION_VERSION, NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION,
 };
 pub use weight_qualification_bundle::{
     WeightQualificationBundleV1, NNIS_WEIGHT_QUALIFICATION_BUNDLE_VERSION,
