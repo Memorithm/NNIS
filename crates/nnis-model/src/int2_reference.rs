@@ -26,6 +26,116 @@ pub const NNIS_INT2_REFERENCE_CODE_RESERVED: u8 = 3;
 
 const SERIALIZED_MAGIC: [u8; 4] = *b"NI21";
 
+/// Version of the isolated packed-INT2 projection execution contract.
+pub const NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION: u32 = 1;
+/// Stable identity of ternary INT2 to F32 dequantization.
+pub const NNIS_INT2_REFERENCE_DEQUANTIZATION_V1: &str = "ternary-int2-to-f32-register-v1";
+/// Stable identity of the projection accumulation order.
+pub const NNIS_INT2_REFERENCE_ACCUMULATION_V1: &str = "increasing-k-f32-fma-v1";
+
+/// Explicit isolated projection plan over one logical matrix in ternary INT2 storage.
+///
+/// This contract authorizes only one `[1,K] x [K,N] -> [1,N]` primitive and
+/// explicitly forbids dense weight materialization. It does not qualify a
+/// full-model INT2 runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Int2ReferenceProjectionPlanV1 {
+    schema_version: u32,
+    storage_version: u32,
+    logical_weight: String,
+    rows: u64,
+    cols: u64,
+    dequantization: String,
+    accumulation: String,
+    dense_weight_materialization: bool,
+}
+
+impl Int2ReferenceProjectionPlanV1 {
+    /// Bind one exact logical matrix name and orientation to the INT2 contract.
+    pub fn for_matrix(logical_weight: impl Into<String>, rows: usize, cols: usize) -> Result<Self> {
+        let logical_weight = logical_weight.into();
+        let rows = u64::try_from(rows)
+            .map_err(|_| NnisError::invalid_input("INT2 projection rows exceed u64"))?;
+        let cols = u64::try_from(cols)
+            .map_err(|_| NnisError::invalid_input("INT2 projection cols exceed u64"))?;
+        let plan = Self {
+            schema_version: NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION,
+            storage_version: NNIS_INT2_REFERENCE_STORAGE_VERSION,
+            logical_weight,
+            rows,
+            cols,
+            dequantization: NNIS_INT2_REFERENCE_DEQUANTIZATION_V1.to_string(),
+            accumulation: NNIS_INT2_REFERENCE_ACCUMULATION_V1.to_string(),
+            dense_weight_materialization: false,
+        };
+        plan.validate()?;
+        Ok(plan)
+    }
+
+    /// Validate every semantic field of the isolated projection plan.
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "INT2 projection plan schema {}; supported version is {}",
+                self.schema_version, NNIS_INT2_REFERENCE_PROJECTION_PLAN_VERSION
+            )));
+        }
+        if self.storage_version != NNIS_INT2_REFERENCE_STORAGE_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "INT2 projection storage version {}; supported version is {}",
+                self.storage_version, NNIS_INT2_REFERENCE_STORAGE_VERSION
+            )));
+        }
+        if self.logical_weight.is_empty() || self.logical_weight.trim() != self.logical_weight {
+            return Err(NnisError::invalid_input(
+                "INT2 projection logical weight must be non-empty and trimmed",
+            ));
+        }
+        if self.rows == 0 || self.cols == 0 {
+            return Err(NnisError::invalid_input(
+                "INT2 projection matrix dimensions must be non-zero",
+            ));
+        }
+        if self.dequantization != NNIS_INT2_REFERENCE_DEQUANTIZATION_V1 {
+            return Err(NnisError::unsupported(
+                "INT2 projection dequantization contract is unsupported",
+            ));
+        }
+        if self.accumulation != NNIS_INT2_REFERENCE_ACCUMULATION_V1 {
+            return Err(NnisError::unsupported(
+                "INT2 projection accumulation contract is unsupported",
+            ));
+        }
+        if self.dense_weight_materialization {
+            return Err(NnisError::unsupported(
+                "INT2 reference projection forbids dense weight materialization",
+            ));
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn logical_weight(&self) -> &str {
+        &self.logical_weight
+    }
+
+    #[must_use]
+    pub const fn rows(&self) -> u64 {
+        self.rows
+    }
+
+    #[must_use]
+    pub const fn cols(&self) -> u64 {
+        self.cols
+    }
+
+    #[must_use]
+    pub const fn dense_weight_materialization(&self) -> bool {
+        self.dense_weight_materialization
+    }
+}
+
 /// Host-side deterministic quantization result for one logical tensor.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Int2ReferenceQuantizedTensorV1 {
@@ -206,6 +316,26 @@ fn validate_quantized_tensor(quantized: &Int2ReferenceQuantizedTensorV1) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projection_plan_is_versioned_shape_bound_and_forbids_dense_materialization() {
+        let plan = Int2ReferenceProjectionPlanV1::for_matrix("layers.0.q_proj", 64, 96).unwrap();
+        assert_eq!(plan.logical_weight(), "layers.0.q_proj");
+        assert_eq!(plan.rows(), 64);
+        assert_eq!(plan.cols(), 96);
+        assert!(!plan.dense_weight_materialization());
+        plan.validate().unwrap();
+
+        assert!(Int2ReferenceProjectionPlanV1::for_matrix("", 64, 96).is_err());
+        assert!(Int2ReferenceProjectionPlanV1::for_matrix(" q_proj", 64, 96).is_err());
+        assert!(Int2ReferenceProjectionPlanV1::for_matrix("q_proj", 0, 96).is_err());
+        assert!(Int2ReferenceProjectionPlanV1::for_matrix("q_proj", 64, 0).is_err());
+
+        let mut value = serde_json::to_value(&plan).unwrap();
+        value["dense_weight_materialization"] = serde_json::Value::Bool(true);
+        let invalid: Int2ReferenceProjectionPlanV1 = serde_json::from_value(value).unwrap();
+        assert!(invalid.validate().is_err());
+    }
 
     #[test]
     fn ternary_int2_known_values_pack_and_reconstruct_deterministically() {
