@@ -208,9 +208,9 @@ impl F32SparseCscGemv {
                 input.len()
             )));
         }
-        let expected_offsets = n
-            .checked_add(1)
-            .ok_or_else(|| NnisError::invalid_input("f32-sparse-csc offset count overflows usize"))?;
+        let expected_offsets = n.checked_add(1).ok_or_else(|| {
+            NnisError::invalid_input("f32-sparse-csc offset count overflows usize")
+        })?;
         if column_offsets.len() != expected_offsets {
             return Err(NnisError::invalid_input(format!(
                 "f32-sparse-csc column offsets has {} entries; shape requires {expected_offsets}",
@@ -287,13 +287,8 @@ mod tests {
         let offsets_host = [0_u64, 2, 3, 5, 7];
         let rows_host = [0_u32, 3, 1, 0, 4, 2, 3];
         let values_host = [2.0_f32, -1.0, 0.5, -0.25, 4.0, 1.5, -2.0];
-        let expected = ordered_csc_projection(
-            &input_host,
-            &offsets_host,
-            &rows_host,
-            &values_host,
-            n,
-        );
+        let expected =
+            ordered_csc_projection(&input_host, &offsets_host, &rows_host, &values_host, n);
 
         let compiler = JitCompiler::new();
         let kernel = F32SparseCscGemv::load_with_block_size(&context, &compiler, 64).unwrap();
@@ -337,16 +332,7 @@ mod tests {
         let output = DeviceBuffer::<f32>::new(&context, 3).unwrap();
 
         let error = kernel
-            .project_kn(
-                &stream,
-                &input,
-                &offsets,
-                &rows,
-                &values,
-                &output,
-                4,
-                3,
-            )
+            .project_kn(&stream, &input, &offsets, &rows, &values, &output, 4, 3)
             .unwrap_err();
         assert!(error.to_string().contains("row indices"), "{error}");
 
