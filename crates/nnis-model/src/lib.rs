@@ -166,6 +166,7 @@ pub use weight_representation_accounting::{
     NNIS_WEIGHT_REPRESENTATION_ACCOUNTING_VERSION,
 };
 pub use weight_representation_qualification::{
+    int2_storage_qualification_record_v1, int4_storage_qualification_record_v1,
     WeightExecutionQualificationLevelV1, WeightRepresentationFamilyV1,
     WeightRepresentationQualificationRecordV1, NNIS_WEIGHT_REPRESENTATION_QUALIFICATION_VERSION,
 };
