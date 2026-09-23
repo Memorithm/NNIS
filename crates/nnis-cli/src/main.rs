@@ -533,7 +533,10 @@ fn format_generate_batch_text(items: &[GenerateBatchItemJsonV1]) -> String {
         schema = NNIS_GENERATE_BATCH_CLI_JSON_SCHEMA_VERSION,
     ));
     for item in items {
-        out.push_str(&format!("=== batch_index {} seed {} ===\n", item.batch_index, item.seed));
+        out.push_str(&format!(
+            "=== batch_index {} seed {} ===\n",
+            item.batch_index, item.seed
+        ));
         if item.ok {
             out.push_str(item.text.as_deref().unwrap_or(""));
             if !out.ends_with('\n') {
@@ -1141,7 +1144,10 @@ mod tests {
         };
         assert_eq!(arguments.model_dir, PathBuf::from("/model"));
         assert_eq!(arguments.tokenizer_file, PathBuf::from("/tokenizer.json"));
-        assert_eq!(arguments.prompts, vec!["alpha".to_string(), "beta".to_string()]);
+        assert_eq!(
+            arguments.prompts,
+            vec!["alpha".to_string(), "beta".to_string()]
+        );
         assert_eq!(arguments.seeds, vec![1, 2]);
         assert_eq!(arguments.device_ordinal, 1);
         assert_eq!(arguments.max_new_tokens, 4);
