@@ -174,9 +174,13 @@ impl DenseWeightMaterializationEvidenceV1 {
                     .representation_resident_bits_per_unique_logical_value
                     .to_bits()
             || self.dense_execution_bits_per_unique_logical_value.to_bits()
-                != rebuilt.dense_execution_bits_per_unique_logical_value.to_bits()
+                != rebuilt
+                    .dense_execution_bits_per_unique_logical_value
+                    .to_bits()
             || self.final_resident_bits_per_unique_logical_value.to_bits()
-                != rebuilt.final_resident_bits_per_unique_logical_value.to_bits()
+                != rebuilt
+                    .final_resident_bits_per_unique_logical_value
+                    .to_bits()
         {
             return Err(NnisError::invalid_input(
                 "dense materialization cached accounting disagrees with exact integer byte totals",
@@ -205,11 +209,15 @@ mod tests {
         assert_eq!(evidence.final_scoped_owned_device_bytes, 460);
         assert_eq!(evidence.peak_scoped_owned_device_bytes, 892);
         assert_eq!(
-            evidence.dense_execution_bits_per_unique_logical_value.to_bits(),
+            evidence
+                .dense_execution_bits_per_unique_logical_value
+                .to_bits(),
             32.0_f64.to_bits()
         );
         assert_eq!(
-            evidence.final_resident_bits_per_unique_logical_value.to_bits(),
+            evidence
+                .final_resident_bits_per_unique_logical_value
+                .to_bits(),
             36.8_f64.to_bits()
         );
         assert!(!evidence.low_bit_compute);
