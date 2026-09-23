@@ -1,7 +1,9 @@
 use nnis::{
-    current_process_gpu_memory, Context, Device, GenerationConfig, GenerationStreamControl, Model,
-    NvmlProcessMemorySnapshotV1, SampledBatchRequest, SamplingConfig, Stream,
-    NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION, NNIS_SAMPLING_POLICY_VERSION,
+    current_process_gpu_memory, reference_weight_capability_manifest_v1, Context, Device,
+    GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
+    SampledBatchRequest, SamplingConfig, Stream, WeightCapabilityManifestV1,
+    WeightRepresentationFamilyV1, NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION,
+    NNIS_SAMPLING_POLICY_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
 use serde::Serialize;
 use std::env;
@@ -12,7 +14,7 @@ use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n  nnis weight-capabilities [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.\n\n`weight-capabilities` is CUDA-independent and prints the versioned fixed-baseline capability manifest. It distinguishes storage/accounting and isolated projection support from full-model qualification; the latter remains false until separately evidenced.";
 
 #[derive(Debug, PartialEq)]
 struct GenerateArgs {
@@ -36,6 +38,11 @@ struct NvmlProcessMemoryArgs {
 }
 
 #[derive(Debug, PartialEq)]
+struct WeightCapabilitiesArgs {
+    json: bool,
+}
+
+#[derive(Debug, PartialEq)]
 struct GenerateBatchArgs {
     model_dir: PathBuf,
     tokenizer_file: PathBuf,
@@ -55,6 +62,7 @@ enum Command {
     Generate(GenerateArgs),
     GenerateBatch(GenerateBatchArgs),
     NvmlProcessMemory(NvmlProcessMemoryArgs),
+    WeightCapabilities(WeightCapabilitiesArgs),
 }
 
 #[derive(Debug, Serialize)]
@@ -146,6 +154,9 @@ where
     }
     if command == "nvml-process-memory" {
         return parse_nvml_process_memory_args(arguments);
+    }
+    if command == "weight-capabilities" {
+        return parse_weight_capabilities_args(arguments);
     }
     if command == "generate-batch" {
         return parse_generate_batch_args(arguments);
@@ -424,6 +435,25 @@ where
     }))
 }
 
+fn parse_weight_capabilities_args<I>(arguments: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut json = false;
+    for argument in arguments {
+        match argument.as_str() {
+            "--json" => json = true,
+            "--help" | "-h" => return Ok(Command::Help),
+            other => {
+                return Err(format!(
+                    "unknown weight-capabilities argument {other:?}\n\n{USAGE}"
+                ))
+            }
+        }
+    }
+    Ok(Command::WeightCapabilities(WeightCapabilitiesArgs { json }))
+}
+
 fn parse_nvml_process_memory_args<I>(arguments: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
@@ -457,6 +487,49 @@ where
         device_ordinal,
         json,
     }))
+}
+
+fn weight_family_name(family: WeightRepresentationFamilyV1) -> &'static str {
+    match family {
+        WeightRepresentationFamilyV1::Int4Symmetric => "int4_symmetric",
+        WeightRepresentationFamilyV1::Int2Ternary => "int2_ternary",
+        WeightRepresentationFamilyV1::MagnitudeSparse => "magnitude_sparse",
+    }
+}
+
+fn format_weight_capabilities_text(manifest: &WeightCapabilityManifestV1) -> String {
+    let mut out = format!(
+        "NNIS weight capability manifest v{}\nschema_version: {}\n",
+        NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION, manifest.schema_version
+    );
+    for entry in &manifest.entries {
+        out.push_str(&format!(
+            "{}: storage_v{} serialization={} accounting={} projection_kernel={} projection_plan_v={} full_model={}\n",
+            weight_family_name(entry.family),
+            entry.storage_contract_version,
+            entry.exact_serialization_available,
+            entry.exact_accounting_available,
+            entry.isolated_projection_kernel.as_deref().unwrap_or("none"),
+            entry
+                .projection_plan_contract_version
+                .map_or_else(|| "none".to_string(), |version| version.to_string()),
+            entry.full_model_execution_qualified,
+        ));
+    }
+    out.push_str(
+        "Claim boundary: software capability inventory only. full_model=false remains authoritative until separately qualified physical execution and generated-token evidence exist.",
+    );
+    out
+}
+
+fn format_weight_capabilities_json(
+    manifest: &WeightCapabilityManifestV1,
+) -> Result<String, String> {
+    manifest
+        .validate()
+        .map_err(|error| format!("invalid weight capability manifest: {error}"))?;
+    serde_json::to_string_pretty(manifest)
+        .map_err(|error| format!("failed to serialize weight capability manifest: {error}"))
 }
 
 fn format_nvml_process_memory_text(snapshot: &NvmlProcessMemorySnapshotV1) -> String {
@@ -814,6 +887,26 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::WeightCapabilities(arguments) => {
+            let manifest = reference_weight_capability_manifest_v1();
+            if let Err(error) = manifest.validate() {
+                eprintln!("nnis weight-capabilities: invalid manifest: {error}");
+                return ExitCode::FAILURE;
+            }
+            let rendered = if arguments.json {
+                match format_weight_capabilities_json(&manifest) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        eprintln!("nnis weight-capabilities: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            } else {
+                format_weight_capabilities_text(&manifest)
+            };
+            println!("{rendered}");
+            ExitCode::SUCCESS
+        }
         Command::NvmlProcessMemory(arguments) => match probe_nvml_process_memory(&arguments) {
             Ok(snapshot) => {
                 let rendered = if arguments.json {
@@ -1058,6 +1151,38 @@ mod tests {
                 json: false,
             })
         );
+    }
+
+    #[test]
+    fn weight_capabilities_parses_and_formats_without_cuda() {
+        assert_eq!(
+            parse_args(strings(&["weight-capabilities"])).unwrap(),
+            Command::WeightCapabilities(WeightCapabilitiesArgs { json: false })
+        );
+        assert_eq!(
+            parse_args(strings(&["weight-capabilities", "--json"])).unwrap(),
+            Command::WeightCapabilities(WeightCapabilitiesArgs { json: true })
+        );
+        assert_eq!(
+            parse_args(strings(&["weight-capabilities", "--help"])).unwrap(),
+            Command::Help
+        );
+        assert!(parse_args(strings(&["weight-capabilities", "--device", "0"])).is_err());
+
+        let manifest = reference_weight_capability_manifest_v1();
+        let text = format_weight_capabilities_text(&manifest);
+        assert!(text.contains("int4_symmetric"));
+        assert!(text.contains("int2_ternary"));
+        assert!(text.contains("magnitude_sparse"));
+        assert!(text.contains("full_model=false"));
+
+        let json = format_weight_capabilities_json(&manifest).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            value["schema_version"],
+            NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION
+        );
+        assert_eq!(value["entries"].as_array().unwrap().len(), 3);
     }
 
     #[test]
