@@ -5,7 +5,8 @@
 //! WeightFullModelCampaignArtifactV1.
 
 use crate::{
-    WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1, WeightRepresentationFamilyV1,
+    WeightCampaignEnvironmentV1, WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1,
+    WeightFullModelCampaignArtifactV2, WeightRepresentationFamilyV1,
 };
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
@@ -13,6 +14,46 @@ use std::collections::BTreeSet;
 
 /// Version of the evidence-bound qualified weight capability record.
 pub const NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_VERSION: u32 = 1;
+/// Version of the environment-bound qualified weight capability record.
+pub const NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION: u32 = 2;
+
+/// Environment-bound qualified backend capability record.
+///
+/// V2 preserves the complete V1 Stage-B capability contract and adds the
+/// validated CUDA environment from the exact physical campaign run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QualifiedWeightCapabilityRecordV2 {
+    pub schema_version: u32,
+    pub capability: QualifiedWeightCapabilityRecordV1,
+    pub environment: WeightCampaignEnvironmentV1,
+}
+
+impl QualifiedWeightCapabilityRecordV2 {
+    pub fn from_artifact(artifact: &WeightFullModelCampaignArtifactV2) -> Result<Self> {
+        artifact.validate()?;
+        let capability =
+            QualifiedWeightCapabilityRecordV1::from_artifact(&artifact.campaign_artifact)?;
+        let record = Self {
+            schema_version: NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION,
+            capability,
+            environment: artifact.environment.clone(),
+        };
+        record.validate()?;
+        Ok(record)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "qualified weight capability v2 schema {}; supported version is {}",
+                self.schema_version, NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION
+            )));
+        }
+        self.capability.validate()?;
+        self.environment.validate()
+    }
+}
 
 /// One physically qualified full-model weight family.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -295,6 +336,39 @@ mod tests {
             tokenizer_sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                 .to_string(),
         }
+    }
+
+    fn environment() -> WeightCampaignEnvironmentV1 {
+        WeightCampaignEnvironmentV1 {
+            schema_version: crate::NNIS_WEIGHT_CAMPAIGN_ENVIRONMENT_VERSION,
+            device_ordinal: 0,
+            device_name: "NVIDIA Test GPU".to_string(),
+            device_uuid: "GPU-CUuuid([0, 1, 2, 3])".to_string(),
+            compute_capability_major: 12,
+            compute_capability_minor: 1,
+            sm_arch: "sm_121".to_string(),
+            multiprocessor_count: 16,
+            clock_khz: 1_000_000,
+            memory_clock_khz: 500_000,
+            integrated: true,
+            cuda_driver_major: 13,
+            cuda_driver_minor: 0,
+        }
+    }
+
+    #[test]
+    fn qualified_record_v2_preserves_physical_environment() {
+        let artifact_v2 =
+            WeightFullModelCampaignArtifactV2::new(artifact(), environment()).unwrap();
+        let record = QualifiedWeightCapabilityRecordV2::from_artifact(&artifact_v2).unwrap();
+        record.validate().unwrap();
+        assert!(record.capability.elastic_stage_b_backend_ready);
+        assert_eq!(record.environment.sm_arch, "sm_121");
+        assert_eq!(record.environment.cuda_driver_major, 13);
+
+        let mut drifted = record;
+        drifted.environment.sm_arch = "sm_120".to_string();
+        assert!(drifted.validate().is_err());
     }
 
     #[test]
