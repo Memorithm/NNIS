@@ -7,13 +7,17 @@
 
 use crate::weights::WeightLogicalShapeV1;
 use crate::{
-    quantize_int2_ternary_reference_v1, DeviceTensor, Int2ReferenceProjectionPlanV1, ModelWeights,
+    dequantize_int2_ternary_reference_v1, quantize_int2_ternary_reference_v1,
+    DenseWeightMaterializationEvidenceV1, DeviceTensor, Int2ReferenceProjectionPlanV1, Model,
+    ModelConfig, ModelWeights, WeightRepresentationFamilyV1, WeightDType,
     NNIS_INT2_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_INT2_REFERENCE_STORAGE_VERSION,
 };
 use nnis_kernels::F32Int2Gemv;
 use nnis_rt::{DeviceBuffer, NnisError, Result, Stream};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Accounting and reconstruction evidence for one unique INT2 source allocation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -76,6 +80,82 @@ pub struct Int2ReferenceModelStorageV1 {
     allocations: Vec<Int2ReferenceDeviceAllocation>,
     bindings: BTreeMap<String, Int2ReferenceLogicalBinding>,
     summary: Int2ReferenceStorageSummaryV1,
+}
+
+/// Full-model ternary-INT2 reference path with dense-F32 execution.
+///
+/// Compact INT2 payloads remain resident while a separate F32 graph feeds the
+/// standard NNIS decoder. This is an honest materialization path, not low-bit
+/// compute, and remains unqualified until exact-checkpoint generation evidence
+/// is recorded.
+pub struct Int2DenseMaterializedModelV1 {
+    compact_storage: Int2ReferenceModelStorageV1,
+    model: Model,
+    materialization: DenseWeightMaterializationEvidenceV1,
+}
+
+impl Int2DenseMaterializedModelV1 {
+    pub fn from_f32_model_weights(
+        config: ModelConfig,
+        source_weights: ModelWeights,
+        stream: &Stream,
+    ) -> Result<Self> {
+        if config.weight_dtype != WeightDType::F32 {
+            return Err(NnisError::unsupported(
+                "INT2 dense materialization requires an F32 execution source graph",
+            ));
+        }
+        source_weights.validate(&config)?;
+        let source_summary = source_weights.weight_allocation_summary_v1()?;
+        let started = Instant::now();
+        let compact_storage =
+            Int2ReferenceModelStorageV1::from_f32_model_weights(&source_weights, stream)?;
+        let dense_weights = compact_storage.materialize_dense_f32_weights(&config, stream)?;
+        stream.synchronize()?;
+        let duration_ns = u64::try_from(started.elapsed().as_nanos()).map_err(|_| {
+            NnisError::invalid_input("INT2 dense materialization duration exceeds u64 nanoseconds")
+        })?;
+        let dense_summary = dense_weights.weight_allocation_summary_v1()?;
+        if source_summary.unique_device_elements != compact_storage.summary.unique_logical_values
+            || source_summary.unique_device_elements != dense_summary.unique_device_elements
+            || source_summary.owned_device_allocation_bytes
+                != compact_storage.summary.source_f32_owned_bytes
+        {
+            return Err(NnisError::invalid_input(
+                "INT2 dense materialization denominator does not reconcile across source, compact and dense graphs",
+            ));
+        }
+        let materialization = DenseWeightMaterializationEvidenceV1::new(
+            WeightRepresentationFamilyV1::Int2Ternary,
+            source_summary.unique_device_elements,
+            source_summary.owned_device_allocation_bytes,
+            compact_storage.summary.resident_device_bytes,
+            dense_summary.owned_device_allocation_bytes,
+            0,
+            duration_ns,
+        )?;
+        let model = Model::new(config, dense_weights, stream)?;
+        Ok(Self {
+            compact_storage,
+            model,
+            materialization,
+        })
+    }
+
+    #[must_use]
+    pub fn model(&self) -> &Model {
+        &self.model
+    }
+
+    #[must_use]
+    pub fn compact_storage_summary(&self) -> &Int2ReferenceStorageSummaryV1 {
+        self.compact_storage.summary()
+    }
+
+    #[must_use]
+    pub fn materialization_evidence(&self) -> &DenseWeightMaterializationEvidenceV1 {
+        &self.materialization
+    }
 }
 
 impl Int2ReferenceModelStorageV1 {
@@ -348,6 +428,74 @@ impl Int2ReferenceModelStorageV1 {
     #[must_use]
     pub fn summary(&self) -> &Int2ReferenceStorageSummaryV1 {
         &self.summary
+    }
+
+    fn materialize_dense_f32_weights(
+        &self,
+        config: &ModelConfig,
+        stream: &Stream,
+    ) -> Result<ModelWeights> {
+        self.validate_resident_allocations()?;
+        if !Arc::ptr_eq(
+            stream.ctx(),
+            self.allocations
+                .first()
+                .ok_or_else(|| {
+                    NnisError::invalid_input("INT2 reference storage has no resident allocations")
+                })?
+                .packed_values
+                .ctx(),
+        ) {
+            return Err(NnisError::invalid_input(
+                "INT2 dense materialization stream must share the compact-storage CUDA context",
+            ));
+        }
+
+        let mut dense_allocations =
+            Vec::<Arc<DeviceBuffer<f32>>>::with_capacity(self.allocations.len());
+        for (allocation, summary) in self.allocations.iter().zip(&self.summary.allocations) {
+            let packed_values = allocation.packed_values.to_vec(stream)?;
+            let scale_values = allocation.scale.to_vec(stream)?;
+            if scale_values.len() != 1 || scale_values[0].to_bits() != summary.scale.to_bits() {
+                return Err(NnisError::invalid_input(
+                    "INT2 live scale disagrees with immutable storage summary",
+                ));
+            }
+            let quantized = crate::Int2ReferenceQuantizedTensorV1 {
+                element_count: summary.logical_values,
+                scale: summary.scale,
+                packed_values,
+                max_abs_error: summary.max_abs_error,
+                mean_squared_error: summary.mean_squared_error,
+            };
+            let dense_host = dequantize_int2_ternary_reference_v1(&quantized)?;
+            let dense = DeviceBuffer::from_host(stream.ctx(), stream, &dense_host)?;
+            dense_allocations.push(Arc::new(dense));
+        }
+
+        let mut logical = BTreeMap::new();
+        for (name, binding) in &self.bindings {
+            let allocation = dense_allocations
+                .get(binding.allocation_index)
+                .ok_or_else(|| {
+                    NnisError::invalid_input(
+                        "INT2 dense logical binding references a missing allocation",
+                    )
+                })?;
+            if logical
+                .insert(
+                    name.clone(),
+                    (binding.shape, DeviceTensor::F32(Arc::clone(allocation))),
+                )
+                .is_some()
+            {
+                return Err(NnisError::invalid_input(format!(
+                    "duplicate INT2 dense logical binding {name}"
+                )));
+            }
+        }
+        stream.synchronize()?;
+        ModelWeights::from_named_logical_tensors(config, logical)
     }
 
     /// Execute one explicitly bound matrix projection directly from packed INT2 storage.
