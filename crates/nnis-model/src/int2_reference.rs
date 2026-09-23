@@ -217,10 +217,7 @@ mod tests {
         assert_eq!(quantized.packed_values[1], 20);
 
         let reconstructed = dequantize_int2_ternary_reference_v1(&quantized).unwrap();
-        assert_eq!(
-            reconstructed,
-            vec![-1.0_f32, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0]
-        );
+        assert_eq!(reconstructed, vec![-1.0_f32, -1.0, 0.0, 0.0, 0.0, 1.0, 1.0]);
     }
 
     #[test]
