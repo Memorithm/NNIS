@@ -26,6 +26,7 @@ mod f16_transposed_projection_candidate;
 mod format;
 mod fused_swiglu;
 mod fusion_plan;
+mod generated_token_evidence;
 mod int2_model_storage;
 mod int2_reference;
 mod int4_reference;
@@ -115,6 +116,10 @@ pub use format::{
 };
 pub use fused_swiglu::F32SiluMultiply;
 pub use fusion_plan::{F32FusionPlan, F32SiluMultiplyKernel, F32_FUSION_PLAN_VERSION};
+pub use generated_token_evidence::{
+    validate_finite_runtime_output, GeneratedTokenEvidenceV1,
+    NNIS_GENERATED_TOKEN_EVIDENCE_VERSION,
+};
 pub use int2_model_storage::{
     Int2DenseMaterializedModelV1, Int2ReferenceAllocationSummaryV1, Int2ReferenceModelStorageV1,
     Int2ReferenceStorageSummaryV1,
