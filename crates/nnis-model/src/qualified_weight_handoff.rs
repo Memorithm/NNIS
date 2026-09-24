@@ -98,8 +98,7 @@ mod tests {
             physical_execution_observed: true,
             generated_token_count: 4,
             generated_token_ids_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             non_finite_output_observed: false,
             serialized_representation_bytes: serialized,
             logical_tensor_references: 1,
@@ -147,10 +146,12 @@ mod tests {
     fn handoff_is_derived_from_one_immutable_artifact() {
         let handoff = QualifiedWeightHandoffV1::from_artifact(&artifact()).unwrap();
         handoff.validate().unwrap();
-        assert!(handoff
-            .qualified_capability
-            .capability
-            .elastic_stage_b_backend_ready);
+        assert!(
+            handoff
+                .qualified_capability
+                .capability
+                .elastic_stage_b_backend_ready
+        );
         assert_eq!(
             handoff.artifact_fingerprint.nnis_commit,
             handoff.qualified_capability.capability.nnis_commit
