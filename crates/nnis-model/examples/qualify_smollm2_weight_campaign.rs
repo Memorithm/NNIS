@@ -6,7 +6,7 @@ use nnis_model::{
     WeightCampaignEnvironmentV1, WeightFullModelCampaignArtifactV1,
     WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1,
     WeightFullModelExecutionEvidenceV1, NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS,
-    SMOLLM2_135M_BF16,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TEXT, SMOLLM2_135M_BF16,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use sha2::{Digest, Sha256};
@@ -14,6 +14,7 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tokenizers::Tokenizer;
 
 #[derive(Debug, PartialEq)]
 struct Args {
@@ -143,6 +144,40 @@ fn validate_args_against_protocol(
         )));
     }
     Ok(())
+}
+
+fn validate_tokenizer_prompt_ids(
+    actual: &[u32],
+    protocol: &SmolLm2WeightQualificationProtocolV1,
+) -> Result<()> {
+    protocol.validate()?;
+    if actual != protocol.prompt_token_ids {
+        return Err(NnisError::invalid_input(format!(
+            "tokenizer encoded preregistered prompt as {actual:?}; expected {:?}",
+            protocol.prompt_token_ids
+        )));
+    }
+    Ok(())
+}
+
+fn verify_tokenizer_prompt(
+    path: &Path,
+    protocol: &SmolLm2WeightQualificationProtocolV1,
+) -> Result<()> {
+    let tokenizer = Tokenizer::from_file(path).map_err(|error| {
+        NnisError::invalid_input(format!(
+            "failed to load qualification tokenizer {:?}: {error}",
+            path
+        ))
+    })?;
+    let encoding = tokenizer
+        .encode(NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TEXT, false)
+        .map_err(|error| {
+            NnisError::invalid_input(format!(
+                "failed to encode preregistered SmolLM2 prompt: {error}"
+            ))
+        })?;
+    validate_tokenizer_prompt_ids(encoding.get_ids(), protocol)
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -358,6 +393,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     verify_clean_git_worktree()?;
     let model_payload = args.model_dir.join("model.safetensors");
     SMOLLM2_135M_BF16.verify_model_file_sha256(&model_payload)?;
+    verify_tokenizer_prompt(&args.tokenizer, &protocol)?;
     let commit = current_nnis_commit()?;
 
     let device = Device::first()?;
@@ -426,6 +462,14 @@ mod tests {
         assert!(validate_git_status_output(" M crates/nnis-model/src/lib.rs\n").is_err());
         assert!(validate_git_status_output("?? local-model/\n").is_err());
         assert!(validate_git_status_output("A  generated-evidence.json\n").is_err());
+    }
+
+    #[test]
+    fn tokenizer_prompt_ids_must_match_preregistered_reference() {
+        let protocol = SmolLm2WeightQualificationProtocolV1::reference().unwrap();
+        validate_tokenizer_prompt_ids(&[22_007, 6_463, 314], &protocol).unwrap();
+        assert!(validate_tokenizer_prompt_ids(&[22_007, 6_463], &protocol).is_err());
+        assert!(validate_tokenizer_prompt_ids(&[22_007, 6_463, 315], &protocol).is_err());
     }
 
     #[test]
