@@ -116,3 +116,9 @@ This file is a bootstrap pointer, not the roadmap itself. The off-main sovereign
 For any BANC v888, SML-GENIUS sparse-recurrent, event-driven, FLAT sparse-routing, CPU/WGPU portability, or connectome-derived runtime work, also read [`docs/V888_CONNECTOME_BOOTSTRAP.md`](docs/V888_CONNECTOME_BOOTSTRAP.md).
 
 The explicit programme direction is vendor-neutral: new V888/SML/FLAT work must not depend on CUDA, NVRTC, TensorRT, TensorRT-LLM, NVML, CUBIN, or other NVIDIA-specific runtime facilities. Existing NVIDIA code remains historical/reference capability until a separately reviewed migration changes or removes it. For this programme the target expansion of NNIS is **Native Neural Inference Stack**, with CPU reference and WGPU/open-GPU execution. When an older roadmap item assumes an NVIDIA-only implementation for this programme, fail closed on that implementation choice and follow the portable V888 bootstrap instead; do not silently reinterpret existing scientific or numerical contracts.
+
+## Mandatory DeepSeek-V4.1 KV-runtime research extension
+
+For bounded replay, explicit cross-layer cache sharing, FP4 KV, or confidence-scheduled speculative verification, also read `deepseek_v41_kv_runtime_program_2026_09_24` in the off-main sovereignty roadmap.
+
+For new work in this programme the qualification order is CPU reference → WGPU portable GPU → optional existing CUDA cross-check. NNIS consumes model- or domain-supplied reuse plans; it must not invent cross-layer sharing semantics. FP4 and INT4 are distinct. Logical KV compaction is not physical-memory release. Speculative verification requires measured acceptance and runtime cost before any throughput claim.
