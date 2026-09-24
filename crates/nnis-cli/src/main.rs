@@ -1,8 +1,7 @@
 use nnis::{
     current_process_gpu_memory, reference_weight_capability_manifest_v1, Context, Device,
-    ElasticStageBPreregistrationHandoffV1, ElasticStageBPreregistrationPacketV1,
-    GenerationConfig, GenerationStreamControl, Model,
-    NvmlProcessMemorySnapshotV1, QualifiedWeightCapabilityRecordV1,
+    ElasticStageBPreregistrationHandoffV1, ElasticStageBPreregistrationPacketV1, GenerationConfig,
+    GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1, QualifiedWeightCapabilityRecordV1,
     QualifiedWeightCapabilityRecordV2, QualifiedWeightHandoffV1, SampledBatchRequest,
     SamplingConfig, Stream, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
     WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
@@ -488,9 +487,7 @@ where
     }))
 }
 
-fn parse_elastic_stage_b_preregistration_packet_args<I>(
-    arguments: I,
-) -> Result<Command, String>
+fn parse_elastic_stage_b_preregistration_packet_args<I>(arguments: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
 {
@@ -500,9 +497,7 @@ where
             Ok(Command::ElasticStageBPreregistrationPacket(arguments))
         }
         Command::Help => Ok(Command::Help),
-        _ => Err(
-            "internal elastic-stage-b-preregistration-packet parser mismatch".to_string(),
-        ),
+        _ => Err("internal elastic-stage-b-preregistration-packet parser mismatch".to_string()),
     }
 }
 
