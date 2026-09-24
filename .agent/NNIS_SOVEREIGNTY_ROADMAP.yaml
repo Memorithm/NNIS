@@ -782,7 +782,7 @@ deepseek_v41_kv_runtime_program_2026_09_24:
     - WGPU_portable_gpu
     - existing_CUDA_path_optional_secondary_cross_check_only
   ordered_sequence:
-    - NNIS_DSV41_0_replayable_state_provider_and_exact_identity_contract
+    - NNIS_DSV41_0_replayable_state_provider_and_exact_identity_contract_complete_PR_226_merge_e053fe00f5b6c85740059b828cc64ce964d524fb
     - NNIS_DSV41_1_bounded_recent_window_replay_reference_path
     - NNIS_DSV41_2_cross_layer_KV_reuse_plan_consumer_without_policy_invention
     - NNIS_DSV41_3_portable_FP4_E2M1_group_scaled_KV_reference_and_accounting
@@ -801,3 +801,19 @@ deepseek_v41_kv_runtime_program_2026_09_24:
     - no_speculative_speed_claim_without_acceptance_and_real_runtime_measurement
     - new_SML_or_V888_work_remains_vendor_neutral
 
+deepseek_v41_runtime_evidence_2026_09_25:
+  status: DSV41_0_merged
+  pull_request: https://github.com/Memorithm/NNIS/pull/226
+  merge_revision: e053fe00f5b6c85740059b828cc64ce964d524fb
+  scope:
+    - backend_neutral_replay_provider_source_generation_identity
+    - representation_schema_and_materialization_epoch_identity
+    - bounded_logical_replay_window_containment
+    - provider_trait_fails_closed_on_source_identity_drift
+    - Rust_1_77_and_CPU_quality_CI_green
+  exclusions:
+    - no_replay_payload_or_reconstruction
+    - no_CUDA_or_WGPU_execution
+    - no_model_policy_or_quality_claim
+    - no_memory_latency_or_throughput_claim
+  next: NNIS_DSV41_1_bounded_recent_window_replay_reference_path
