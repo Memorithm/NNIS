@@ -766,3 +766,38 @@ v888_portable_program:
     an older NVIDIA-only implementation assumption is not an authorized path.
     Preserve its historical evidence, but fail closed and use the portable
     CPU/WGPU contract described by the V888 bootstrap.
+deepseek_v41_kv_runtime_program_2026_09_24:
+  status: active_vendor_neutral_research_extension
+  source:
+    title: "DeepSeek-V4.1-Flash: Pushing the Limits of KV Cache Compression"
+    organization: DeepSeek-AI
+    reviewed_on: 2026-09-24
+    evidence_rule: external_results_do_not_authorize_NNIS_promotion
+  objective: >-
+    Add portable runtime primitives needed to qualify bounded replay, explicit
+    cross-layer cache sharing plans, low-bit KV formats, and confidence-scheduled
+    speculative verification without importing model policy into the runtime.
+  backend_order_for_new_programme:
+    - CPU_reference
+    - WGPU_portable_gpu
+    - existing_CUDA_path_optional_secondary_cross_check_only
+  ordered_sequence:
+    - NNIS_DSV41_0_replayable_state_provider_and_exact_identity_contract
+    - NNIS_DSV41_1_bounded_recent_window_replay_reference_path
+    - NNIS_DSV41_2_cross_layer_KV_reuse_plan_consumer_without_policy_invention
+    - NNIS_DSV41_3_portable_FP4_E2M1_group_scaled_KV_reference_and_accounting
+    - NNIS_DSV41_4_confidence_scheduled_speculative_verification_runtime_surface
+    - NNIS_DSV41_5_real_model_quality_memory_latency_and_throughput_campaign
+  ownership:
+    FLAT_ATTENTION: sparse_selection_and_attention_semantics
+    SLHAv2: compressed_KV_representation_and_replayable_state_semantics
+    KVLab: comparative_experiment_design_and_evidence
+    ElasticXxx: generic_resource_decision_and_rollback
+    NNIS: runtime_execution_memory_movement_and_measurement
+  invariants:
+    - no_layer_reuse_without_model_supplied_versioned_plan
+    - FP4_and_INT4_are_distinct_formats_and_evidence
+    - no_physical_memory_claim_from_logical_compaction_alone
+    - no_speculative_speed_claim_without_acceptance_and_real_runtime_measurement
+    - new_SML_or_V888_work_remains_vendor_neutral
+
