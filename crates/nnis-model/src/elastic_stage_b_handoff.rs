@@ -16,7 +16,7 @@ pub const NNIS_ELASTIC_STAGE_B_FINAL_TEST_PARTITION_LOCKED: &str = "locked";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ElasticStageBPreregristrationHandoffV1 {
+pub struct ElasticStageBPreregistrationHandoffV1 {
     pub schema_version: u32,
     pub consumer: String,
     pub qualified_weight_handoff: QualifiedWeightHandoffV1,
@@ -27,7 +27,7 @@ pub struct ElasticStageBPreregristrationHandoffV1 {
     pub final_test_partition: String,
 }
 
-impl ElasticStageBPreregristrationHandoffV1 {
+impl ElasticStageBPreregistrationHandoffV1 {
     /// Derive the NNIS-side handoff from one exact physical campaign artifact.
     ///
     /// This constructor intentionally keeps all measurement authorization false.
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn elastic_handoff_keeps_measurements_and_final_test_locked() {
-        let record = ElasticStageBPreregristrationHandoffV1::from_artifact(&artifact()).unwrap();
+        let record = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.validate().unwrap();
         assert!(record.backend_ready_for_preregistration);
         assert!(record.downstream_preregistration_update_required);
@@ -169,17 +169,17 @@ mod tests {
     #[test]
     fn elastic_handoff_rejects_authorization_or_consumer_drift() {
         let mut record =
-            ElasticStageBPreregristrationHandoffV1::from_artifact(&artifact()).unwrap();
+            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.development_measurement_authorized = true;
         assert!(record.validate().is_err());
 
         let mut record =
-            ElasticStageBPreregristrationHandoffV1::from_artifact(&artifact()).unwrap();
+            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.consumer = "other".to_string();
         assert!(record.validate().is_err());
 
         let mut record =
-            ElasticStageBPreregristrationHandoffV1::from_artifact(&artifact()).unwrap();
+            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.final_test_partition = "open".to_string();
         assert!(record.validate().is_err());
     }
