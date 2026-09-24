@@ -33,6 +33,7 @@ mod int4_reference;
 mod kernels;
 mod projection_plan;
 mod qualified_weight_capability_record;
+mod qualified_weight_handoff;
 mod representation_plan;
 #[path = "runtime/mod.rs"]
 mod runtime;
@@ -154,6 +155,9 @@ pub use qualified_weight_capability_record::{
     QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2,
     QualifiedWeightFamilyCapabilityV1, NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_V2_VERSION,
     NNIS_QUALIFIED_WEIGHT_CAPABILITY_RECORD_VERSION,
+};
+pub use qualified_weight_handoff::{
+    QualifiedWeightHandoffV1, NNIS_QUALIFIED_WEIGHT_HANDOFF_VERSION,
 };
 pub use representation_plan::{
     load_model_directory_with_representation_plan, PhysicalWeightRepresentation,
