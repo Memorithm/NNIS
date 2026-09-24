@@ -16,6 +16,68 @@ use std::path::Path;
 pub const NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_VERSION: u32 = 1;
 /// Version of the environment-bound campaign artifact envelope.
 pub const NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION: u32 = 2;
+/// Version of the artifact fingerprint handoff identity.
+pub const NNIS_WEIGHT_CAMPAIGN_ARTIFACT_FINGERPRINT_VERSION: u32 = 1;
+
+/// Immutable identity of one validated environment-bound campaign artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeightCampaignArtifactFingerprintV1 {
+    pub schema_version: u32,
+    pub artifact_schema_version: u32,
+    pub artifact_json_sha256: String,
+    pub nnis_commit: String,
+    pub exact_checkpoint: String,
+    pub tokenizer_sha256: String,
+    pub device_uuid: String,
+    pub sm_arch: String,
+    pub cuda_driver_major: i32,
+    pub cuda_driver_minor: i32,
+}
+
+impl WeightCampaignArtifactFingerprintV1 {
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_WEIGHT_CAMPAIGN_ARTIFACT_FINGERPRINT_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "weight campaign artifact fingerprint schema {}; supported version is {}",
+                self.schema_version, NNIS_WEIGHT_CAMPAIGN_ARTIFACT_FINGERPRINT_VERSION
+            )));
+        }
+        if self.artifact_schema_version != NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "weight campaign fingerprint artifact schema {}; expected {}",
+                self.artifact_schema_version, NNIS_WEIGHT_FULL_MODEL_CAMPAIGN_ARTIFACT_V2_VERSION
+            )));
+        }
+        validate_lower_sha256(
+            "weight campaign artifact JSON SHA-256",
+            &self.artifact_json_sha256,
+        )?;
+        validate_lower_sha256(
+            "weight campaign fingerprint tokenizer SHA-256",
+            &self.tokenizer_sha256,
+        )?;
+        if self.nnis_commit.len() != 40
+            || !self
+                .nnis_commit
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            || self.exact_checkpoint.is_empty()
+            || self.exact_checkpoint.trim() != self.exact_checkpoint
+            || self.device_uuid.is_empty()
+            || self.device_uuid.trim() != self.device_uuid
+            || self.sm_arch.is_empty()
+            || self.sm_arch.trim() != self.sm_arch
+            || self.cuda_driver_major <= 0
+            || self.cuda_driver_minor < 0
+        {
+            return Err(NnisError::invalid_input(
+                "weight campaign artifact fingerprint identity fields are invalid",
+            ));
+        }
+        Ok(())
+    }
+}
 
 /// Environment-bound wrapper around one validated V1 campaign artifact.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -27,6 +89,35 @@ pub struct WeightFullModelCampaignArtifactV2 {
 }
 
 impl WeightFullModelCampaignArtifactV2 {
+    /// Derive a SHA-256 identity over the complete compact JSON wire payload.
+    ///
+    /// The digest covers every V2 field, including nested family evidence,
+    /// recipe, tokenizer identity and physical CUDA environment.
+    pub fn fingerprint(&self) -> Result<WeightCampaignArtifactFingerprintV1> {
+        self.validate()?;
+        let bytes = serde_json::to_vec(self).map_err(|error| {
+            NnisError::invalid_input(format!(
+                "failed to serialize weight campaign artifact v2 for fingerprinting: {error}"
+            ))
+        })?;
+        let artifact_json_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let campaign = &self.campaign_artifact.campaign;
+        let fingerprint = WeightCampaignArtifactFingerprintV1 {
+            schema_version: NNIS_WEIGHT_CAMPAIGN_ARTIFACT_FINGERPRINT_VERSION,
+            artifact_schema_version: self.schema_version,
+            artifact_json_sha256,
+            nnis_commit: campaign.nnis_commit.clone(),
+            exact_checkpoint: campaign.exact_checkpoint.clone(),
+            tokenizer_sha256: self.campaign_artifact.tokenizer_sha256.clone(),
+            device_uuid: self.environment.device_uuid.clone(),
+            sm_arch: self.environment.sm_arch.clone(),
+            cuda_driver_major: self.environment.cuda_driver_major,
+            cuda_driver_minor: self.environment.cuda_driver_minor,
+        };
+        fingerprint.validate()?;
+        Ok(fingerprint)
+    }
+
     pub fn new(
         campaign_artifact: WeightFullModelCampaignArtifactV1,
         environment: WeightCampaignEnvironmentV1,
@@ -239,6 +330,35 @@ mod tests {
             cuda_driver_major: 13,
             cuda_driver_minor: 0,
         }
+    }
+
+    #[test]
+    fn v2_fingerprint_is_deterministic_and_environment_sensitive() {
+        let v1 = WeightFullModelCampaignArtifactV1::new(
+            campaign(),
+            WeightCampaignRecipeV1::new(vec![1, 2], 4, 0.05).unwrap(),
+            "tokenizer.json",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        )
+        .unwrap();
+        let artifact = WeightFullModelCampaignArtifactV2::new(v1, environment()).unwrap();
+        let first = artifact.fingerprint().unwrap();
+        let second = artifact.fingerprint().unwrap();
+        assert_eq!(first, second);
+        first.validate().unwrap();
+        assert_eq!(
+            first.nnis_commit,
+            artifact.campaign_artifact.campaign.nnis_commit
+        );
+        assert_eq!(first.sm_arch, artifact.environment.sm_arch);
+
+        let mut changed = artifact;
+        changed.environment.clock_khz += 1;
+        let changed_fingerprint = changed.fingerprint().unwrap();
+        assert_ne!(
+            first.artifact_json_sha256,
+            changed_fingerprint.artifact_json_sha256
+        );
     }
 
     #[test]
