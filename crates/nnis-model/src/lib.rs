@@ -43,6 +43,7 @@ mod safetensors_loader;
 mod safetensors_preflight;
 mod sampling;
 mod session_batch;
+mod smollm2_weight_qualification_protocol;
 mod sparse_csc_reference;
 mod sparse_model_storage;
 mod sparse_reference;
@@ -181,6 +182,14 @@ pub use safetensors_preflight::{
 };
 pub use sampling::{SamplingConfig, NNIS_SAMPLING_POLICY_VERSION};
 pub use session_batch::{SampledBatchRequest, SampledSessionBatch};
+pub use smollm2_weight_qualification_protocol::{
+    SmolLm2WeightQualificationProtocolV1,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_EXPECTED_GREEDY_TOKEN_IDS,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TOKEN_IDS,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROTOCOL_VERSION,
+    NNIS_SMOLLM2_WEIGHT_QUALIFICATION_SPARSE_THRESHOLD,
+};
 pub use sparse_csc_reference::{
     densify_matrix_csc_reference_v1, sparsify_matrix_csc_reference_v1, SparseCscProjectionPlanV1,
     SparseCscReferenceMatrixV1, NNIS_SPARSE_CSC_ACCUMULATION_V1,
