@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the preregistered SmolLM2 weight qualification protocol.
 pub const NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROTOCOL_VERSION: u32 = 1;
+pub const NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TEXT: &str = "Gravity is";
 pub const NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TOKEN_IDS: [u32; 3] = [22_007, 6_463, 314];
 pub const NNIS_SMOLLM2_WEIGHT_QUALIFICATION_EXPECTED_GREEDY_TOKEN_IDS: [u32; 2] = [260, 3_075];
 pub const NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS: usize = 2;
