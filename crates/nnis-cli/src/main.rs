@@ -1,5 +1,6 @@
 use nnis::{
-    current_process_gpu_memory, reference_weight_capability_manifest_v1, Context, Device,
+    current_process_gpu_memory, reference_weight_capability_manifest_v1,
+    ElasticStageBPreregistrationHandoffV1, Context, Device,
     GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
     QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2, QualifiedWeightHandoffV1,
     SampledBatchRequest, SamplingConfig, Stream, WeightCapabilityManifestV1,
@@ -18,7 +19,7 @@ use tokenizers::Tokenizer;
 
 const DEFAULT_DEVICE_ORDINAL: i32 = 0;
 const DEFAULT_MAX_NEW_TOKENS: usize = 16;
-const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n  nnis weight-capabilities [--json]\n  nnis validate-weight-campaign --input FILE [--json]\n  nnis validate-weight-campaign-artifact --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-capabilities --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-capabilities-v2 --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-handoff --input FILE --tokenizer FILE [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.\n\n`weight-capabilities` is CUDA-independent and prints the versioned fixed-baseline capability manifest. It distinguishes storage/accounting and isolated projection support from full-model qualification; the latter remains false until separately evidenced.\n\n`validate-weight-campaign` is CUDA-independent. It reads a versioned WeightFullModelCampaignV1 JSON artifact, revalidates same-commit/same-checkpoint INT4+INT2+sparse evidence, and emits the derived Stage-B qualification bundle only when every contract passes.\n\n`validate-weight-campaign-artifact` additionally validates the frozen recipe and verifies the concrete tokenizer basename and SHA-256 before emitting the Stage-B bundle.\n\n`qualified-weight-capabilities` performs the same artifact/tokenizer verification and emits the evidence-bound qualified backend capability record for downstream preregistration.\n\n`qualified-weight-capabilities-v2` consumes the environment-bound campaign artifact and preserves the validated CUDA environment in the downstream capability record.\n\n`qualified-weight-handoff` emits the immutable downstream handoff joining that capability record to the SHA-256 fingerprint of the exact physical campaign artifact.";
+const USAGE: &str = "Usage:\n  nnis generate --model DIR --tokenizer FILE --prompt TEXT [--device N] [--max-new-tokens N] [--sample --seed U64] [--temperature F] [--top-k N] [--top-p F] [--stream]\n  nnis generate-batch --model DIR --tokenizer FILE --prompt TEXT [--prompt TEXT ...] --seed U64 [--seed U64 ...] [--device N] [--max-new-tokens N] [--temperature F] [--top-k N] [--top-p F] [--json]\n  nnis nvml-process-memory [--device N] [--json]\n  nnis weight-capabilities [--json]\n  nnis validate-weight-campaign --input FILE [--json]\n  nnis validate-weight-campaign-artifact --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-capabilities --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-capabilities-v2 --input FILE --tokenizer FILE [--json]\n  nnis qualified-weight-handoff --input FILE --tokenizer FILE [--json]\n  nnis elastic-stage-b-handoff --input FILE --tokenizer FILE [--json]\n\nDefault decoding on `generate` is greedy (unchanged). Opt-in `--sample` requires `--seed` and uses host-visible NNML1 SamplingConfig. Optional `--temperature`, `--top-k`, and `--top-p` apply only with `--sample`. `--stream` is valid only with `--sample` and prints each decoded token piece as it is emitted. CUDA device ordinal defaults to 0.\n\n`generate-batch` is a fail-closed thin CLI over SampledSessionBatch / SampledBatchRequest. It requires one `--seed` per `--prompt` (no silent seed reuse). Shared optional `--temperature` / `--top-k` / `--top-p` apply to every request. Human text by default; `--json` emits versioned JSON. Host-orchestrated independent sessions in deterministic index order — not fused kernels, overlapping CUDA streams, or concurrent multi-session overlap claims.\n\n`nvml-process-memory` is a fail-closed, read-only NVML process-scoped usedGpuMemory debug surface for this PID on the selected CUDA device (default 0). Human text by default; `--json` emits versioned JSON with schema_version. It does not claim physical residency, weight-only attribution, or performance.\n\n`weight-capabilities` is CUDA-independent and prints the versioned fixed-baseline capability manifest. It distinguishes storage/accounting and isolated projection support from full-model qualification; the latter remains false until separately evidenced.\n\n`validate-weight-campaign` is CUDA-independent. It reads a versioned WeightFullModelCampaignV1 JSON artifact, revalidates same-commit/same-checkpoint INT4+INT2+sparse evidence, and emits the derived Stage-B qualification bundle only when every contract passes.\n\n`validate-weight-campaign-artifact` additionally validates the frozen recipe and verifies the concrete tokenizer basename and SHA-256 before emitting the Stage-B bundle.\n\n`qualified-weight-capabilities` performs the same artifact/tokenizer verification and emits the evidence-bound qualified backend capability record for downstream preregistration.\n\n`qualified-weight-capabilities-v2` consumes the environment-bound campaign artifact and preserves the validated CUDA environment in the downstream capability record.\n\n`qualified-weight-handoff` emits the immutable downstream handoff joining that capability record to the SHA-256 fingerprint of the exact physical campaign artifact.\n\n`elastic-stage-b-handoff` wraps that immutable backend handoff for Memorithm/ElasticXxx#29 and explicitly keeps both development measurement authorization and final-test access false until the downstream preregistration is updated.";
 
 #[derive(Debug, PartialEq)]
 struct GenerateArgs {
@@ -92,6 +93,7 @@ enum Command {
     QualifiedWeightCapabilities(QualifiedWeightCapabilitiesArgs),
     QualifiedWeightCapabilitiesV2(QualifiedWeightCapabilitiesArgs),
     QualifiedWeightHandoff(QualifiedWeightCapabilitiesArgs),
+    ElasticStageBHandoff(QualifiedWeightCapabilitiesArgs),
 }
 
 #[derive(Debug, Serialize)]
@@ -201,6 +203,9 @@ where
     }
     if command == "qualified-weight-handoff" {
         return parse_qualified_weight_handoff_args(arguments);
+    }
+    if command == "elastic-stage-b-handoff" {
+        return parse_elastic_stage_b_handoff_args(arguments);
     }
     if command == "generate-batch" {
         return parse_generate_batch_args(arguments);
@@ -479,6 +484,20 @@ where
     }))
 }
 
+fn parse_elastic_stage_b_handoff_args<I>(arguments: I) -> Result<Command, String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let command = parse_qualified_weight_capabilities_args(arguments)?;
+    match command {
+        Command::QualifiedWeightCapabilities(arguments) => {
+            Ok(Command::ElasticStageBHandoff(arguments))
+        }
+        Command::Help => Ok(Command::Help),
+        _ => Err("internal elastic-stage-b-handoff parser mismatch".to_string()),
+    }
+}
+
 fn parse_qualified_weight_handoff_args<I>(arguments: I) -> Result<Command, String>
 where
     I: IntoIterator<Item = String>,
@@ -708,6 +727,48 @@ fn validate_weight_campaign(arguments: &ValidateWeightCampaignArgs) -> Result<St
         )
     })?;
     validate_weight_campaign_text(&raw, arguments.json)
+}
+
+fn elastic_stage_b_handoff(
+    arguments: &QualifiedWeightCapabilitiesArgs,
+) -> Result<String, String> {
+    let raw = fs::read_to_string(&arguments.input).map_err(|error| {
+        format!(
+            "failed to read weight campaign artifact v2 JSON {:?}: {error}",
+            arguments.input
+        )
+    })?;
+    let artifact: WeightFullModelCampaignArtifactV2 =
+        serde_json::from_str(&raw).map_err(|error| {
+            format!("failed to parse WeightFullModelCampaignArtifactV2 JSON: {error}")
+        })?;
+    artifact
+        .validate()
+        .map_err(|error| format!("invalid full-model weight campaign artifact v2: {error}"))?;
+    artifact
+        .verify_tokenizer_file(&arguments.tokenizer)
+        .map_err(|error| format!("tokenizer verification failed: {error}"))?;
+    let handoff = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact)
+        .map_err(|error| format!("failed to derive Elastic Stage-B handoff: {error}"))?;
+    if arguments.json {
+        serde_json::to_string_pretty(&handoff)
+            .map_err(|error| format!("failed to serialize Elastic Stage-B handoff: {error}"))
+    } else {
+        Ok(format!(
+            "NNIS Elastic Stage-B handoff valid\nconsumer: {}\nartifact_sha256: {}\nnnis_commit: {}\nbackend_ready_for_preregistration: true\ndownstream_preregistration_update_required: true\ndevelopment_measurement_authorized: false\nfinal_test_access_authorized: false\nfinal_test_partition: {}",
+            handoff.consumer,
+            handoff
+                .qualified_weight_handoff
+                .artifact_fingerprint
+                .artifact_json_sha256,
+            handoff
+                .qualified_weight_handoff
+                .qualified_capability
+                .capability
+                .nnis_commit,
+            handoff.final_test_partition
+        ))
+    }
 }
 
 fn qualified_weight_handoff(arguments: &QualifiedWeightCapabilitiesArgs) -> Result<String, String> {
@@ -1316,6 +1377,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Command::ElasticStageBHandoff(arguments) => match elastic_stage_b_handoff(&arguments) {
+            Ok(rendered) => {
+                println!("{rendered}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("nnis elastic-stage-b-handoff: {error}");
+                ExitCode::FAILURE
+            }
+        },
         Command::WeightCapabilities(arguments) => {
             let manifest = reference_weight_capability_manifest_v1();
             if let Err(error) = manifest.validate() {
@@ -1580,6 +1651,32 @@ mod tests {
                 json: false,
             })
         );
+    }
+
+    #[test]
+    fn elastic_stage_b_handoff_parser_requires_artifact_and_tokenizer() {
+        assert_eq!(
+            parse_args(strings(&[
+                "elastic-stage-b-handoff",
+                "--input",
+                "/tmp/artifact-v2.json",
+                "--tokenizer",
+                "/tmp/tokenizer.json",
+                "--json",
+            ]))
+            .unwrap(),
+            Command::ElasticStageBHandoff(QualifiedWeightCapabilitiesArgs {
+                input: PathBuf::from("/tmp/artifact-v2.json"),
+                tokenizer: PathBuf::from("/tmp/tokenizer.json"),
+                json: true,
+            })
+        );
+        assert!(parse_args(strings(&[
+            "elastic-stage-b-handoff",
+            "--input",
+            "/tmp/artifact-v2.json",
+        ]))
+        .is_err());
     }
 
     #[test]
