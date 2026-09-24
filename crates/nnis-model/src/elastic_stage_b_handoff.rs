@@ -109,8 +109,7 @@ mod tests {
             physical_execution_observed: true,
             generated_token_count: 4,
             generated_token_ids_sha256:
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                    .to_string(),
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
             non_finite_output_observed: false,
             serialized_representation_bytes: serialized,
             logical_tensor_references: 1,
@@ -168,18 +167,15 @@ mod tests {
 
     #[test]
     fn elastic_handoff_rejects_authorization_or_consumer_drift() {
-        let mut record =
-            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
+        let mut record = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.development_measurement_authorized = true;
         assert!(record.validate().is_err());
 
-        let mut record =
-            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
+        let mut record = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.consumer = "other".to_string();
         assert!(record.validate().is_err());
 
-        let mut record =
-            ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
+        let mut record = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact()).unwrap();
         record.final_test_partition = "open".to_string();
         assert!(record.validate().is_err());
     }
