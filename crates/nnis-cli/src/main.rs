@@ -2,9 +2,9 @@ use nnis::{
     current_process_gpu_memory, reference_weight_capability_manifest_v1, Context, Device,
     GenerationConfig, GenerationStreamControl, Model, NvmlProcessMemorySnapshotV1,
     QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2, QualifiedWeightHandoffV1,
-    SampledBatchRequest,
-    SamplingConfig, Stream, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
-    WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
+    SampledBatchRequest, SamplingConfig, Stream, WeightCapabilityManifestV1,
+    WeightFullModelCampaignArtifactV1, WeightFullModelCampaignArtifactV2,
+    WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
     NNIS_NVML_PROCESS_MEMORY_SNAPSHOT_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
 };
@@ -710,9 +710,7 @@ fn validate_weight_campaign(arguments: &ValidateWeightCampaignArgs) -> Result<St
     validate_weight_campaign_text(&raw, arguments.json)
 }
 
-fn qualified_weight_handoff(
-    arguments: &QualifiedWeightCapabilitiesArgs,
-) -> Result<String, String> {
+fn qualified_weight_handoff(arguments: &QualifiedWeightCapabilitiesArgs) -> Result<String, String> {
     let raw = fs::read_to_string(&arguments.input).map_err(|error| {
         format!(
             "failed to read weight campaign artifact v2 JSON {:?}: {error}",
