@@ -13,6 +13,73 @@ pub const NNIS_ELASTIC_STAGE_B_HANDOFF_VERSION: u32 = 1;
 pub const NNIS_ELASTIC_STAGE_B_CONSUMER: &str = "Memorithm/ElasticXxx#29";
 /// Machine-readable locked-partition state.
 pub const NNIS_ELASTIC_STAGE_B_FINAL_TEST_PARTITION_LOCKED: &str = "locked";
+/// Version of the explicit downstream preregistration packet.
+pub const NNIS_ELASTIC_STAGE_B_PREREGISTRATION_PACKET_VERSION: u32 = 1;
+
+/// Explicit source identity plus qualified handoff for Elastic Stage-B preregistration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElasticStageBPreregistrationPacketV1 {
+    pub schema_version: u32,
+    pub checkpoint_spec_name: String,
+    pub checkpoint_evidence_key: String,
+    pub source_repo: String,
+    pub source_revision: String,
+    pub source_model_sha256: String,
+    pub tokenizer_sha256: String,
+    pub handoff: ElasticStageBPreregistrationHandoffV1,
+}
+
+impl ElasticStageBPreregistrationPacketV1 {
+    pub fn from_artifact(artifact: &WeightFullModelCampaignArtifactV2) -> Result<Self> {
+        let handoff = ElasticStageBPreregistrationHandoffV1::from_artifact(artifact)?;
+        let packet = Self {
+            schema_version: NNIS_ELASTIC_STAGE_B_PREREGISTRATION_PACKET_VERSION,
+            checkpoint_spec_name: SMOLLM2_135M_BF16.name.to_string(),
+            checkpoint_evidence_key: SMOLLM2_135M_BF16.evidence_key(),
+            source_repo: SMOLLM2_135M_BF16.source_repo.to_string(),
+            source_revision: SMOLLM2_135M_BF16.source_revision.to_string(),
+            source_model_sha256: SMOLLM2_135M_BF16.source_model_sha256.to_string(),
+            tokenizer_sha256: artifact.campaign_artifact.tokenizer_sha256.clone(),
+            handoff,
+        };
+        packet.validate()?;
+        Ok(packet)
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.schema_version != NNIS_ELASTIC_STAGE_B_PREREGISTRATION_PACKET_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "Elastic Stage-B preregistration packet schema {}; supported version is {}",
+                self.schema_version, NNIS_ELASTIC_STAGE_B_PREREGISTRATION_PACKET_VERSION
+            )));
+        }
+        self.handoff.validate()?;
+        if self.checkpoint_spec_name != SMOLLM2_135M_BF16.name
+            || self.checkpoint_evidence_key != SMOLLM2_135M_BF16.evidence_key()
+            || self.source_repo != SMOLLM2_135M_BF16.source_repo
+            || self.source_revision != SMOLLM2_135M_BF16.source_revision
+            || self.source_model_sha256 != SMOLLM2_135M_BF16.source_model_sha256
+        {
+            return Err(NnisError::invalid_input(
+                "Elastic Stage-B preregistration packet checkpoint provenance drifted",
+            ));
+        }
+        if self.tokenizer_sha256
+            != self
+                .handoff
+                .qualified_weight_handoff
+                .qualified_capability
+                .capability
+                .tokenizer_sha256
+        {
+            return Err(NnisError::invalid_input(
+                "Elastic Stage-B preregistration packet tokenizer identity drifted",
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -163,6 +230,27 @@ mod tests {
             cuda_driver_minor: 0,
         };
         WeightFullModelCampaignArtifactV2::new(v1, environment).unwrap()
+    }
+
+    #[test]
+    fn preregistration_packet_exposes_exact_smollm2_source_identity() {
+        let packet = ElasticStageBPreregistrationPacketV1::from_artifact(&artifact()).unwrap();
+        packet.validate().unwrap();
+        assert_eq!(packet.checkpoint_spec_name, SMOLLM2_135M_BF16.name);
+        assert_eq!(packet.source_repo, SMOLLM2_135M_BF16.source_repo);
+        assert_eq!(packet.source_revision, SMOLLM2_135M_BF16.source_revision);
+        assert_eq!(
+            packet.source_model_sha256,
+            SMOLLM2_135M_BF16.source_model_sha256
+        );
+        assert_eq!(
+            packet.checkpoint_evidence_key,
+            SMOLLM2_135M_BF16.evidence_key()
+        );
+
+        let mut drifted = packet;
+        drifted.source_revision = "other".to_string();
+        assert!(drifted.validate().is_err());
     }
 
     #[test]
