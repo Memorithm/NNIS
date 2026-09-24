@@ -346,7 +346,10 @@ mod tests {
         let second = artifact.fingerprint().unwrap();
         assert_eq!(first, second);
         first.validate().unwrap();
-        assert_eq!(first.nnis_commit, artifact.campaign_artifact.campaign.nnis_commit);
+        assert_eq!(
+            first.nnis_commit,
+            artifact.campaign_artifact.campaign.nnis_commit
+        );
         assert_eq!(first.sm_arch, artifact.environment.sm_arch);
 
         let mut changed = artifact;
