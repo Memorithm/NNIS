@@ -69,8 +69,7 @@ impl SmolLm2WeightQualificationProtocolV1 {
             || self.prompt_token_ids != NNIS_SMOLLM2_WEIGHT_QUALIFICATION_PROMPT_TOKEN_IDS
             || self.expected_generated_token_ids
                 != NNIS_SMOLLM2_WEIGHT_QUALIFICATION_EXPECTED_GREEDY_TOKEN_IDS
-            || self.max_new_tokens
-                != NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS as u64
+            || self.max_new_tokens != NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS as u64
             || self.sparse_threshold.to_bits()
                 != NNIS_SMOLLM2_WEIGHT_QUALIFICATION_SPARSE_THRESHOLD.to_bits()
         {
@@ -107,11 +106,13 @@ mod tests {
         assert_eq!(protocol.expected_generated_token_ids, vec![260, 3_075]);
         assert_eq!(protocol.max_new_tokens, 2);
         assert_eq!(protocol.sparse_threshold.to_bits(), 0.05_f32.to_bits());
-        assert_eq!(protocol.recipe().unwrap().prompt_token_ids, protocol.prompt_token_ids);
+        assert_eq!(
+            protocol.recipe().unwrap().prompt_token_ids,
+            protocol.prompt_token_ids
+        );
 
         let encoded = serde_json::to_string(&protocol).unwrap();
-        let decoded: SmolLm2WeightQualificationProtocolV1 =
-            serde_json::from_str(&encoded).unwrap();
+        let decoded: SmolLm2WeightQualificationProtocolV1 = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, protocol);
     }
 
