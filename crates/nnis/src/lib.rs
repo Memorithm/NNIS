@@ -55,7 +55,8 @@ pub mod model {
         NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
     };
     pub use nnis_model::{
-        reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+        reference_weight_capability_manifest_v1, ElasticStageBPreregistrationHandoffV1,
+        Int2ReferenceModelStorageV1,
         Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1,
         QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2,
         QualifiedWeightHandoffV1, SparseCscReferenceMatrixV1, WeightCapabilityManifestV1,
@@ -99,7 +100,8 @@ pub use model::{
     NNIS_MODEL_FORMAT, NNIS_MODEL_MANIFEST, NNIS_MODEL_VERSION, NNIS_SAMPLING_POLICY_VERSION,
 };
 pub use nnis_model::{
-    reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
+    reference_weight_capability_manifest_v1, ElasticStageBPreregistrationHandoffV1,
+    Int2ReferenceModelStorageV1,
     Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1,
     QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2, QualifiedWeightHandoffV1,
     SparseCscReferenceMatrixV1, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
