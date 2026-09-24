@@ -58,8 +58,9 @@ pub mod model {
         reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
         Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1,
         QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2,
-        SparseCscReferenceMatrixV1, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
-        WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
+        QualifiedWeightHandoffV1, SparseCscReferenceMatrixV1, WeightCapabilityManifestV1,
+        WeightFullModelCampaignArtifactV1, WeightFullModelCampaignArtifactV2,
+        WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
         WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
         NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
     };
@@ -100,7 +101,7 @@ pub use model::{
 pub use nnis_model::{
     reference_weight_capability_manifest_v1, Int2ReferenceModelStorageV1,
     Int2ReferenceProjectionPlanV1, Int2ReferenceStorageSummaryV1,
-    QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2,
+    QualifiedWeightCapabilityRecordV1, QualifiedWeightCapabilityRecordV2, QualifiedWeightHandoffV1,
     SparseCscReferenceMatrixV1, WeightCapabilityManifestV1, WeightFullModelCampaignArtifactV1,
     WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
     WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
