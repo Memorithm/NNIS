@@ -1,10 +1,12 @@
 use nnis_model::{
     load_model_from_safetensors_f32, validate_finite_runtime_output, GeneratedTokenEvidenceV1,
     GenerationConfig, Int2DenseMaterializedModelV1, Int4DenseMaterializedModelV1,
-    PhysicalWeightExecutionObservationV1, SafetensorsLoadConfig, SparseDenseMaterializedModelV1,
-    WeightCampaignEnvironmentV1, WeightCampaignRecipeV1, WeightFullModelCampaignArtifactV1,
+    PhysicalWeightExecutionObservationV1, SafetensorsLoadConfig,
+    SmolLm2WeightQualificationProtocolV1, SparseDenseMaterializedModelV1,
+    WeightCampaignEnvironmentV1, WeightFullModelCampaignArtifactV1,
     WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1,
-    WeightFullModelExecutionEvidenceV1, SMOLLM2_135M_BF16,
+    WeightFullModelExecutionEvidenceV1, NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS,
+    SMOLLM2_135M_BF16,
 };
 use nnis_rt::{Context, Device, NnisError, Result, Stream};
 use sha2::{Digest, Sha256};
@@ -48,7 +50,7 @@ where
     let mut model_dir = None;
     let mut tokenizer = None;
     let mut prompt_ids = None;
-    let mut max_new_tokens = 8_usize;
+    let mut max_new_tokens = NNIS_SMOLLM2_WEIGHT_QUALIFICATION_MAX_NEW_TOKENS;
     let mut sparse_threshold = 0.05_f32;
     let mut output = None;
 
@@ -113,6 +115,34 @@ where
         sparse_threshold,
         output: output.ok_or_else(|| "missing --output FILE".to_string())?,
     })
+}
+
+fn validate_args_against_protocol(
+    args: &Args,
+    protocol: &SmolLm2WeightQualificationProtocolV1,
+) -> Result<()> {
+    protocol.validate()?;
+    if args.prompt_ids != protocol.prompt_token_ids {
+        return Err(NnisError::invalid_input(format!(
+            "SmolLM2 qualification prompt ids {:?} do not match preregistered {:?}",
+            args.prompt_ids, protocol.prompt_token_ids
+        )));
+    }
+    let max_new_tokens = u64::try_from(args.max_new_tokens)
+        .map_err(|_| NnisError::invalid_input("qualification generation length exceeds u64"))?;
+    if max_new_tokens != protocol.max_new_tokens {
+        return Err(NnisError::invalid_input(format!(
+            "SmolLM2 qualification generation length {max_new_tokens} does not match preregistered {}",
+            protocol.max_new_tokens
+        )));
+    }
+    if args.sparse_threshold.to_bits() != protocol.sparse_threshold.to_bits() {
+        return Err(NnisError::invalid_input(format!(
+            "SmolLM2 sparse threshold {} does not match preregistered {}",
+            args.sparse_threshold, protocol.sparse_threshold
+        )));
+    }
+    Ok(())
 }
 
 fn sha256_file(path: &Path) -> Result<String> {
@@ -218,6 +248,7 @@ fn observe_generation(
     model: &nnis_model::Model,
     prompt_ids: &[u32],
     max_new_tokens: usize,
+    expected_generated_token_ids: &[u32],
     nnis_commit: &str,
     runtime_entrypoint: &str,
 ) -> Result<PhysicalWeightExecutionObservationV1> {
@@ -225,6 +256,11 @@ fn observe_generation(
     let logits = session.prefill(prompt_ids)?;
     validate_finite_runtime_output("prefill_logits", &logits)?;
     let generated = session.generate(prompt_ids, GenerationConfig::fixed(max_new_tokens))?;
+    if generated != expected_generated_token_ids {
+        return Err(NnisError::invalid_input(format!(
+            "runtime entrypoint {runtime_entrypoint:?} generated {generated:?}; preregistered SmolLM2 greedy transcript is {expected_generated_token_ids:?}"
+        )));
+    }
     let generated_tokens = GeneratedTokenEvidenceV1::from_token_ids(&generated)?;
     PhysicalWeightExecutionObservationV1::new(
         nnis_commit,
@@ -240,6 +276,7 @@ fn run_int4(
     model_dir: &Path,
     prompt_ids: &[u32],
     max_new_tokens: usize,
+    expected_generated_token_ids: &[u32],
     commit: &str,
 ) -> Result<WeightFullModelExecutionEvidenceV1> {
     let loaded = load_source(context, stream, model_dir)?;
@@ -252,6 +289,7 @@ fn run_int4(
         model.model(),
         prompt_ids,
         max_new_tokens,
+        expected_generated_token_ids,
         commit,
         "Int4DenseMaterializedModelV1::model",
     )?;
@@ -264,6 +302,7 @@ fn run_int2(
     model_dir: &Path,
     prompt_ids: &[u32],
     max_new_tokens: usize,
+    expected_generated_token_ids: &[u32],
     commit: &str,
 ) -> Result<WeightFullModelExecutionEvidenceV1> {
     let loaded = load_source(context, stream, model_dir)?;
@@ -276,6 +315,7 @@ fn run_int2(
         model.model(),
         prompt_ids,
         max_new_tokens,
+        expected_generated_token_ids,
         commit,
         "Int2DenseMaterializedModelV1::model",
     )?;
@@ -289,6 +329,7 @@ fn run_sparse(
     model_dir: &Path,
     prompt_ids: &[u32],
     max_new_tokens: usize,
+    expected_generated_token_ids: &[u32],
     sparse_threshold: f32,
     commit: &str,
 ) -> Result<WeightFullModelExecutionEvidenceV1> {
@@ -303,6 +344,7 @@ fn run_sparse(
         model.model(),
         prompt_ids,
         max_new_tokens,
+        expected_generated_token_ids,
         commit,
         "SparseDenseMaterializedModelV1::model",
     )?;
@@ -311,6 +353,8 @@ fn run_sparse(
 
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let args = parse_args(std::env::args().skip(1)).map_err(NnisError::invalid_input)?;
+    let protocol = SmolLm2WeightQualificationProtocolV1::reference()?;
+    validate_args_against_protocol(&args, &protocol)?;
     verify_clean_git_worktree()?;
     let model_payload = args.model_dir.join("model.safetensors");
     SMOLLM2_135M_BF16.verify_model_file_sha256(&model_payload)?;
@@ -327,6 +371,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &args.model_dir,
         &args.prompt_ids,
         args.max_new_tokens,
+        &protocol.expected_generated_token_ids,
         &commit,
     )?;
     let int2 = run_int2(
@@ -343,17 +388,14 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &args.model_dir,
         &args.prompt_ids,
         args.max_new_tokens,
+        &protocol.expected_generated_token_ids,
         args.sparse_threshold,
         &commit,
     )?;
 
     let campaign = WeightFullModelCampaignV1::new(vec![int4, int2, sparse])?;
     campaign.qualification_bundle()?;
-    let recipe = WeightCampaignRecipeV1::new(
-        args.prompt_ids.clone(),
-        args.max_new_tokens,
-        args.sparse_threshold,
-    )?;
+    let recipe = protocol.recipe()?;
     let artifact_v1 = WeightFullModelCampaignArtifactV1::new(
         campaign,
         recipe,
@@ -383,6 +425,27 @@ mod tests {
         assert!(validate_git_status_output(" M crates/nnis-model/src/lib.rs\n").is_err());
         assert!(validate_git_status_output("?? local-model/\n").is_err());
         assert!(validate_git_status_output("A  generated-evidence.json\n").is_err());
+    }
+
+    #[test]
+    fn runner_arguments_must_match_preregistered_protocol() {
+        let protocol = SmolLm2WeightQualificationProtocolV1::reference().unwrap();
+        let args = Args {
+            model_dir: PathBuf::from("/tmp/model"),
+            tokenizer: PathBuf::from("/tmp/tokenizer.json"),
+            prompt_ids: protocol.prompt_token_ids.clone(),
+            max_new_tokens: usize::try_from(protocol.max_new_tokens).unwrap(),
+            sparse_threshold: protocol.sparse_threshold,
+            output: PathBuf::from("/tmp/campaign.json"),
+        };
+        validate_args_against_protocol(&args, &protocol).unwrap();
+
+        let mut drifted = Args {
+            prompt_ids: args.prompt_ids.clone(),
+            ..args
+        };
+        drifted.prompt_ids[0] += 1;
+        assert!(validate_args_against_protocol(&drifted, &protocol).is_err());
     }
 
     #[test]
