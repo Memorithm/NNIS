@@ -3,7 +3,9 @@
 //! NNIS can attest backend capability, but this record deliberately does not
 //! authorize Elastic development measurements or final-test access.
 
-use crate::{QualifiedWeightHandoffV1, WeightFullModelCampaignArtifactV2};
+use crate::{
+    QualifiedWeightHandoffV1, WeightFullModelCampaignArtifactV2, SMOLLM2_135M_BF16,
+};
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +56,18 @@ impl ElasticStageBPreregistrationHandoffV1 {
             )));
         }
         self.qualified_weight_handoff.validate()?;
+        let expected_checkpoint = SMOLLM2_135M_BF16.evidence_key();
+        if self
+            .qualified_weight_handoff
+            .qualified_capability
+            .capability
+            .exact_checkpoint
+            != expected_checkpoint
+        {
+            return Err(NnisError::invalid_input(format!(
+                "Elastic Stage-B handoff requires exact checkpoint {expected_checkpoint:?}"
+            )));
+        }
         if self.consumer != NNIS_ELASTIC_STAGE_B_CONSUMER {
             return Err(NnisError::invalid_input(
                 "Elastic Stage-B handoff consumer identity drifted",
@@ -103,7 +117,7 @@ mod tests {
             schema_version: NNIS_WEIGHT_FULL_MODEL_EVIDENCE_VERSION,
             family,
             representation_version: 1,
-            exact_checkpoint: "smollm2@sha256:test".to_string(),
+            exact_checkpoint: SMOLLM2_135M_BF16.evidence_key(),
             nnis_commit: "0123456789abcdef0123456789abcdef01234567".to_string(),
             runtime_entrypoint: format!("{family:?}::model"),
             physical_execution_observed: true,
@@ -163,6 +177,18 @@ mod tests {
         assert!(!record.final_test_access_authorized);
         assert_eq!(record.final_test_partition, "locked");
         assert_eq!(record.consumer, "Memorithm/ElasticXxx#29");
+    }
+
+    #[test]
+    fn elastic_handoff_rejects_non_preregistered_checkpoint() {
+        let artifact = artifact();
+        let mut handoff = ElasticStageBPreregistrationHandoffV1::from_artifact(&artifact).unwrap();
+        handoff
+            .qualified_weight_handoff
+            .qualified_capability
+            .capability
+            .exact_checkpoint = "other@sha256:test".to_string();
+        assert!(handoff.validate().is_err());
     }
 
     #[test]
