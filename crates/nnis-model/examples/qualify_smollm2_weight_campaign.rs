@@ -256,7 +256,7 @@ fn observe_generation(
     let logits = session.prefill(prompt_ids)?;
     validate_finite_runtime_output("prefill_logits", &logits)?;
     let generated = session.generate(prompt_ids, GenerationConfig::fixed(max_new_tokens))?;
-    if generated != expected_generated_token_ids {
+    if generated.as_slice() != expected_generated_token_ids {
         return Err(NnisError::invalid_input(format!(
             "runtime entrypoint {runtime_entrypoint:?} generated {generated:?}; preregistered SmolLM2 greedy transcript is {expected_generated_token_ids:?}"
         )));
@@ -380,6 +380,7 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         &args.model_dir,
         &args.prompt_ids,
         args.max_new_tokens,
+        &protocol.expected_generated_token_ids,
         &commit,
     )?;
     let sparse = run_sparse(
