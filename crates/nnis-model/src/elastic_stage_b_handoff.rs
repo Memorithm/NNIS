@@ -3,9 +3,7 @@
 //! NNIS can attest backend capability, but this record deliberately does not
 //! authorize Elastic development measurements or final-test access.
 
-use crate::{
-    QualifiedWeightHandoffV1, WeightFullModelCampaignArtifactV2, SMOLLM2_135M_BF16,
-};
+use crate::{QualifiedWeightHandoffV1, WeightFullModelCampaignArtifactV2, SMOLLM2_135M_BF16};
 use nnis_rt::{NnisError, Result};
 use serde::{Deserialize, Serialize};
 
