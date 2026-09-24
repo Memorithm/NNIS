@@ -11,6 +11,7 @@ mod da_luc_evidence;
 mod da_luc_plan;
 mod decoder_capabilities;
 mod dense_weight_materialization;
+mod elastic_stage_b_handoff;
 mod exact_checkpoint_spec;
 mod execution_transition;
 mod f16_attention_plan;
@@ -83,6 +84,10 @@ pub use dense_weight_materialization::{
     DenseWeightMaterializationEvidenceV1, DenseWeightMaterializationEvidenceV2,
     NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_V2_VERSION,
     NNIS_DENSE_WEIGHT_MATERIALIZATION_EVIDENCE_VERSION,
+};
+pub use elastic_stage_b_handoff::{
+    ElasticStageBPreregistrationHandoffV1, NNIS_ELASTIC_STAGE_B_CONSUMER,
+    NNIS_ELASTIC_STAGE_B_FINAL_TEST_PARTITION_LOCKED, NNIS_ELASTIC_STAGE_B_HANDOFF_VERSION,
 };
 pub use exact_checkpoint_spec::{
     ExactDecoderCheckpointSpec, NNIS_EXACT_DECODER_CHECKPOINT_SPEC_VERSION, SMOLLM2_135M_BF16,
