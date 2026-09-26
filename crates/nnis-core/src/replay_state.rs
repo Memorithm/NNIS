@@ -217,6 +217,8 @@ pub enum ReplayIdentityError {
     EmptyId { field: &'static str },
     /// One opaque identity exceeded the bounded contract.
     IdTooLong { field: &'static str, bytes: usize },
+    /// One opaque identity was not in canonical trimmed form.
+    NonCanonicalId { field: &'static str },
     /// Representation schema version zero is not valid.
     ZeroRepresentationSchemaVersion,
     /// Source range had start greater than end.
@@ -242,6 +244,9 @@ impl fmt::Display for ReplayIdentityError {
             Self::EmptyId { field } => write!(output, "{field} must not be empty"),
             Self::IdTooLong { field, bytes } => {
                 write!(output, "{field} uses {bytes} bytes, maximum is {MAX_REPLAY_ID_BYTES}")
+            }
+            Self::NonCanonicalId { field } => {
+                write!(output, "{field} must not have leading or trailing whitespace")
             }
             Self::ZeroRepresentationSchemaVersion => {
                 output.write_str("replay representation schema version must be non-zero")
@@ -272,8 +277,12 @@ impl fmt::Display for ReplayIdentityError {
 impl std::error::Error for ReplayIdentityError {}
 
 fn validate_id(field: &'static str, value: &str) -> Result<(), ReplayIdentityError> {
-    if value.trim().is_empty() {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
         return Err(ReplayIdentityError::EmptyId { field });
+    }
+    if trimmed != value {
+        return Err(ReplayIdentityError::NonCanonicalId { field });
     }
     if value.len() > MAX_REPLAY_ID_BYTES {
         return Err(ReplayIdentityError::IdTooLong {
@@ -347,6 +356,42 @@ mod tests {
         assert!(matches!(
             ReplayWindowRequestV1::new(identity, 63, 127),
             Err(ReplayIdentityError::WindowOutsideSource { .. })
+        ));
+    }
+
+    #[test]
+    fn replay_ids_must_be_canonical_trimmed_strings() {
+        assert!(matches!(
+            ReplayRepresentationIdentityV1::new(" rep", 1, 1),
+            Err(ReplayIdentityError::NonCanonicalId {
+                field: "representation_id"
+            })
+        ));
+        assert!(matches!(
+            ReplaySourceIdentityV1::new(
+                "cpu ",
+                "source",
+                0,
+                ReplayRepresentationIdentityV1::new("rep", 1, 1).unwrap(),
+                0,
+                1,
+            ),
+            Err(ReplayIdentityError::NonCanonicalId {
+                field: "provider_id"
+            })
+        ));
+        assert!(matches!(
+            ReplaySourceIdentityV1::new(
+                "cpu",
+                "\tsource",
+                0,
+                ReplayRepresentationIdentityV1::new("rep", 1, 1).unwrap(),
+                0,
+                1,
+            ),
+            Err(ReplayIdentityError::NonCanonicalId {
+                field: "source_id"
+            })
         ));
     }
 
