@@ -389,9 +389,7 @@ mod tests {
                 0,
                 1,
             ),
-            Err(ReplayIdentityError::NonCanonicalId {
-                field: "source_id"
-            })
+            Err(ReplayIdentityError::NonCanonicalId { field: "source_id" })
         ));
     }
 
