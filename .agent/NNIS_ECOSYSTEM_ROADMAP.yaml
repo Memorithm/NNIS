@@ -1,0 +1,25 @@
+schema_version: 1
+kind: nnis_ecosystem_roadmap
+status: active
+last_updated: "2026-09-27"
+repository: Memorithm/NNIS
+merge_policy: never_merge_this_file_to_default_branch_unless_user_explicitly_requests
+mission:
+  role: native_gpu_runtime_task_consumer
+  boundary: NNIS_owns_CUDA_runtime_and_kernel_semantics_Hub_owns_task_lifecycle
+ax_task_program:
+  external_reference: google_ax_architecture_only
+  objective: >-
+    Advertise and consume explicit GPU/runtime capabilities for task admission,
+    bind CUDA/NVRTC/device/toolchain identity to execution evidence and enforce
+    declared GPU/memory/time envelopes.
+  phases:
+    - AXNN1_define_truthful_GPU_backend_capability_descriptor
+    - AXNN2_bind_device_driver_NVRTC_and_kernel_identity
+    - AXNN3_reject_task_placement_when_required_GPU_capabilities_are_missing
+    - AXNN4_integrate_RemoteOps_host_capability_discovery
+    - AXNN5_integrate_ElasticXxx_resource_plans_inside_runtime_invariants
+  invariants:
+    - GPU_presence_is_measured_not_assumed
+    - task_success_does_not_establish_kernel_correctness
+    - hardware_claims_remain_exact_environment_scoped
