@@ -122,3 +122,12 @@ The explicit programme direction is vendor-neutral: new V888/SML/FLAT work must 
 For bounded replay, explicit cross-layer cache sharing, FP4 KV, or confidence-scheduled speculative verification, also read `deepseek_v41_kv_runtime_program_2026_09_24` in the off-main sovereignty roadmap.
 
 For new work in this programme the qualification order is CPU reference → WGPU portable GPU → optional existing CUDA cross-check. NNIS consumes model- or domain-supplied reuse plans; it must not invent cross-layer sharing semantics. FP4 and INT4 are distinct. Logical KV compaction is not physical-memory release. Speculative verification requires measured acceptance and runtime cost before any throughput claim.
+
+
+## AX-inspired isolated task execution
+
+Before work involving autonomous execution, generated or untrusted code, remote workers, task-scoped tool authority, workspace materialization, resource envelopes, network egress, sandboxing, checkpoint/suspend/resume, or cross-repository execution, also read:
+
+`origin/agent/ecosystem-roadmap:.agent/NNIS_ECOSYSTEM_ROADMAP.yaml`
+
+Google AX is an architectural reference only. The Memorithm contract is Rust-native: SciRust Hub owns task lifecycle/identity, RemoteOps owns concrete host enforcement, ElasticXxx owns adaptive resource policy, and this repository retains its domain authority. A supervised process must never be described as a hostile-code sandbox.
