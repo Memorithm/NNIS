@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: e0d2d3eca34428cfe02c5f006a06a9f8168b5012
+  main_head: eff0be40b890f12670aa428f38de19ea776a145a
   main_head_recorded_on: "2026-09-28"
   previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
@@ -275,16 +275,33 @@ main_repository_state:
           dense_CPU_reference_only; no_WGPU_or_CUDA_execution; logical_window_copy_is_not_physical_memory_release;
           no_memory_latency_throughput_or_quality_claim; no_DeepSeek_equivalence_claim
 
+      - id: dsv41_2_cross_layer_kv_reuse_plan_consumer
+        pull_request: 231
+        qualified_head: 696dc90ee84eaaa8cba6dcd7bfe60d7a6c4ce4a2
+        merge_commit: eff0be40b890f12670aa428f38de19ea776a145a
+        exact_head_ci: {run_id: 36390260469, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core CrossLayerKvReusePlanV1 (model-supplied, causal, non-chained,
+          per-component, never rewritten) plus nnis-cpu CpuCrossLayerKvBindingV1
+          resolving reusing layers to owner CpuReplaySourceV1 bit-exactly
+        record: docs/PORTABLE_CROSS_LAYER_KV_REUSE_PLAN_V1.md
+        claim_boundary: >-
+          logical_sharing_only_not_physical_memory_release; no_quality_latency_throughput_or_model_support_claim;
+          no_WGPU_or_CUDA_execution
+
 current_execution_order:
-  - id: DSV41_2_CROSS_LAYER_KV_REUSE_PLAN_CONSUMER
+  - id: DSV41_3_PORTABLE_FP4_E2M1_GROUP_SCALED_KV_REFERENCE
     status: selected_next_software
     action: >-
-      backend-neutral validation and resolution of a model-supplied versioned
-      cross-layer K/V reuse plan in nnis-core plus a CPU binding that resolves
-      each layer to owner replay sources; NNIS must not invent reuse semantics
+      CPU reference FP4 E2M1 group-scaled KV encode/decode with exact
+      effective-bits accounting (codes, scales, padding, metadata), distinct
+      from INT4, with a dense reference path retained
     claim_boundary: >-
-      plan_consumption_is_not_quality_memory_or_throughput_evidence;
-      logical_owner_count_is_not_physical_memory_release
+      FP4_and_INT4_are_distinct; nominal_bits_are_not_a_compression_result;
+      no_quality_memory_or_throughput_claim_without_real_model_campaign
+  - id: DSV41_2_CROSS_LAYER_KV_REUSE_PLAN_CONSUMER
+    status: completed_software
+    completed_pull_requests: [231]
   - id: DSV41_1_WGPU_COUNTERPART
     status: open_blocked_on_portable_WGPU_backend
     action: qualify a WGPU recent-window replay path against the merged CPU oracle once a WGPU backend exists (portable P3)
