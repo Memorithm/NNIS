@@ -23,6 +23,8 @@
 //! - device-resident DSV41 replay sources and cross-layer KV reuse bindings
 //!   mirroring the CPU references ([`replay::WgpuReplaySourceV1`],
 //!   [`replay::WgpuCrossLayerKvBindingV1`]).
+//! - integer-exact WGSL decode of FP4 E2M1 group-scaled KV blocks
+//!   ([`fp4::WgpuFp4E2M1KvBlockV1`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -37,6 +39,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::sync::{mpsc, Arc, Mutex};
 
+pub mod fp4;
 pub mod graph;
 mod memory;
 pub mod numerical;
