@@ -13,9 +13,9 @@ Status: **completed** (merged as PR #155 on main `a9a17ef`).
 
 ## Follow-on
 
-Next non-physical software selection:
-`docs/exec-plans/active/NNML1_GENERATE_BATCH_CLI.md`
-(SampledSessionBatch thin CLI; avoids conflict with in-flight #156 INT4 facade).
+Next non-physical software selection (since completed as PR #157):
+`docs/exec-plans/completed/NNML1_GENERATE_BATCH_CLI.md`
+(SampledSessionBatch thin CLI).
 
 ## Claim boundary (unchanged)
 

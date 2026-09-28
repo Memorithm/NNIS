@@ -2,8 +2,8 @@
 
 Status: **historical / completed bootstrap** (retained for chronology; not the
 active execution plan). Current non-physical software selection is recorded in
-`.agent/CURRENT_EXECUTION_STATUS.yaml` and
-`docs/exec-plans/active/NNML1_CLI_SAMPLED_STREAMING.md`.
+the `.agent/` ledger on the `agent/sovereignty-roadmap` branch; see
+`docs/exec-plans/README.md`.
 
 ## Current objective (historical)
 Turn validated CUDA foundation into usable NVIDIA-native inference substrate.

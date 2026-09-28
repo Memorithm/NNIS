@@ -14,9 +14,9 @@ Status: **completed** (merged as PR #137 on main `faab2ea`).
 ## Follow-on
 
 Library + single-session CLI shipped in #137. Later non-physical software
-selections included NVML process-memory CLI (#155). Next selected:
-`docs/exec-plans/active/NNML1_GENERATE_BATCH_CLI.md` (SampledSessionBatch thin
-CLI).
+selections included NVML process-memory CLI (#155). Next selected (since
+completed as PR #157): `docs/exec-plans/completed/NNML1_GENERATE_BATCH_CLI.md`
+(SampledSessionBatch thin CLI).
 
 ## Claim boundary (unchanged)
 

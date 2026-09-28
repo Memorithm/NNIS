@@ -1,5 +1,8 @@
 # NNML1 KV cache telemetry surface
 
+Status: **completed** (merged as PR #138 on main `8d19ca6`; versioned as schema
+v1 by PR #154 on main `c58ec1c`, see `NNML2_KV_LOGICAL_CACHE_TELEMETRY.md`).
+
 ## Current slice
 
 - expose `InferenceSession::kv_cache_telemetry` as a synchronizing read-only observer;
