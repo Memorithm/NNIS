@@ -4,12 +4,15 @@
 //! by explicit finite-F32 reference operations in [`numerical`]. Per-buffer
 //! limits are admission ceilings, not a promise of available RAM or a
 //! process-wide memory budget. General model scheduling remains separate.
+//! [`replay`] provides the dense DSV41-1 bounded recent-window replay reference.
 
 #![forbid(unsafe_code)]
 
 pub mod graph;
 
 pub mod numerical;
+
+pub mod replay;
 
 use core::ops::Range;
 
