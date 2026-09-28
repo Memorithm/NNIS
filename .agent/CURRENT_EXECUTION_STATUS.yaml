@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
+  main_head: 891c22681d4a15d1ce7fbcbb60fff93448452ed4
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
+  previous_recorded_main_head: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -448,6 +448,21 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
           sharing_is_logical_no_memory_residency_latency_or_throughput_claim
+      - id: portable_p3_wgpu_dsv41_fp4_e2m1_decode
+        pull_request: 242
+        qualified_head: 3e0e8d9319e1f5ac8de25aa58d2109d0fbd2d079
+        merge_commit: 891c22681d4a15d1ce7fbcbb60fff93448452ed4
+        exact_head_ci: {run_id: 36398100653, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 23}
+        summary: >-
+          WgpuFp4E2M1KvBlockV1 with host from_parts validation identical in order and
+          variants to CpuFp4E2M1KvBlockV1::from_parts and a WGSL decode artifact using
+          integer arithmetic only (exact m*S product, single round-to-nearest-even to
+          binary32 including subnormals, sign last); bit-exact with the CPU decode
+          across all E8M0 exponents, 4096 F32 scales and CPU-encoded padded blocks
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
+          no_memory_residency_model_quality_latency_or_throughput_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -466,9 +481,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_slices_merged_PR_237_238_239_240_241_selected_next_software
-    completed_pull_requests: [237, 238, 239, 240, 241]
-    next_slice: DSV41_WGPU_FP4_E2M1_decode_then_speculative_verification
+    status: in_progress_slices_merged_PR_237_238_239_240_241_242_selected_next_software
+    completed_pull_requests: [237, 238, 239, 240, 241, 242]
+    next_slice: DSV41_WGPU_greedy_speculative_verification_PR_243
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
