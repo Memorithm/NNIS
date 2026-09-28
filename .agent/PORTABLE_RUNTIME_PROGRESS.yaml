@@ -383,6 +383,20 @@ completed:
       - ARM64_execution_or_qualification
       - WGPU_or_GPU_qualification
       - latency_cost_or_throughput
+  P10_evidence_cli_surface:
+    pull_request: 247
+    qualified_head: b136b6fb911d3d01d4cfcddd14e2e4d4c234b9f8
+    merge_commit: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
+    status: complete_nnis_evidence_CLI_over_library_suites_no_record
+    exact_head_ci: {run_id: 36403748529, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - nnis_cpu_evidence_run_cpu_host_suites_oracle_cpu_host_evidence_record
+      - nnis_wgpu_evidence_run_wgpu_suites_wgpu_adapter_evidence_record
+      - nnis_evidence_cpu_host_wgpu_adapter_validate
+    not_claimed:
+      - hardware_or_ARM64_evidence
+      - latency_cost_or_throughput
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-

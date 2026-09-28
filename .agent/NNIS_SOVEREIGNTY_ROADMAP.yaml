@@ -1111,3 +1111,17 @@ v888_portable_evidence_2026_09_28_p10_cpu_host_evidence_harness:
     - CPU_verdict_does_not_qualify_WGPU_or_any_GPU
     - no_performance_claim
   next: human_runs_cpu_host_evidence_on_an_ARM64_host_and_submits_the_record_for_review
+v888_portable_evidence_2026_09_28_p10_evidence_cli:
+  status: NNIS_P10_evidence_harnesses_exposed_as_nnis_evidence_CLI_no_record_exists
+  pull_request: https://github.com/Memorithm/NNIS/pull/247
+  qualified_head: b136b6fb911d3d01d4cfcddd14e2e4d4c234b9f8
+  merge_revision: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
+  exact_head_ci: {run_id: 36403748529, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - evidence_suites_moved_into_nnis_cpu_and_nnis_wgpu_libraries
+    - nnis_evidence_cpu_host_wgpu_adapter_validate_CLI
+  exclusions:
+    - no_hardware_ARM64_or_reviewed_record
+    - llvmpipe_runs_are_code_path_only
+    - no_performance_claim
+  next: human_runs_nnis_evidence_cpu_host_on_ARM64_and_nnis_evidence_wgpu_adapter_on_a_real_adapter

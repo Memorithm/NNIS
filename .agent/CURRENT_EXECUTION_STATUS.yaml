@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
+  main_head: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 70edaa1c11d26b414344d9b0ba97c5646ec91745
+  previous_recorded_main_head: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -526,6 +526,23 @@ main_repository_state:
           harness_and_format_only_no_reviewed_host_record_committed;
           no_ARM64_execution_performed_aarch64_cargo_check_only;
           CPU_verdict_does_not_qualify_WGPU; no_performance_claim
+      - id: portable_evidence_cli_surface
+        pull_request: 247
+        qualified_head: b136b6fb911d3d01d4cfcddd14e2e4d4c234b9f8
+        merge_commit: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
+        exact_head_ci: {run_id: 36403748529, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 28}
+        summary: >-
+          CPU host suites and integer oracle moved into nnis-cpu::evidence
+          (run_cpu_host_suites, oracle, cpu_host_evidence_record) and WGPU parity
+          suites into nnis-wgpu::evidence (run_wgpu_suites,
+          wgpu_adapter_evidence_record; nnis-cpu now a normal dependency of
+          nnis-wgpu); CUDA-independent nnis evidence cpu-host|wgpu-adapter|validate
+          CLI emitting only structurally valid records (--json/--out), SKIP exit 3
+          without an adapter, kind-detecting re-validation
+        record: docs/PORTABLE_CPU_HOST_EVIDENCE_V1.md
+        claim_boundary: >-
+          software_surface_only_no_hardware_ARM64_or_reviewed_record;
+          llvmpipe_code_path_only; no_performance_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -556,7 +573,7 @@ current_execution_order:
       WGPU_compilation_or_software_adapter_runs_are_not_hardware_parity_or_performance_evidence
   - id: PORTABLE_P10_VENDOR_NEUTRAL_QUALIFICATION_HARNESSES
     status: software_harnesses_complete_PR_244_WGPU_adapter_PR_246_CPU_host_human_runs_open
-    completed_pull_requests: [244, 246]
+    completed_pull_requests: [244, 246, 247]
     next_slice: human_runs_cpu_host_evidence_on_an_ARM64_host_and_wgpu_adapter_evidence_on_a_real_adapter_then_review_records
     claim_boundary: no_record_may_be_cited_before_review_software_adapter_and_dirty_worktree_records_are_not_qualification
   - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
