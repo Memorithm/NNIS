@@ -904,3 +904,23 @@ deepseek_v41_runtime_evidence_2026_09_28_dsv41_4:
     - WGPU_counterpart_after_portable_WGPU_backend_exists
   next: NNIS_DSV41_5_real_model_quality_memory_latency_and_throughput_campaign_requires_physical_execution
   next_software_candidate: DSV41_5_campaign_preregistration_and_fail_closed_evidence_validator_without_results
+
+deepseek_v41_runtime_evidence_2026_09_28_dsv41_5_preregistration:
+  status: DSV41_5_preregistration_and_evidence_validator_merged_campaign_not_executed
+  pull_request: https://github.com/Memorithm/NNIS/pull/234
+  qualified_head: e7676057c4508f6c44ae82705278b93c83c2fb2c
+  merge_revision: c577f01eb0ecf84420fd316ffd13492f6faf9311
+  exact_head_ci: {run_id: 36391854129, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - versioned_preregistration_exact_model_prompt_suite_backend_arms_grid_repetitions
+    - exactly_one_dense_baseline_arm_and_at_least_one_candidate_arm
+    - one_memory_metric_shared_by_all_arms_and_caller_declared_quality_budget
+    - evidence_requires_quality_memory_latency_distribution_and_tokens_per_second_together_per_cell
+    - exact_clean_green_CI_provenance_and_hardware_identity_required
+    - synthetic_fixture_records_rejected_as_non_evidence
+  exclusions:
+    - no_campaign_executed
+    - no_results_or_measured_numbers_recorded
+    - no_promotion_comparison_or_ratio_computation
+    - no_JSON_serialization_or_hashing_in_v1
+  next: NNIS_DSV41_5_real_model_campaign_requires_physical_execution_on_declared_environment

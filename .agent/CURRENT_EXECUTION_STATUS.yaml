@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: c22230979f8be930382130d14d95e4d60b4f7a32
+  main_head: c577f01eb0ecf84420fd316ffd13492f6faf9311
   main_head_recorded_on: "2026-09-28"
   previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
@@ -320,6 +320,21 @@ main_repository_state:
         claim_boundary: >-
           counts_only_no_speed_up_claim; NNIS_drafts_nothing_and_invents_no_confidence_policy;
           not_wired_into_InferenceSession; greedy_acceptance_only_in_v1; no_WGPU_or_CUDA_execution
+      - id: dsv41_5_campaign_preregistration_and_evidence_validator
+        pull_request: 234
+        qualified_head: e7676057c4508f6c44ae82705278b93c83c2fb2c
+        merge_commit: c577f01eb0ecf84420fd316ffd13492f6faf9311
+        exact_head_ci: {run_id: 36391854129, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core Dsv41CampaignPreregistrationV1 and fail-closed
+          validate_dsv41_evidence requiring quality, exact shared memory metric,
+          decode-latency distribution and tokens/s together per preregistered
+          cell, exact clean green-CI provenance and hardware identity;
+          SyntheticFixture records are never evidence
+        record: docs/DSV41_5_CAMPAIGN_PREREGISTRATION_V1.md
+        claim_boundary: >-
+          software_contract_only_no_campaign_executed_no_results_recorded;
+          validated_record_is_not_promotion_or_comparison; synthetic_values_only_in_cfg_test
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -329,14 +344,16 @@ current_execution_order:
       exact memory, decode latency distribution and tokens/s together at an
       exact clean green head; cannot be completed by software-only agents
     claim_boundary: no_result_may_be_recorded_without_actual_execution_on_the_declared_environment
+    prerequisite_software: preregistration_and_validator_merged_PR_234_JSON_IO_and_campaign_runner_still_open
   - id: DSV41_5_CAMPAIGN_PREREGISTRATION_SOFTWARE
-    status: candidate_next_software
+    status: completed_software
+    completed_pull_requests: [234]
     action: >-
       software-only versioned preregistration/evidence schema and fail-closed
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
-    status: candidate_next_software
+    status: selected_next_software
     action: define_versioned_portable_kernel_artifact_binding_and_capability_identity_per_PORTABLE_RUNTIME_PROGRESS
   - id: DSV41_WGPU_COUNTERPARTS
     status: open_blocked_on_portable_WGPU_backend
