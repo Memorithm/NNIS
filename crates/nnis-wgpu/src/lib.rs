@@ -9,7 +9,12 @@
 //!   [`KernelArtifactV1::bind`](nnis_core::kernel_artifact::KernelArtifactV1::bind),
 //!   plus the WGPU-specific per-binding limits that set does not express;
 //! - one tiny WGSL kernel (finite F32 elementwise add) carried as a P4 kernel
-//!   artifact and executed only after fail-closed binding.
+//!   artifact and executed only after fail-closed binding;
+//! - the portable [`PortableDevice`](nnis_core::PortableDevice) /
+//!   [`PortableQueue`](nnis_core::PortableQueue) /
+//!   [`PortableBuffer`](nnis_core::PortableBuffer) /
+//!   [`PortableFence`](nnis_core::PortableFence) contracts over WGPU buffers
+//!   ([`WgpuBuffer`], [`WgpuQueue`], [`WgpuFence`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -22,7 +27,11 @@ use core::fmt;
 use std::borrow::Cow;
 use std::future::Future;
 use std::pin::pin;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
+
+mod memory;
+
+pub use memory::{WgpuBuffer, WgpuFence, WgpuQueue};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 
@@ -262,8 +271,9 @@ pub struct WgpuDevice {
     backend_id: BackendId,
     capabilities: CapabilitySet,
     limits: wgpu::Limits,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    token: u64,
 }
 
 impl fmt::Debug for WgpuDevice {
@@ -281,7 +291,15 @@ impl WgpuDevice {
     /// Discover the default adapter for the primary native backends (or those
     /// selected by `WGPU_BACKEND`) and create a device with the adapter's full
     /// limits. Returns `Ok(None)` when no adapter exists.
+    ///
+    /// Discovery is serialized process-wide: some drivers (observed with the
+    /// Mesa llvmpipe Vulkan ICD) are not safe under concurrent instance and
+    /// device creation.
     pub fn discover() -> Result<Option<Self>, WgpuBackendError> {
+        static DISCOVERY: Mutex<()> = Mutex::new(());
+        let _guard = DISCOVERY
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let backends = wgpu::util::backend_bits_from_env().unwrap_or(wgpu::Backends::PRIMARY);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
@@ -317,8 +335,9 @@ impl WgpuDevice {
             backend_id,
             capabilities,
             limits,
-            device,
-            queue,
+            device: Arc::new(device),
+            queue: Arc::new(queue),
+            token: memory::next_device_token(),
         }))
     }
 
