@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
+  main_head: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
+  previous_recorded_main_head: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -351,6 +351,23 @@ main_repository_state:
         claim_boundary: >-
           binding_executes_nothing; not_correctness_parity_or_performance_evidence;
           no_WGPU_backend_or_WGSL_validation; no_vendor_dependency
+      - id: dsv41_5_campaign_json_io
+        pull_request: 236
+        qualified_head: ea37204661cd215153a14a66e1593284c75e76fe
+        merge_commit: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
+        exact_head_ci: {run_id: 36392787583, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core dsv41_campaign_json versioned (kind tag + schema_version 1)
+          JSON read/write for Dsv41CampaignPreregistrationV1 and
+          Dsv41CampaignEvidenceV1 over a hand-written crate-private strict
+          RFC 8259 parser/writer (nnis-core stays dependency-free; serde_json
+          exists only in non-portable nnis-model/bench/cli); fail closed on
+          unknown/missing fields, wrong kind/version, bad integers, non-finite
+          numbers, duplicate keys; exact round-trip and byte-identical re-encode
+        record: docs/DSV41_5_CAMPAIGN_JSON_V1.md
+        claim_boundary: >-
+          serialization_only_no_campaign_executed_no_results; parsing_evidence_does_not_validate_it;
+          synthetic_values_only_in_cfg_test
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -360,12 +377,12 @@ current_execution_order:
       exact memory, decode latency distribution and tokens/s together at an
       exact clean green head; cannot be completed by software-only agents
     claim_boundary: no_result_may_be_recorded_without_actual_execution_on_the_declared_environment
-    prerequisite_software: preregistration_and_validator_merged_PR_234_JSON_IO_and_campaign_runner_still_open
+    prerequisite_software: preregistration_validator_PR_234_and_JSON_IO_PR_236_merged_campaign_runner_still_open
   - id: DSV41_5_CAMPAIGN_PREREGISTRATION_SOFTWARE
     status: completed_software
-    completed_pull_requests: [234]
+    completed_pull_requests: [234, 236]
     action: >-
-      software-only versioned preregistration/evidence schema and fail-closed
+      software-only versioned preregistration/evidence schema, JSON I/O and fail-closed
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION

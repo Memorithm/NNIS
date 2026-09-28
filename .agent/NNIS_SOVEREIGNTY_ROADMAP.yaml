@@ -923,6 +923,25 @@ deepseek_v41_runtime_evidence_2026_09_28_dsv41_5_preregistration:
     - no_results_or_measured_numbers_recorded
     - no_promotion_comparison_or_ratio_computation
     - no_JSON_serialization_or_hashing_in_v1
+  superseded_exclusion: JSON_serialization_added_by_PR_236
+  next: NNIS_DSV41_5_real_model_campaign_requires_physical_execution_on_declared_environment
+
+deepseek_v41_runtime_evidence_2026_09_28_dsv41_5_json_io:
+  status: DSV41_5_versioned_fail_closed_JSON_IO_merged_campaign_not_executed
+  pull_request: https://github.com/Memorithm/NNIS/pull/236
+  qualified_head: ea37204661cd215153a14a66e1593284c75e76fe
+  merge_revision: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
+  exact_head_ci: {run_id: 36392787583, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - kind_tagged_schema_version_1_JSON_for_preregistration_and_evidence
+    - hand_written_strict_RFC_8259_parser_writer_nnis_core_dependency_free_MSRV_1_77
+    - fail_closed_unknown_missing_fields_wrong_kind_version_types_integers_non_finite_duplicate_keys
+    - exact_round_trip_and_byte_identical_re_encode
+  exclusions:
+    - no_campaign_executed
+    - no_results_or_measured_numbers_recorded
+    - parsing_evidence_does_not_validate_it
+    - no_file_hashing_or_campaign_runner
   next: NNIS_DSV41_5_real_model_campaign_requires_physical_execution_on_declared_environment
 
 v888_portable_evidence_2026_09_28_p4:
