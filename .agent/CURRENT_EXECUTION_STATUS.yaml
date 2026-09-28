@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_agent_current_execution_status
 status: active
-last_updated: "2026-09-21"
+last_updated: "2026-09-28"
 repository: Memorithm/NNIS
 merge_policy: never_merge_this_file_to_main_unless_user_explicitly_requests
 
@@ -22,7 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
+  main_head: e0d2d3eca34428cfe02c5f006a06a9f8168b5012
+  main_head_recorded_on: "2026-09-28"
+  previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -215,13 +217,91 @@ main_repository_state:
         pull_request: 136
         summary: TinyLlama P0 oracle alignment with F16 LM-head contract
 
+  post_1efbf18_software_merges_on_main:
+    status: merged_software_only_physical_gates_still_open
+    recorded_on: "2026-09-28"
+    note: >-
+      Software/contract merges recorded through main e0d2d3e. No physical Thor,
+      WGPU, or other hardware campaign results are claimed by any entry here.
+    entries:
+      - id: nnml2_nvml_process_memory_cli
+        pull_request: 155
+        merge_commit: a9a17ef8a3954576b6ef2bd07d88c3b3241edbbd
+        summary: read-only fail-closed nnis nvml-process-memory CLI over the existing NVML snapshot contract
+        claim_boundary: CLI_exposure_is_not_process_wide_VRAM_qualification
+      - id: nnml2_int4_facade_reexport
+        pull_request: 156
+        merge_commit: 2e994083c1e5a6c310d0ed7ac3b0b4670b55f1a8
+        summary: INT4 projection contracts re-exported on the nnis facade
+        claim_boundary: re_export_is_not_INT4_execution_or_quality_evidence
+      - id: nnml1_generate_batch_cli
+        pull_request: 157
+        merge_commit: 1f8aeaa63167757f8a34e09185ae41d4c6a51c4f
+        summary: fail-closed nnis generate-batch CLI over SampledSessionBatch
+        ci_note: >-
+          merged_2026_09_23_while_its_head_Rust_quality_CPU_check_was_FAILURE;
+          later_main_CI_runs_are_green_including_90c9902_and_e0d2d3e_PR_head
+        claim_boundary: host_visible_batch_CLI_is_not_serving_performance_or_physical_parity
+      - id: nnml2_weight_campaign_contracts
+        pull_requests: [202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224]
+        summary: >-
+          weight-campaign recipe/artifact/environment/fingerprint, qualified
+          weight capability and handoff records, Elastic Stage-B preregistration
+          packet, SmolLM2 protocol binding and tokenizer parity (authored by others)
+        claim_boundary: software_contracts_only_no_physical_campaign_executed_here
+      - id: dsv41_0_replay_state_provider_identity
+        pull_requests: [226, 227]
+        merge_commits:
+          - e053fe00f5b6c85740059b828cc64ce964d524fb
+          - acef50c459f2dfa1498b354e7759e8f96d87c21a
+        summary: backend-neutral replay provider/source/generation/representation/epoch identity with canonical-id rejection
+        claim_boundary: identity_contract_only_no_payload_reconstruction_or_execution
+      - id: ax_isolated_task_bootstrap
+        pull_request: 229
+        merge_commit: 90c9902f707743ea4d31d0aeb803302979c16edd
+        summary: AGENTS.md points isolated-task/autonomous-execution work to origin/agent/ecosystem-roadmap:.agent/NNIS_ECOSYSTEM_ROADMAP.yaml
+        claim_boundary: supervised_process_is_not_a_hostile_code_sandbox
+      - id: dsv41_1_cpu_recent_window_replay_reference
+        pull_request: 230
+        qualified_head: c2bf86c24624d298afde5b8ab17cba271c0b26f9
+        merge_commit: e0d2d3eca34428cfe02c5f006a06a9f8168b5012
+        exact_head_ci: {run_id: 36389822648, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          ReplayWindowRequestV1::recent (caller-supplied length, never clamped)
+          plus immutable dense CpuReplaySourceV1 bit-exact window copy after
+          fail-closed source-identity validation
+        record: docs/PORTABLE_REPLAY_RECENT_WINDOW_V1.md
+        claim_boundary: >-
+          dense_CPU_reference_only; no_WGPU_or_CUDA_execution; logical_window_copy_is_not_physical_memory_release;
+          no_memory_latency_throughput_or_quality_claim; no_DeepSeek_equivalence_claim
+
 current_execution_order:
-  - id: NNML2_NVML_PROCESS_MEMORY_CLI
+  - id: DSV41_2_CROSS_LAYER_KV_REUSE_PLAN_CONSUMER
     status: selected_next_software
+    action: >-
+      backend-neutral validation and resolution of a model-supplied versioned
+      cross-layer K/V reuse plan in nnis-core plus a CPU binding that resolves
+      each layer to owner replay sources; NNIS must not invent reuse semantics
+    claim_boundary: >-
+      plan_consumption_is_not_quality_memory_or_throughput_evidence;
+      logical_owner_count_is_not_physical_memory_release
+  - id: DSV41_1_WGPU_COUNTERPART
+    status: open_blocked_on_portable_WGPU_backend
+    action: qualify a WGPU recent-window replay path against the merged CPU oracle once a WGPU backend exists (portable P3)
+  - id: DSV41_1_BOUNDED_RECENT_WINDOW_REPLAY_CPU_REFERENCE
+    status: completed_software
+    completed_pull_requests: [230]
+  - id: DSV41_0_REPLAY_STATE_PROVIDER_IDENTITY
+    status: completed_software
+    completed_pull_requests: [226, 227]
+  - id: NNML2_NVML_PROCESS_MEMORY_CLI
+    status: completed_software
+    completed_pull_requests: [155]
     action: >-
       add fail-closed read-only nnis nvml-process-memory CLI over existing NVML snapshot contract
   - id: NNML1_CLI_SAMPLED_STREAMING_SURFACE
-    status: selected_next_software
+    status: completed_software
+    completed_pull_requests: [137, 157]
     action: >-
       expose SamplingConfig/streaming/batch through nnis facade; add opt-in
       sampled (+optional stream) flags to nnis generate and nnis-hf generate;
@@ -230,6 +310,7 @@ current_execution_order:
       CLI_opt_in_sampled_streaming_is_not_physical_parity_model_quality_or_serving_performance
   - id: P0_REAL_CHECKPOINT
     status: physical_bundle_ready
+    note: exact_main_head_moved_to_e0d2d3e_physical_bundle_must_run_on_the_current_exact_head
     action: >-
       run_the_merged_P0_physical_bundle_on_exact_main_1efbf18_to_generate_and_validate_NNML0_plus_same_head_SmolLM2_and_TinyLlama_checkpoint_evidence
     claim_boundary: structural_or_load_success_is_not_model_quality_or_performance_evidence

@@ -783,7 +783,7 @@ deepseek_v41_kv_runtime_program_2026_09_24:
     - existing_CUDA_path_optional_secondary_cross_check_only
   ordered_sequence:
     - NNIS_DSV41_0_replayable_state_provider_and_exact_identity_contract_complete_PR_226_merge_e053fe00f5b6c85740059b828cc64ce964d524fb
-    - NNIS_DSV41_1_bounded_recent_window_replay_reference_path
+    - NNIS_DSV41_1_bounded_recent_window_replay_reference_path_CPU_reference_complete_PR_230_merge_e0d2d3eca34428cfe02c5f006a06a9f8168b5012_WGPU_counterpart_open
     - NNIS_DSV41_2_cross_layer_KV_reuse_plan_consumer_without_policy_invention
     - NNIS_DSV41_3_portable_FP4_E2M1_group_scaled_KV_reference_and_accounting
     - NNIS_DSV41_4_confidence_scheduled_speculative_verification_runtime_surface
@@ -817,3 +817,23 @@ deepseek_v41_runtime_evidence_2026_09_25:
     - no_model_policy_or_quality_claim
     - no_memory_latency_or_throughput_claim
   next: NNIS_DSV41_1_bounded_recent_window_replay_reference_path
+
+deepseek_v41_runtime_evidence_2026_09_28:
+  status: DSV41_1_CPU_reference_merged
+  pull_request: https://github.com/Memorithm/NNIS/pull/230
+  qualified_head: c2bf86c24624d298afde5b8ab17cba271c0b26f9
+  merge_revision: e0d2d3eca34428cfe02c5f006a06a9f8168b5012
+  exact_head_ci: {run_id: 36389822648, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - backend_neutral_recent_window_resolution_caller_supplied_length_never_clamped
+    - overflow_free_resolution_including_full_u64_source_range
+    - immutable_dense_finite_F32_CPU_replay_source_bound_to_exact_identity
+    - bit_exact_window_copy_after_fail_closed_source_identity_validation
+  exclusions:
+    - no_WGPU_or_CUDA_execution
+    - no_reconstruction_compression_FP4_INT4_paging_or_eviction
+    - no_physical_memory_release_claim
+    - no_model_policy_quality_memory_latency_or_throughput_claim
+  open:
+    - WGPU_counterpart_against_this_CPU_oracle_after_portable_WGPU_backend_exists
+  next: NNIS_DSV41_2_cross_layer_KV_reuse_plan_consumer_without_policy_invention
