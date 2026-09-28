@@ -27,6 +27,9 @@
 //!   ([`fp4::WgpuFp4E2M1KvBlockV1`]).
 //! - greedy speculative-draft verification over device-resident target logits
 //!   ([`speculative::WgpuGreedySpeculativeVerifierV1`]).
+//! - the suite ids and adapter-identity mapping of the WGPU hardware-evidence
+//!   harness ([`evidence`]); the record format lives in
+//!   [`nnis_core::adapter_evidence`].
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -41,6 +44,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::sync::{mpsc, Arc, Mutex};
 
+pub mod evidence;
 pub mod fp4;
 pub mod graph;
 mod memory;
