@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod adapter_evidence;
 pub mod dsv41_campaign;
 pub mod dsv41_campaign_json;
 pub mod graph;
