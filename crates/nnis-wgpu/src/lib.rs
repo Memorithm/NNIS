@@ -20,6 +20,9 @@
 //!   ([`numerical::WgpuF32KernelsV1`]).
 //! - execution of validated portable F32 graph plans through those kernels
 //!   ([`graph::execute_f32_graph`]).
+//! - device-resident DSV41 replay sources and cross-layer KV reuse bindings
+//!   mirroring the CPU references ([`replay::WgpuReplaySourceV1`],
+//!   [`replay::WgpuCrossLayerKvBindingV1`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -37,6 +40,7 @@ use std::sync::{mpsc, Arc, Mutex};
 pub mod graph;
 mod memory;
 pub mod numerical;
+pub mod replay;
 
 pub use memory::{WgpuBuffer, WgpuFence, WgpuQueue};
 use std::task::{Context, Poll, Wake, Waker};

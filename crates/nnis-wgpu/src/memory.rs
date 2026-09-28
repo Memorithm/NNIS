@@ -203,6 +203,30 @@ impl WgpuQueue {
         self.submit_checked(encoder)
     }
 
+    /// Allocate a non-Host buffer on this queue's device whose size does not
+    /// exceed `bound` (an existing buffer of this device), so the device
+    /// capability and WGPU size limits already admitted it.
+    pub(crate) fn create_bounded_buffer(
+        &self,
+        descriptor: BufferDesc,
+        bound: &WgpuBuffer,
+    ) -> Result<WgpuBuffer> {
+        self.check_owner(bound)?;
+        let descriptor =
+            BufferDesc::new(descriptor.size_bytes, descriptor.usages, descriptor.memory)?;
+        if descriptor.memory == MemoryClass::Host || descriptor.size_bytes > bound.len() {
+            return Err(PortableError::Unsupported(
+                "bounded WGPU allocation exceeds its bound or requests Host memory".to_string(),
+            ));
+        }
+        allocate(
+            &self.device,
+            self.device_token,
+            descriptor,
+            align_up(descriptor.size_bytes),
+        )
+    }
+
     pub(crate) fn submit_checked(&self, encoder: wgpu::CommandEncoder) -> Result<WgpuFence> {
         self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let submission = self.queue.submit(Some(encoder.finish()));
@@ -372,27 +396,7 @@ impl PortableDevice for WgpuDevice {
                 "padded buffer exceeds WGPU max_buffer_size".to_string(),
             ));
         }
-        let mut usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
-        if descriptor.usages.contains(BufferUsages::STORAGE) {
-            usage |= wgpu::BufferUsages::STORAGE;
-        }
-        if descriptor.usages.contains(BufferUsages::UNIFORM) {
-            usage |= wgpu::BufferUsages::UNIFORM;
-        }
-        self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("nnis.wgpu.buffer"),
-            size,
-            usage,
-            mapped_at_creation: false,
-        });
-        pop_scopes(&self.device, "WGPU buffer allocation")?;
-        Ok(WgpuBuffer {
-            descriptor,
-            buffer,
-            device_token: self.token,
-        })
+        allocate(&self.device, self.token, descriptor, size)
     }
 
     fn create_queue(&self) -> Result<Self::Queue> {
@@ -402,6 +406,36 @@ impl PortableDevice for WgpuDevice {
             device_token: self.token,
         })
     }
+}
+
+/// Allocate a zero-initialized buffer for an already validated descriptor.
+fn allocate(
+    device: &wgpu::Device,
+    token: u64,
+    descriptor: BufferDesc,
+    size: u64,
+) -> Result<WgpuBuffer> {
+    let mut usage = wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST;
+    if descriptor.usages.contains(BufferUsages::STORAGE) {
+        usage |= wgpu::BufferUsages::STORAGE;
+    }
+    if descriptor.usages.contains(BufferUsages::UNIFORM) {
+        usage |= wgpu::BufferUsages::UNIFORM;
+    }
+    device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("nnis.wgpu.buffer"),
+        size,
+        usage,
+        mapped_at_creation: false,
+    });
+    pop_scopes(device, "WGPU buffer allocation")?;
+    Ok(WgpuBuffer {
+        descriptor,
+        buffer,
+        device_token: token,
+    })
 }
 
 /// Pop a Validation scope then an OutOfMemory scope pushed in that order.
