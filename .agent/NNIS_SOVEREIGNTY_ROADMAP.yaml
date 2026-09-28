@@ -1094,3 +1094,20 @@ v888_portable_evidence_2026_09_28_adapter_evidence_harness:
     - CI_has_no_GPU_SKIP_not_evidence
     - no_performance_or_cross_device_claim
   next: human_runs_wgpu_adapter_evidence_on_a_real_non_software_adapter_and_submits_the_record_for_review
+v888_portable_evidence_2026_09_28_p10_cpu_host_evidence_harness:
+  status: NNIS_P10_CPU_host_evidence_record_and_harness_merged_no_ARM64_record_exists
+  pull_request: https://github.com/Memorithm/NNIS/pull/246
+  qualified_head: 42080a019bbd8ad88cb4582cedf564be93e13946
+  merge_revision: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
+  exact_head_ci: {run_id: 36401723160, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - versioned_PortableCpuHostEvidenceV1_record_without_timing_fields
+    - six_CPU_reference_suites_bit_exact_against_integer_only_binary32_oracle
+    - cpu_host_evidence_example_record_and_validate_modes
+    - suites_run_in_CI_on_x86_64_via_check_portable_cpu_sh
+  exclusions:
+    - no_ARM64_execution_aarch64_cargo_check_only
+    - no_reviewed_host_record_committed
+    - CPU_verdict_does_not_qualify_WGPU_or_any_GPU
+    - no_performance_claim
+  next: human_runs_cpu_host_evidence_on_an_ARM64_host_and_submits_the_record_for_review

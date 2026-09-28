@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 70edaa1c11d26b414344d9b0ba97c5646ec91745
+  main_head: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: fbfef08736e15b52c69cf04557758b2aabec73fd
+  previous_recorded_main_head: 70edaa1c11d26b414344d9b0ba97c5646ec91745
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -508,6 +508,24 @@ main_repository_state:
           commit; added docs/exec-plans/README.md stating there is no active plan
           and that the current selection lives in this .agent ledger
         claim_boundary: documentation_housekeeping_only_no_new_physical_or_performance_result
+      - id: portable_p10_cpu_host_evidence_record_and_harness
+        pull_request: 246
+        qualified_head: 42080a019bbd8ad88cb4582cedf564be93e13946
+        merge_commit: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
+        exact_head_ci: {run_id: 36401723160, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 28}
+        summary: >-
+          nnis-core PortableCpuHostEvidenceV1 (kind nnis.portable.cpu-host-evidence,
+          schema 1, host arch/os/endian/pointer_width/cpu_model, no timing fields)
+          with strict JSON and fail-closed validate_cpu_host_evidence (Failed >
+          Incomplete > DirtyWorktree > ReferenceOracleAgreementObserved); nnis-cpu
+          CPU_HOST_QUALIFICATION_SUITES_V1 (6 suites) comparing the CPU reference
+          bit for bit with an integer-only binary32 oracle, and the
+          cpu_host_evidence example a human runs on an ARM64 or other host
+        record: docs/PORTABLE_CPU_HOST_EVIDENCE_V1.md
+        claim_boundary: >-
+          harness_and_format_only_no_reviewed_host_record_committed;
+          no_ARM64_execution_performed_aarch64_cargo_check_only;
+          CPU_verdict_does_not_qualify_WGPU; no_performance_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -536,6 +554,11 @@ current_execution_order:
       strategy (software adapter or explicit skip that is not evidence)
     claim_boundary: >-
       WGPU_compilation_or_software_adapter_runs_are_not_hardware_parity_or_performance_evidence
+  - id: PORTABLE_P10_VENDOR_NEUTRAL_QUALIFICATION_HARNESSES
+    status: software_harnesses_complete_PR_244_WGPU_adapter_PR_246_CPU_host_human_runs_open
+    completed_pull_requests: [244, 246]
+    next_slice: human_runs_cpu_host_evidence_on_an_ARM64_host_and_wgpu_adapter_evidence_on_a_real_adapter_then_review_records
+    claim_boundary: no_record_may_be_cited_before_review_software_adapter_and_dirty_worktree_records_are_not_qualification
   - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
     status: completed_software
     completed_pull_requests: [235]
