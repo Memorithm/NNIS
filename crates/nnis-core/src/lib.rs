@@ -5,6 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod dsv41_campaign;
 pub mod graph;
 pub mod kv_fp4;
 pub mod kv_reuse_plan;
