@@ -185,6 +185,45 @@ the bound.
 
 Without an adapter every test logs an explicit SKIP.
 
+## Portable F32 graph execution (P3 slice 4)
+
+`nnis_wgpu::graph::execute_f32_graph` runs a `ValidatedF32GraphV1` through
+`WgpuF32KernelsV1`, mirroring `nnis_cpu::graph::execute_f32_graph`:
+
+- Before any node buffer is allocated, it checks the schema and policy, the
+  binding count, per-buffer device limits, input `STORAGE` usage and byte
+  lengths, and the finiteness of every input, including unused ones.
+- Caller buffers are never mutated. Scatter-add writes into a fresh copy of
+  its base.
+- Intermediates stay private and are dropped on any error. Only the final
+  value escapes.
+
+The report records the bound artifact fingerprint of every node.
+`execute_f32_graph_traced` returns every node output.
+
+Declared tolerance:
+
+- Each node meets the policy of the kernel it runs.
+- A graph with **no `ProjectKn` node** is **bit-exact** end-to-end with the
+  CPU graph reference for normal-range values.
+- For graphs **with projections**, the contract is per node. Every
+  non-projection node must be bit-exact with the CPU kernel applied to the
+  same WGPU node inputs. Every projection node must be within the declared
+  projection bound for those inputs. End-to-end equality with the CPU graph
+  is not claimed, because projection differences propagate into later nodes.
+
+`tests/graph_parity.rs` covers:
+
+- projection-free graphs, including a branched graph and a six-node
+  300-element graph using add, multiply, ReLU, gather, scatter-add and sum,
+  checked bit-exact end-to-end;
+- a seven-node two-projection graph checked node by node through the trace;
+- errors (late overflow, non-finite used and unused inputs, binding count,
+  byte length, usage) matching the CPU error variants, with inputs checked
+  unchanged.
+
+Without an adapter every test logs an explicit SKIP.
+
 ## Claim boundary
 
 This slice adds WGPU compilation plus adapter discovery, limit mapping and a

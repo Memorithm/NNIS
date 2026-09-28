@@ -186,6 +186,23 @@ impl WgpuQueue {
         self.write_raw(destination, destination_offset_bytes, &bytes)
     }
 
+    /// Device copy between buffers of this device without portable usage
+    /// checks (internal plumbing; caller checks ownership and sizes).
+    pub(crate) fn copy_unchecked(
+        &self,
+        source: &WgpuBuffer,
+        destination: &WgpuBuffer,
+        size_bytes: u64,
+    ) -> Result<WgpuFence> {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("nnis.wgpu.copy_unchecked"),
+            });
+        encoder.copy_buffer_to_buffer(&source.buffer, 0, &destination.buffer, 0, size_bytes);
+        self.submit_checked(encoder)
+    }
+
     pub(crate) fn submit_checked(&self, encoder: wgpu::CommandEncoder) -> Result<WgpuFence> {
         self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let submission = self.queue.submit(Some(encoder.finish()));
