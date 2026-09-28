@@ -83,6 +83,57 @@ workflow scope. The proposed step is:
         run: bash scripts/check-portable-wgpu.sh
 ```
 
+## Portable buffer, queue and fence contracts (P3 slice 2)
+
+`WgpuDevice` implements `PortableDevice`, with `WgpuBuffer`, `WgpuQueue` and
+`WgpuFence` implementing `PortableBuffer`, `PortableQueue` and
+`PortableFence`. `WgpuQueue::copy_buffer` mirrors `CpuQueue::copy_buffer`.
+Semantics follow `nnis-cpu`:
+
+- Descriptors are revalidated at allocation, so literals that skip
+  `BufferDesc::new` are still checked. Sizes above
+  `CapabilitySet::max_buffer_bytes` are rejected as `Unsupported`.
+- Buffers are zero-initialized.
+- Usage bits are enforced at the portable API. Writes need `COPY_DST`.
+  Reads and copy sources need `COPY_SRC`. Copy destinations need
+  `COPY_DST`.
+- Every range is checked against the logical size before any mutation.
+  Empty ranges are allowed at the end of a buffer and rejected beyond it.
+  A failed call leaves the payload unchanged.
+- Arbitrary byte offsets and sizes work. Allocations are padded to WGPU's
+  4-byte copy alignment. Unaligned writes read, modify and write back the
+  aligned span. Unaligned copies are staged through the host. The padding is
+  never observable through the API.
+- `write_buffer` stages the caller's bytes before returning (WGPU copies
+  the slice) and submits. The fence completes when the queue reports that the
+  submitted work is done. `read_buffer` blocks until all previously
+  submitted work has finished.
+- `MemoryClass::Host` is rejected. `Shared` and `DeviceLocal` are accepted
+  as declared intent only: WGPU does not report physical placement, so no
+  residency is claimed.
+- A buffer is tied to the device that created it. Using it with another
+  device's queue fails closed.
+
+Concurrency notes from local runs on Mesa llvmpipe (software; these are
+code-path findings, not evidence):
+
+- Creating and tearing down several devices concurrently crashed the
+  process (SIGSEGV). `WgpuDevice::discover` is therefore serialized
+  process-wide. The tests in each binary share devices that are never
+  dropped.
+- A work-done callback can run on another thread's poll, after this thread's
+  blocking wait has returned. `WgpuFence::wait` therefore records
+  completion once `Maintain::wait_for(index)` returns, and does not depend
+  on the callback. The fixed version passed 140 repeated runs under Rust
+  1.77.0 and stable.
+
+`tests/portable_memory.rs` runs the same scripted sequence through the
+generic traits on `CpuDevice` and on a WGPU adapter and requires identical
+results. Error text is normalized, but error variants and out-of-bounds
+fields must match. The test also covers WGPU-specific admission rules,
+fences, and aligned and unaligned `copy_buffer` against `CpuQueue`. Without
+an adapter every test logs an explicit SKIP.
+
 ## Claim boundary
 
 This slice adds WGPU compilation plus adapter discovery, limit mapping and a
