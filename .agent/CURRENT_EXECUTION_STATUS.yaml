@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
+  main_head: fbfef08736e15b52c69cf04557758b2aabec73fd
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 891c22681d4a15d1ce7fbcbb60fff93448452ed4
+  previous_recorded_main_head: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -478,6 +478,24 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
           serial_reference_kernel_no_latency_cost_or_throughput_claim
+      - id: portable_adapter_evidence_record_and_wgpu_harness
+        pull_request: 244
+        qualified_head: 6fbeee172d872588af53b09e3662ac5529687a6a
+        merge_commit: fbfef08736e15b52c69cf04557758b2aabec73fd
+        exact_head_ci: {run_id: 36400347337, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 28}
+        summary: >-
+          nnis-core PortableAdapterEvidenceV1 (kind nnis.portable.adapter-evidence,
+          schema 1, no timing fields) with strict JSON I/O and fail-closed
+          validate_adapter_evidence verdicts (Failed > Incomplete > DirtyWorktree >
+          CodePathOnlySoftwareAdapter / UnclassifiedAdapter / HardwareParityObserved;
+          hardware class rejected for Cpu device type or software markers);
+          nnis-wgpu WGPU_QUALIFICATION_SUITES_V1 (7 suites) and the
+          wgpu_adapter_evidence example a human runs on a real adapter, plus a
+          --validate review mode
+        record: docs/PORTABLE_ADAPTER_EVIDENCE_V1.md
+        claim_boundary: >-
+          harness_and_format_only_no_hardware_record_produced_or_committed;
+          llvmpipe_run_is_code_path_only; CI_pass_is_SKIP_not_evidence
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -496,9 +514,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: software_slices_complete_PR_237_to_243_CI_wiring_and_hardware_evidence_open
-    completed_pull_requests: [237, 238, 239, 240, 241, 242, 243]
-    next_slice: wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push_then_hardware_WGPU_adapter_evidence
+    status: software_slices_complete_PR_237_to_244_CI_wiring_and_hardware_evidence_open
+    completed_pull_requests: [237, 238, 239, 240, 241, 242, 243, 244]
+    next_slice: wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push_then_human_runs_wgpu_adapter_evidence_example_PR_244_on_a_real_adapter
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
@@ -511,7 +529,8 @@ current_execution_order:
     completed_pull_requests: [235]
     action: define_versioned_portable_kernel_artifact_binding_and_capability_identity_per_PORTABLE_RUNTIME_PROGRESS
   - id: DSV41_WGPU_COUNTERPARTS
-    status: open_blocked_on_portable_WGPU_backend
+    status: completed_software_PR_241_to_243_hardware_evidence_absent
+    completed_pull_requests: [241, 242, 243]
     action: qualify WGPU replay, reuse binding, FP4 decode and speculative verification against the merged CPU oracles
   - id: DSV41_4_CONFIDENCE_SCHEDULED_SPECULATIVE_VERIFICATION_SURFACE
     status: completed_software

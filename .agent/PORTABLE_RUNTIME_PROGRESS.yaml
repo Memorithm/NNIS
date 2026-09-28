@@ -351,6 +351,21 @@ completed:
     not_claimed:
       - hardware_WGPU_evidence
       - latency_cost_or_throughput
+  portable_adapter_evidence_harness:
+    pull_request: 244
+    qualified_head: 6fbeee172d872588af53b09e3662ac5529687a6a
+    merge_commit: fbfef08736e15b52c69cf04557758b2aabec73fd
+    status: complete_record_format_validator_and_WGPU_harness_no_hardware_record
+    exact_head_ci: {run_id: 36400347337, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - nnis_core_PortableAdapterEvidenceV1_strict_JSON_and_validate_adapter_evidence
+      - nnis_wgpu_WGPU_QUALIFICATION_SUITES_V1_and_adapter_identity
+      - example_wgpu_adapter_evidence_record_and_validate_modes
+    record: docs/PORTABLE_ADAPTER_EVIDENCE_V1.md
+    not_claimed:
+      - hardware_WGPU_evidence
+      - latency_cost_or_throughput
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-
@@ -363,7 +378,7 @@ current:
   status: P3_software_slices_complete_ops_graphs_and_DSV41_counterparts_on_WGPU_hardware_evidence_absent
 next:
   - wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push
-  - obtain_hardware_WGPU_adapter_evidence_separately_software_adapters_do_not_count
+  - human_runs_wgpu_adapter_evidence_example_PR_244_on_a_real_adapter_software_adapters_do_not_count
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately
   - expose_versioned_executable_plans_to_ElasticXxx_after_backend_verification_exists
   - retain_SciRust_generic_math_ownership_and_review_compatible_shared_primitives
