@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/nnis-core",
     "crates/nnis-cpu",
+    "crates/nnis-wgpu",
     "crates/nnis-sys",
     "crates/nnis-rt",
     "crates/nnis-jit",

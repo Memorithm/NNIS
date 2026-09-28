@@ -3,7 +3,7 @@ set -euo pipefail
 
 tree="$(cargo tree -p nnis-core --edges normal --prefix none)"
 
-for forbidden in nnis-sys nnis-rt nnis-jit nnis-kernels nnis-model nnis-bench; do
+for forbidden in nnis-sys nnis-rt nnis-jit nnis-kernels nnis-model nnis-bench nnis-wgpu wgpu; do
   if printf '%s\n' "$tree" | grep -Eq "^$forbidden( |$)"; then
     echo "nnis-core portable boundary depends on forbidden crate: $forbidden" >&2
     exit 1
