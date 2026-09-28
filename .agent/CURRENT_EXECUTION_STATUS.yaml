@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: eff0be40b890f12670aa428f38de19ea776a145a
+  main_head: 01f6ca72c00ea4c0a7591404cde40503bab47533
   main_head_recorded_on: "2026-09-28"
   previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
@@ -289,16 +289,36 @@ main_repository_state:
           logical_sharing_only_not_physical_memory_release; no_quality_latency_throughput_or_model_support_claim;
           no_WGPU_or_CUDA_execution
 
+      - id: dsv41_3_fp4_e2m1_group_scaled_kv_reference
+        pull_request: 232
+        qualified_head: df78e4b39812143b0a378fd3ce4a0b2e5ddbe917
+        merge_commit: 01f6ca72c00ea4c0a7591404cde40503bab47533
+        exact_head_ci: {run_id: 36390790540, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core Fp4E2M1KvLayoutV1 (layout v1, F32/E8M0 group scales, 24-byte
+          descriptor) with exact Fp4KvStorageV1 accounting; nnis-cpu
+          CpuFp4E2M1KvBlockV1 encode/decode oracle (RNE ties-to-even, signed
+          zero, fail-closed reassembly) and reconstruction error vs dense F32
+        record: docs/PORTABLE_FP4_E2M1_KV_REFERENCE_V1.md
+        claim_boundary: >-
+          isolated_reference_error_and_storage_accounting_only; FP4_distinct_from_INT4;
+          not_wired_into_runtime_KV; no_quality_memory_latency_or_throughput_claim;
+          SLHAv2_canonical_FP4_contract_binding_open
+
 current_execution_order:
-  - id: DSV41_3_PORTABLE_FP4_E2M1_GROUP_SCALED_KV_REFERENCE
+  - id: DSV41_4_CONFIDENCE_SCHEDULED_SPECULATIVE_VERIFICATION_SURFACE
     status: selected_next_software
     action: >-
-      CPU reference FP4 E2M1 group-scaled KV encode/decode with exact
-      effective-bits accounting (codes, scales, padding, metadata), distinct
-      from INT4, with a dense reference path retained
+      backend-neutral runtime surface for confidence-scheduled speculative
+      verification: explicit caller-supplied draft/confidence inputs and a
+      deterministic CPU reference verifier that records acceptance counts
+      against the target model's greedy/declared semantics
     claim_boundary: >-
-      FP4_and_INT4_are_distinct; nominal_bits_are_not_a_compression_result;
-      no_quality_memory_or_throughput_claim_without_real_model_campaign
+      no_speculative_speed_claim_without_measured_acceptance_and_real_runtime_cost;
+      NNIS_does_not_invent_the_confidence_policy
+  - id: DSV41_3_PORTABLE_FP4_E2M1_GROUP_SCALED_KV_REFERENCE
+    status: completed_software
+    completed_pull_requests: [232]
   - id: DSV41_2_CROSS_LAYER_KV_REUSE_PLAN_CONSUMER
     status: completed_software
     completed_pull_requests: [231]
