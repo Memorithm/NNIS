@@ -6,9 +6,11 @@
 #![forbid(unsafe_code)]
 
 pub mod adapter_evidence;
+
 pub mod dsv41_campaign;
 pub mod dsv41_campaign_json;
 pub mod graph;
+pub mod host_evidence;
 mod json;
 pub mod kernel_artifact;
 pub mod kv_fp4;

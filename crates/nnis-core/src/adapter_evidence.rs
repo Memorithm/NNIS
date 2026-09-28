@@ -226,6 +226,10 @@ pub enum AdapterEvidenceError {
     MissingDetail { suite_id: String },
     /// Hardware class claimed for a CPU device type or a software adapter.
     HardwareClassConflict,
+    /// A CPU host identity field had a value outside its allowed set.
+    InvalidHostField { field: &'static str },
+    /// The recorded build target does not name the recorded host architecture.
+    HostTargetMismatch,
 }
 
 impl fmt::Display for AdapterEvidenceError {
@@ -267,6 +271,12 @@ impl fmt::Display for AdapterEvidenceError {
             Self::HardwareClassConflict => output.write_str(
                 "hardware class claimed for a CPU device type or a known software adapter",
             ),
+            Self::InvalidHostField { field } => {
+                write!(output, "host field {field} has an unsupported value")
+            }
+            Self::HostTargetMismatch => {
+                output.write_str("source target does not name the host architecture")
+            }
         }
     }
 }
@@ -288,17 +298,7 @@ pub fn validate_adapter_evidence(
     required_suites: &[&str],
 ) -> Result<AdapterEvidenceVerdictV1, AdapterEvidenceError> {
     let source = &record.source;
-    if source.git_commit.len() != 40
-        || !source
-            .git_commit
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Err(AdapterEvidenceError::InvalidGitCommit);
-    }
-    required_text("crate_version", &source.crate_version)?;
-    required_text("toolchain", &source.toolchain)?;
-    required_text("target", &source.target)?;
+    validate_source(source)?;
     let adapter = &record.adapter;
     required_text("backend_family", &adapter.backend_family)?;
     required_text("api_backend", &adapter.api_backend)?;
@@ -312,18 +312,64 @@ pub fn validate_adapter_evidence(
     {
         return Err(AdapterEvidenceError::HardwareClassConflict);
     }
-    if record.suites.is_empty() {
+    match summarize_suites(&record.suites, required_suites)? {
+        SuiteSummary::Failed(suite_ids) => {
+            return Ok(AdapterEvidenceVerdictV1::Failed { suite_ids })
+        }
+        SuiteSummary::Incomplete(suite_ids) => {
+            return Ok(AdapterEvidenceVerdictV1::Incomplete { suite_ids })
+        }
+        SuiteSummary::AllRequiredPassed => {}
+    }
+    if !source.worktree_clean {
+        return Ok(AdapterEvidenceVerdictV1::DirtyWorktree);
+    }
+    Ok(match adapter.class {
+        AdapterClassV1::Hardware => AdapterEvidenceVerdictV1::HardwareParityObserved,
+        AdapterClassV1::Software => AdapterEvidenceVerdictV1::CodePathOnlySoftwareAdapter,
+        AdapterClassV1::Unknown => AdapterEvidenceVerdictV1::UnclassifiedAdapter,
+    })
+}
+
+/// Outcome summary of structurally valid suites.
+pub(crate) enum SuiteSummary {
+    Failed(Vec<String>),
+    Incomplete(Vec<String>),
+    AllRequiredPassed,
+}
+
+/// Validate the source identity shared by portable evidence records.
+pub(crate) fn validate_source(source: &EvidenceSourceV1) -> Result<(), AdapterEvidenceError> {
+    if source.git_commit.len() != 40
+        || !source
+            .git_commit
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(AdapterEvidenceError::InvalidGitCommit);
+    }
+    required_text("crate_version", &source.crate_version)?;
+    required_text("toolchain", &source.toolchain)?;
+    required_text("target", &source.target)
+}
+
+/// Validate suites and required ids, then summarize outcomes.
+pub(crate) fn summarize_suites(
+    suites: &[SuiteResultV1],
+    required_suites: &[&str],
+) -> Result<SuiteSummary, AdapterEvidenceError> {
+    if suites.is_empty() {
         return Err(AdapterEvidenceError::NoSuites);
     }
-    if record.suites.len() > MAX_EVIDENCE_SUITES {
+    if suites.len() > MAX_EVIDENCE_SUITES {
         return Err(AdapterEvidenceError::TooManySuites);
     }
-    for (index, suite) in record.suites.iter().enumerate() {
+    for (index, suite) in suites.iter().enumerate() {
         let id = || suite.suite_id.clone();
         if !valid_suite_id(&suite.suite_id) {
             return Err(AdapterEvidenceError::InvalidSuiteId { suite_id: id() });
         }
-        if record.suites[..index]
+        if suites[..index]
             .iter()
             .any(|other| other.suite_id == suite.suite_id)
         {
@@ -358,38 +404,27 @@ pub fn validate_adapter_evidence(
         }
     }
 
-    let failed: Vec<String> = record
-        .suites
+    let failed: Vec<String> = suites
         .iter()
         .filter(|suite| suite.outcome == SuiteOutcomeV1::Fail)
         .map(|suite| suite.suite_id.clone())
         .collect();
     if !failed.is_empty() {
-        return Ok(AdapterEvidenceVerdictV1::Failed { suite_ids: failed });
+        return Ok(SuiteSummary::Failed(failed));
     }
     let incomplete: Vec<String> = required_suites
         .iter()
         .filter(|required| {
-            !record
-                .suites
+            !suites
                 .iter()
                 .any(|suite| suite.suite_id == **required && suite.outcome == SuiteOutcomeV1::Pass)
         })
         .map(|required| (*required).to_owned())
         .collect();
     if !incomplete.is_empty() {
-        return Ok(AdapterEvidenceVerdictV1::Incomplete {
-            suite_ids: incomplete,
-        });
+        return Ok(SuiteSummary::Incomplete(incomplete));
     }
-    if !source.worktree_clean {
-        return Ok(AdapterEvidenceVerdictV1::DirtyWorktree);
-    }
-    Ok(match adapter.class {
-        AdapterClassV1::Hardware => AdapterEvidenceVerdictV1::HardwareParityObserved,
-        AdapterClassV1::Software => AdapterEvidenceVerdictV1::CodePathOnlySoftwareAdapter,
-        AdapterClassV1::Unknown => AdapterEvidenceVerdictV1::UnclassifiedAdapter,
-    })
+    Ok(SuiteSummary::AllRequiredPassed)
 }
 
 fn valid_suite_id(id: &str) -> bool {
@@ -400,7 +435,7 @@ fn valid_suite_id(id: &str) -> bool {
             .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
 }
 
-fn optional_text(field: &'static str, value: &str) -> Result<(), AdapterEvidenceError> {
+pub(crate) fn optional_text(field: &'static str, value: &str) -> Result<(), AdapterEvidenceError> {
     if value.len() > MAX_EVIDENCE_TEXT_BYTES {
         return Err(AdapterEvidenceError::FieldTooLong { field });
     }
@@ -410,7 +445,7 @@ fn optional_text(field: &'static str, value: &str) -> Result<(), AdapterEvidence
     Ok(())
 }
 
-fn required_text(field: &'static str, value: &str) -> Result<(), AdapterEvidenceError> {
+pub(crate) fn required_text(field: &'static str, value: &str) -> Result<(), AdapterEvidenceError> {
     if value.is_empty() {
         return Err(AdapterEvidenceError::EmptyField { field });
     }
@@ -427,16 +462,7 @@ pub fn adapter_evidence_to_json(record: &PortableAdapterEvidenceV1) -> String {
             "schema_version",
             json::unsigned(u64::from(PORTABLE_ADAPTER_EVIDENCE_SCHEMA_VERSION)),
         ),
-        member(
-            "source",
-            Json::Object(vec![
-                member("git_commit", text(&source.git_commit)),
-                member("worktree_clean", Json::Bool(source.worktree_clean)),
-                member("crate_version", text(&source.crate_version)),
-                member("toolchain", text(&source.toolchain)),
-                member("target", text(&source.target)),
-            ]),
-        ),
+        member("source", source_json(source)),
         member(
             "adapter",
             Json::Object(vec![
@@ -451,29 +477,39 @@ pub fn adapter_evidence_to_json(record: &PortableAdapterEvidenceV1) -> String {
                 member("class", text(adapter.class.name())),
             ]),
         ),
-        member(
-            "suites",
-            Json::Array(
-                record
-                    .suites
-                    .iter()
-                    .map(|suite| {
-                        Json::Object(vec![
-                            member("suite_id", text(&suite.suite_id)),
-                            member("outcome", text(suite.outcome.name())),
-                            member("checks", json::unsigned(suite.checks)),
-                            member("mismatches", json::unsigned(suite.mismatches)),
-                            member("tolerance", text(&suite.tolerance)),
-                            member("detail", text(&suite.detail)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        ),
+        member("suites", suites_json(&record.suites)),
     ]);
     let mut output = String::new();
     json::write(&value, &mut output);
     output
+}
+
+pub(crate) fn source_json(source: &EvidenceSourceV1) -> Json {
+    Json::Object(vec![
+        member("git_commit", text(&source.git_commit)),
+        member("worktree_clean", Json::Bool(source.worktree_clean)),
+        member("crate_version", text(&source.crate_version)),
+        member("toolchain", text(&source.toolchain)),
+        member("target", text(&source.target)),
+    ])
+}
+
+pub(crate) fn suites_json(suites: &[SuiteResultV1]) -> Json {
+    Json::Array(
+        suites
+            .iter()
+            .map(|suite| {
+                Json::Object(vec![
+                    member("suite_id", text(&suite.suite_id)),
+                    member("outcome", text(suite.outcome.name())),
+                    member("checks", json::unsigned(suite.checks)),
+                    member("mismatches", json::unsigned(suite.mismatches)),
+                    member("tolerance", text(&suite.tolerance)),
+                    member("detail", text(&suite.detail)),
+                ])
+            })
+            .collect(),
+    )
 }
 
 /// Parse a record strictly. Parsing does not validate; call
@@ -481,27 +517,12 @@ pub fn adapter_evidence_to_json(record: &PortableAdapterEvidenceV1) -> String {
 pub fn adapter_evidence_from_json(
     input: &str,
 ) -> Result<PortableAdapterEvidenceV1, AdapterEvidenceJsonError> {
-    let value = json::parse(input).map_err(|error| AdapterEvidenceJsonError::Syntax {
-        offset: error.offset,
-        reason: error.reason,
-    })?;
-    let mut root = Object::new("root", value)?;
-    if root.string("kind")? != PORTABLE_ADAPTER_EVIDENCE_KIND {
-        return Err(AdapterEvidenceJsonError::WrongKind);
-    }
-    if root.u64("schema_version").ok() != Some(u64::from(PORTABLE_ADAPTER_EVIDENCE_SCHEMA_VERSION))
-    {
-        return Err(AdapterEvidenceJsonError::UnsupportedSchemaVersion);
-    }
-    let mut source_object = root.object("source")?;
-    let source = EvidenceSourceV1 {
-        git_commit: source_object.string("git_commit")?,
-        worktree_clean: source_object.bool("worktree_clean")?,
-        crate_version: source_object.string("crate_version")?,
-        toolchain: source_object.string("toolchain")?,
-        target: source_object.string("target")?,
-    };
-    source_object.finish()?;
+    let mut root = parse_root(
+        input,
+        PORTABLE_ADAPTER_EVIDENCE_KIND,
+        PORTABLE_ADAPTER_EVIDENCE_SCHEMA_VERSION,
+    )?;
+    let source = source_from(root.object("source")?)?;
     let mut adapter_object = root.object("adapter")?;
     let adapter = AdapterIdentityV1 {
         backend_family: adapter_object.string("backend_family")?,
@@ -516,8 +537,54 @@ pub fn adapter_evidence_from_json(
             .ok_or(AdapterEvidenceJsonError::UnknownVariant { field: "class" })?,
     };
     adapter_object.finish()?;
+    let suites = suites_from(root.array("suites")?)?;
+    root.finish()?;
+    Ok(PortableAdapterEvidenceV1 {
+        source,
+        adapter,
+        suites,
+    })
+}
+
+/// Parse a JSON document and check its `kind` and `schema_version`.
+pub(crate) fn parse_root(
+    input: &str,
+    kind: &str,
+    schema_version: u32,
+) -> Result<Object, AdapterEvidenceJsonError> {
+    let value = json::parse(input).map_err(|error| AdapterEvidenceJsonError::Syntax {
+        offset: error.offset,
+        reason: error.reason,
+    })?;
+    let mut root = Object::new("root", value)?;
+    if root.string("kind")? != kind {
+        return Err(AdapterEvidenceJsonError::WrongKind);
+    }
+    if root.u64("schema_version").ok() != Some(u64::from(schema_version)) {
+        return Err(AdapterEvidenceJsonError::UnsupportedSchemaVersion);
+    }
+    Ok(root)
+}
+
+pub(crate) fn source_from(
+    mut object: Object,
+) -> Result<EvidenceSourceV1, AdapterEvidenceJsonError> {
+    let source = EvidenceSourceV1 {
+        git_commit: object.string("git_commit")?,
+        worktree_clean: object.bool("worktree_clean")?,
+        crate_version: object.string("crate_version")?,
+        toolchain: object.string("toolchain")?,
+        target: object.string("target")?,
+    };
+    object.finish()?;
+    Ok(source)
+}
+
+pub(crate) fn suites_from(
+    items: Vec<Json>,
+) -> Result<Vec<SuiteResultV1>, AdapterEvidenceJsonError> {
     let mut suites = Vec::new();
-    for item in root.array("suites")? {
+    for item in items {
         let mut suite = Object::new("suites", item)?;
         suites.push(SuiteResultV1 {
             suite_id: suite.string("suite_id")?,
@@ -530,12 +597,7 @@ pub fn adapter_evidence_from_json(
         });
         suite.finish()?;
     }
-    root.finish()?;
-    Ok(PortableAdapterEvidenceV1 {
-        source,
-        adapter,
-        suites,
-    })
+    Ok(suites)
 }
 
 /// Fail-closed JSON errors of adapter evidence records.
@@ -566,10 +628,7 @@ impl fmt::Display for AdapterEvidenceJsonError {
                 write!(output, "JSON syntax error at byte {offset}: {reason}")
             }
             Self::WrongKind => output.write_str("record kind tag does not match"),
-            Self::UnsupportedSchemaVersion => write!(
-                output,
-                "unsupported schema_version, expected {PORTABLE_ADAPTER_EVIDENCE_SCHEMA_VERSION}"
-            ),
+            Self::UnsupportedSchemaVersion => output.write_str("unsupported schema_version"),
             Self::MissingField { field } => write!(output, "missing field {field}"),
             Self::UnknownField { field } => write!(output, "unknown field {field}"),
             Self::WrongType { field } => write!(output, "field {field} has the wrong type"),
@@ -583,12 +642,12 @@ impl fmt::Display for AdapterEvidenceJsonError {
 
 impl std::error::Error for AdapterEvidenceJsonError {}
 
-struct Object {
+pub(crate) struct Object {
     members: Vec<(String, Json)>,
 }
 
 impl Object {
-    fn new(field: &'static str, value: Json) -> Result<Self, AdapterEvidenceJsonError> {
+    pub(crate) fn new(field: &'static str, value: Json) -> Result<Self, AdapterEvidenceJsonError> {
         match value {
             Json::Object(members) => Ok(Self { members }),
             _ => Err(AdapterEvidenceJsonError::WrongType { field }),
@@ -604,21 +663,24 @@ impl Object {
         Ok(self.members.remove(index).1)
     }
 
-    fn string(&mut self, field: &'static str) -> Result<String, AdapterEvidenceJsonError> {
+    pub(crate) fn string(
+        &mut self,
+        field: &'static str,
+    ) -> Result<String, AdapterEvidenceJsonError> {
         match self.take(field)? {
             Json::String(text) => Ok(text),
             _ => Err(AdapterEvidenceJsonError::WrongType { field }),
         }
     }
 
-    fn bool(&mut self, field: &'static str) -> Result<bool, AdapterEvidenceJsonError> {
+    pub(crate) fn bool(&mut self, field: &'static str) -> Result<bool, AdapterEvidenceJsonError> {
         match self.take(field)? {
             Json::Bool(value) => Ok(value),
             _ => Err(AdapterEvidenceJsonError::WrongType { field }),
         }
     }
 
-    fn u64(&mut self, field: &'static str) -> Result<u64, AdapterEvidenceJsonError> {
+    pub(crate) fn u64(&mut self, field: &'static str) -> Result<u64, AdapterEvidenceJsonError> {
         match self.take(field)? {
             Json::Number(text) => {
                 if !text.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -631,23 +693,26 @@ impl Object {
         }
     }
 
-    fn u32(&mut self, field: &'static str) -> Result<u32, AdapterEvidenceJsonError> {
+    pub(crate) fn u32(&mut self, field: &'static str) -> Result<u32, AdapterEvidenceJsonError> {
         u32::try_from(self.u64(field)?)
             .map_err(|_| AdapterEvidenceJsonError::InvalidInteger { field })
     }
 
-    fn object(&mut self, field: &'static str) -> Result<Self, AdapterEvidenceJsonError> {
+    pub(crate) fn object(&mut self, field: &'static str) -> Result<Self, AdapterEvidenceJsonError> {
         Self::new(field, self.take(field)?)
     }
 
-    fn array(&mut self, field: &'static str) -> Result<Vec<Json>, AdapterEvidenceJsonError> {
+    pub(crate) fn array(
+        &mut self,
+        field: &'static str,
+    ) -> Result<Vec<Json>, AdapterEvidenceJsonError> {
         match self.take(field)? {
             Json::Array(items) => Ok(items),
             _ => Err(AdapterEvidenceJsonError::WrongType { field }),
         }
     }
 
-    fn finish(self) -> Result<(), AdapterEvidenceJsonError> {
+    pub(crate) fn finish(self) -> Result<(), AdapterEvidenceJsonError> {
         match self.members.into_iter().next() {
             None => Ok(()),
             Some((field, _)) => Err(AdapterEvidenceJsonError::UnknownField { field }),
@@ -655,11 +720,11 @@ impl Object {
     }
 }
 
-fn member(name: &str, value: Json) -> (String, Json) {
+pub(crate) fn member(name: &str, value: Json) -> (String, Json) {
     (name.to_owned(), value)
 }
 
-fn text(value: &str) -> Json {
+pub(crate) fn text(value: &str) -> Json {
     Json::String(value.to_owned())
 }
 

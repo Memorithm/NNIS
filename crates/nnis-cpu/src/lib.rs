@@ -8,8 +8,12 @@
 //! [`kv_reuse`] consumes a model-supplied DSV41-2 cross-layer KV reuse plan.
 //! [`fp4_kv`] is the DSV41-3 FP4 E2M1 group-scaled KV encode/decode reference.
 //! [`speculative`] is the DSV41-4 greedy speculative-verification reference.
+//! [`evidence`] fixes the suite ids and host identity of CPU host evidence
+//! records produced by the `cpu_host_evidence` example.
 
 #![forbid(unsafe_code)]
+
+pub mod evidence;
 
 pub mod fp4_kv;
 
