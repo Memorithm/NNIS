@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod graph;
+pub mod kv_reuse_plan;
 pub mod replay_state;
 
 use core::fmt;

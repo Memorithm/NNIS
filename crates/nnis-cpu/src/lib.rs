@@ -5,10 +5,13 @@
 //! limits are admission ceilings, not a promise of available RAM or a
 //! process-wide memory budget. General model scheduling remains separate.
 //! [`replay`] provides the dense DSV41-1 bounded recent-window replay reference.
+//! [`kv_reuse`] consumes a model-supplied DSV41-2 cross-layer KV reuse plan.
 
 #![forbid(unsafe_code)]
 
 pub mod graph;
+
+pub mod kv_reuse;
 
 pub mod numerical;
 
