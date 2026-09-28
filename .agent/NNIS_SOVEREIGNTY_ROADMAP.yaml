@@ -1013,3 +1013,20 @@ v888_portable_evidence_2026_09_28_p3_wgsl_f32_reference_ops:
     - serial_reference_kernels_no_performance_claim
     - no_WGPU_graph_execution_yet
   next: NNIS_P3_WGPU_execution_of_portable_F32_graph_plans_vs_CPU_graph_reference
+v888_portable_evidence_2026_09_28_p3_wgpu_f32_graph_execution:
+  status: NNIS_P3_WGPU_portable_F32_graph_execution_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/240
+  qualified_head: 7962387c21243df82e87d343cfab9b027d02f953
+  merge_revision: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
+  exact_head_ci: {run_id: 36396975187, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - ValidatedF32GraphV1_execution_on_WGPU_through_WgpuF32KernelsV1
+    - CPU_graph_reference_equivalent_preflight_errors_and_input_preservation
+    - projection_free_graphs_bit_exact_end_to_end_normal_range
+    - graphs_with_projections_per_node_contract_via_trace
+  exclusions:
+    - CI_has_no_GPU_SKIP_not_evidence
+    - llvmpipe_runs_are_code_path_only
+    - no_end_to_end_equality_claim_for_graphs_with_projections
+    - no_performance_claim
+  next: NNIS_DSV41_WGPU_counterparts_replay_KV_reuse_FP4_decode_speculative_verification

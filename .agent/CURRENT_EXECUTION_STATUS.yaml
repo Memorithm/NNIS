@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: cdd1416d33f7bc297420b02b6f9e071bd1facb31
+  main_head: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
+  previous_recorded_main_head: cdd1416d33f7bc297420b02b6f9e071bd1facb31
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -416,6 +416,23 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only (projection 51/70 bit-identical, 70/70 within bound);
           serial_reference_kernels_no_performance_claim; no_graph_execution_on_WGPU
+      - id: portable_p3_wgpu_f32_graph_execution
+        pull_request: 240
+        qualified_head: 7962387c21243df82e87d343cfab9b027d02f953
+        merge_commit: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
+        exact_head_ci: {run_id: 36396975187, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 13}
+        summary: >-
+          nnis_wgpu::graph::execute_f32_graph(_traced) runs ValidatedF32GraphV1
+          through WgpuF32KernelsV1 mirroring nnis_cpu::graph::execute_f32_graph;
+          host structural checks and device finiteness of all inputs before any
+          node allocation; caller buffers never mutated; per-node artifact
+          fingerprints reported; projection-free graphs bit-exact end-to-end,
+          graphs with projections checked per node (non-projection nodes bit-exact,
+          projection within declared bound)
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
+          no_end_to_end_equality_claim_for_graphs_with_projections; no_performance_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -434,9 +451,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_slices_merged_PR_237_238_239_selected_next_software
-    completed_pull_requests: [237, 238, 239]
-    next_slice: WGPU_execution_of_portable_F32_graph_plans_vs_CPU_graph_reference
+    status: in_progress_slices_merged_PR_237_238_239_240_selected_next_software
+    completed_pull_requests: [237, 238, 239, 240]
+    next_slice: DSV41_WGPU_counterparts_replay_and_cross_layer_KV_reuse_then_FP4_decode_then_speculative_verification
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
