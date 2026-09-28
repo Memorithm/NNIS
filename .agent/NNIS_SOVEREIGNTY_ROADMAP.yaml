@@ -995,3 +995,21 @@ v888_portable_evidence_2026_09_28_p3_wgpu_portable_memory:
     - llvmpipe_runs_are_code_path_only
     - no_residency_or_performance_claim
   next: NNIS_P3_WGSL_relu_sum_project_gather_scatter_add_parity_vs_CPU_reference
+
+v888_portable_evidence_2026_09_28_p3_wgsl_f32_reference_ops:
+  status: NNIS_P3_WGSL_F32_reference_kernels_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/239
+  qualified_head: b8ccb9d2985d7344a7990cc6ab7e9b6fba28a024
+  merge_revision: cdd1416d33f7bc297420b02b6f9e071bd1facb31
+  exact_head_ci: {run_id: 36395924066, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - WGSL_add_multiply_relu_sum_project_kn_gather_scatter_add_as_bound_P4_artifacts
+    - CPU_equivalent_finiteness_shape_index_usage_and_destination_preservation
+    - bit_exact_bitwise_and_correctly_rounded_normal_range_policies
+    - projection_declared_bound_3k_plus_1_ulp_scaled_because_WGSL_fma_inherited
+  exclusions:
+    - CI_has_no_GPU_SKIP_not_evidence
+    - llvmpipe_runs_are_code_path_only
+    - serial_reference_kernels_no_performance_claim
+    - no_WGPU_graph_execution_yet
+  next: NNIS_P3_WGPU_execution_of_portable_F32_graph_plans_vs_CPU_graph_reference

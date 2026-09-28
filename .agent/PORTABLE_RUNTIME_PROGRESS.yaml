@@ -262,6 +262,29 @@ completed:
       - hardware_WGPU_evidence
       - physical_memory_residency
       - performance
+  P3_WGSL_F32_reference_ops:
+    pull_request: 239
+    qualified_head: b8ccb9d2985d7344a7990cc6ab7e9b6fba28a024
+    merge_commit: cdd1416d33f7bc297420b02b6f9e071bd1facb31
+    status: complete_WGSL_counterparts_of_all_CpuF32KernelsV1_operations
+    exact_head_ci: {run_id: 36395924066, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - WgpuF32KernelsV1_binary_relu_sum_project_kn_gather_scatter_add
+      - every_op_and_finiteness_validator_bound_as_P4_artifact_before_pipeline_creation
+      - bit_level_finiteness_scratch_commit_only_on_success
+      - tolerance_bitwise_exact_relu_gather_incl_subnormals
+      - tolerance_bit_exact_normal_range_add_multiply_serial_sum_serial_scatter_add
+      - tolerance_project_kn_abs_diff_le_3k_plus_1_times_2_pow_minus_24_times_sum_abs_products
+    local_software_adapter_run: >-
+      llvmpipe (code path only): all parity tests pass; projection 51/70
+      bit-identical to fused CPU and 70/70 within bound; 80 repeated full-crate
+      runs under 1.77.0 and stable passed
+    record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+    not_claimed:
+      - hardware_WGPU_evidence
+      - performance_serial_kernels_are_reference_paths
+      - WGPU_graph_execution
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-
@@ -270,10 +293,11 @@ completed:
       speculative verification surface, DSV41-5 campaign preregistration and
       evidence validator (CPU/core only; see sovereignty roadmap DSV41 evidence)
 current:
-  earliest_open_slice: WGPU_PortableDevice_Queue_Buffer_and_graph_ops_against_CPU_reference
-  status: P3_first_slice_merged_wgpu_23_discovery_capability_mapping_add_parity_hardware_evidence_absent
+  earliest_open_slice: WGPU_graph_plan_execution_against_CPU_graph_reference
+  status: P3_discovery_portable_memory_and_all_CPU_reference_ops_merged_on_WGPU_hardware_evidence_absent
 next:
-  - implement_remaining_CPU_reference_ops_relu_sum_project_gather_scatter_add_binary_as_WGSL_P4_artifacts_on_nnis_wgpu
+  - execute_portable_F32_graph_plans_on_WGPU_via_WgpuF32KernelsV1_and_compare_with_CPU_graph_reference
+  - then_DSV41_WGPU_counterparts_replay_reuse_FP4_decode_speculative_verification
   - wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push
   - obtain_hardware_WGPU_adapter_evidence_separately_software_adapters_do_not_count
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately

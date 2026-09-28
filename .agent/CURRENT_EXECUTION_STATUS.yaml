@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
+  main_head: cdd1416d33f7bc297420b02b6f9e071bd1facb31
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
+  previous_recorded_main_head: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -400,6 +400,22 @@ main_repository_state:
         claim_boundary: >-
           data_movement_only; CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
           llvmpipe_found_concurrent_discovery_SIGSEGV_and_fence_callback_race_both_fixed
+      - id: portable_p3_wgsl_f32_reference_ops
+        pull_request: 239
+        qualified_head: b8ccb9d2985d7344a7990cc6ab7e9b6fba28a024
+        merge_commit: cdd1416d33f7bc297420b02b6f9e071bd1facb31
+        exact_head_ci: {run_id: 36395924066, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          WgpuF32KernelsV1 (add, multiply, ReLU, serial sum, project_kn, gather,
+          serial scatter-add) mirroring CpuF32KernelsV1; each op and finiteness
+          validator bound as a P4 artifact before pipeline creation; bit-level
+          finiteness; scratch commit only on success; bit-exact policies for
+          bitwise and correctly-rounded ops (normal range), projection within
+          declared (3k+1)*2^-24*sum|x*w| bound because WGSL fma is inherited
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only (projection 51/70 bit-identical, 70/70 within bound);
+          serial_reference_kernels_no_performance_claim; no_graph_execution_on_WGPU
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -418,9 +434,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_slices_merged_PR_237_238_selected_next_software
-    completed_pull_requests: [237, 238]
-    next_slice: WGSL_relu_sum_project_gather_scatter_add_binary_parity_vs_CPU_reference
+    status: in_progress_slices_merged_PR_237_238_239_selected_next_software
+    completed_pull_requests: [237, 238, 239]
+    next_slice: WGPU_execution_of_portable_F32_graph_plans_vs_CPU_graph_reference
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
