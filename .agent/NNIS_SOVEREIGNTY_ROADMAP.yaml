@@ -924,3 +924,19 @@ deepseek_v41_runtime_evidence_2026_09_28_dsv41_5_preregistration:
     - no_promotion_comparison_or_ratio_computation
     - no_JSON_serialization_or_hashing_in_v1
   next: NNIS_DSV41_5_real_model_campaign_requires_physical_execution_on_declared_environment
+
+v888_portable_evidence_2026_09_28_p4:
+  status: NNIS_P4_portable_kernel_artifact_binding_merged
+  pull_request: https://github.com/Memorithm/NNIS/pull/235
+  qualified_head: ae44260afd1a7ae6e0b61288f7bef6e92af5f3bc
+  merge_revision: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
+  exact_head_ci: {run_id: 36392233169, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - versioned_kernel_artifact_source_entry_point_bindings_workgroup_policy_evidence_digest
+    - SHA_256_source_and_canonical_descriptor_fingerprints_dependency_free
+    - fail_closed_bind_fingerprint_backend_family_and_capability_requirements
+  exclusions:
+    - no_compilation_dispatch_or_execution
+    - no_WGPU_backend_or_WGSL_validation
+    - no_correctness_parity_or_performance_claim
+  next: NNIS_P3_WGPU_backend_qualified_against_CPU_reference_graph_semantics_and_P4_binding

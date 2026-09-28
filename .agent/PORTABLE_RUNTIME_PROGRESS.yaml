@@ -1,7 +1,7 @@
 schema_version: 1
 kind: nnis_portable_execution_progress
 repository: Memorithm/NNIS
-last_updated: "2026-09-22"
+last_updated: "2026-09-28"
 status: active
 merge_policy: never_merge_this_file_to_main_without_explicit_user_request
 scope: >-
@@ -178,12 +178,41 @@ completed:
       - total_process_memory_budget_or_OS_overcommit_guarantee
       - ElasticXxx_transactional_adapter
       - ElasticBitAllocation_Stage_B_execution
+  P4_kernel_artifact_binding:
+    pull_request: 235
+    qualified_head: ae44260afd1a7ae6e0b61288f7bef6e92af5f3bc
+    merge_commit: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
+    status: complete_artifact_identity_and_capability_binding_only
+    exact_head_ci: {run_id: 36392233169, conclusion: success}
+    Rust_1_77_check: success
+    rustfmt_clippy_workspace_tests: success
+    scope:
+      - KernelArtifactV1_WGSL_PortableIr_CpuBuiltin_source_kinds_mapped_to_backend_family
+      - ASCII_entry_point_ordered_binding_schema_with_writable_storage_requirement
+      - overflow_checked_workgroup_geometry_numerical_policy_optional_evidence_digest
+      - dependency_free_SHA_256_FIPS_180_vectors_source_and_canonical_descriptor_fingerprints
+      - golden_descriptor_fingerprint_independently_reproduced_with_Python_hashlib
+      - fail_closed_bind_expected_fingerprint_backend_family_and_CapabilitySet_requirements
+      - CPU_integration_test_against_declared_CpuDevice_limits
+    record: docs/PORTABLE_KERNEL_ARTIFACT_V1.md
+    not_claimed:
+      - kernel_compilation_dispatch_or_execution
+      - WGSL_or_portable_IR_validation
+      - WGPU_backend
+      - numerical_correctness_cross_backend_parity_or_performance
+  DSV41_CPU_references:
+    pull_requests: [230, 231, 232, 233, 234]
+    scope: >-
+      bounded recent-window replay, cross-layer KV reuse-plan consumer, FP4
+      E2M1 group-scaled KV reference and accounting, confidence-scheduled
+      speculative verification surface, DSV41-5 campaign preregistration and
+      evidence validator (CPU/core only; see sovereignty roadmap DSV41 evidence)
 current:
-  earliest_open_slice: portable_kernel_artifact_binding_and_capability_contract
-  status: typed_CPU_graph_execution_qualified_WGPU_and_real_consumers_still_open
+  earliest_open_slice: WGPU_backend_qualification_against_CPU_reference
+  status: CPU_reference_graph_and_P4_artifact_binding_qualified_WGPU_and_real_consumers_still_open
 next:
-  - define_versioned_portable_kernel_artifact_binding_and_capability_identity
-  - qualify_WGPU_against_explicit_CPU_reference_and_graph_semantics
+  - qualify_WGPU_against_explicit_CPU_reference_graph_semantics_and_P4_artifact_binding
+  - decide_Rust_1_77_compatible_wgpu_dependency_and_CI_adapter_strategy_before_WGPU_code
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately
   - expose_versioned_executable_plans_to_ElasticXxx_after_backend_verification_exists
   - retain_SciRust_generic_math_ownership_and_review_compatible_shared_primitives

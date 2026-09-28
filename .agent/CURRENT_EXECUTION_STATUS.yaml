@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: c577f01eb0ecf84420fd316ffd13492f6faf9311
+  main_head: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
   main_head_recorded_on: "2026-09-28"
   previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
@@ -335,6 +335,22 @@ main_repository_state:
         claim_boundary: >-
           software_contract_only_no_campaign_executed_no_results_recorded;
           validated_record_is_not_promotion_or_comparison; synthetic_values_only_in_cfg_test
+      - id: portable_p4_kernel_artifact_binding
+        pull_request: 235
+        qualified_head: ae44260afd1a7ae6e0b61288f7bef6e92af5f3bc
+        merge_commit: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
+        exact_head_ci: {run_id: 36392233169, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core KernelArtifactV1 (WGSL/PortableIr/CpuBuiltin source, entry
+          point, ordered binding schema, workgroup geometry, numerical policy,
+          optional qualification evidence digest) with SHA-256 source and
+          canonical descriptor fingerprints (dependency-free SHA-256, FIPS 180
+          vectors) and fail-closed bind() checking fingerprint, backend family and
+          derived capabilities; CPU test against declared CpuDevice limits
+        record: docs/PORTABLE_KERNEL_ARTIFACT_V1.md
+        claim_boundary: >-
+          binding_executes_nothing; not_correctness_parity_or_performance_evidence;
+          no_WGPU_backend_or_WGSL_validation; no_vendor_dependency
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -352,8 +368,18 @@ current_execution_order:
       software-only versioned preregistration/evidence schema and fail-closed
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
-  - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
+  - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
     status: selected_next_software
+    action: >-
+      qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
+      merged CPU reference, graph semantics and P4 artifact binding; requires a
+      reviewed Rust 1.77 compatible wgpu dependency decision and CI adapter
+      strategy (software adapter or explicit skip that is not evidence)
+    claim_boundary: >-
+      WGPU_compilation_or_software_adapter_runs_are_not_hardware_parity_or_performance_evidence
+  - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
+    status: completed_software
+    completed_pull_requests: [235]
     action: define_versioned_portable_kernel_artifact_binding_and_capability_identity_per_PORTABLE_RUNTIME_PROGRESS
   - id: DSV41_WGPU_COUNTERPARTS
     status: open_blocked_on_portable_WGPU_backend
