@@ -20,6 +20,7 @@ cargo test --locked -p nnis-wgpu --test capabilities
 cargo test --locked -p nnis-wgpu --test adapter_add_f32 -- --nocapture
 cargo test --locked -p nnis-wgpu --test portable_memory -- --nocapture
 cargo test --locked -p nnis-wgpu --test numerical_parity -- --nocapture
+cargo test --locked -p nnis-wgpu --test graph_parity -- --nocapture
 RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo doc --locked -p nnis-wgpu --no-deps
 
 echo "nnis-wgpu portable dependency boundary: OK"

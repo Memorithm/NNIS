@@ -402,6 +402,44 @@ fn main() {{
         )
     }
 
+    /// Fail with `InvalidDescriptor` if any F32 in `buffer` is non-finite.
+    pub(crate) fn check_finite(&self, buffer: &WgpuBuffer) -> Result<()> {
+        let words = self.words(buffer)?;
+        let device = self.queue.device();
+        device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let status = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("nnis.wgpu.f32.status"),
+            size: 4,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        pop_scopes(device, "WGPU F32 status allocation")?;
+        let bindings = [read(buffer), status_binding(&status)];
+        let artifact = self.artifact(
+            "nnis.wgpu.f32.validate_finite",
+            WGSL_F32_BITWISE_NUMERICAL_POLICY,
+            &validate_source(),
+            &bindings,
+            [WORKGROUP, 1, 1],
+        )?;
+        let groups = self.groups(words, WORKGROUP)?;
+        device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("nnis.wgpu.f32.validate_finite"),
+        });
+        self.dispatch(&mut encoder, &artifact, &bindings, groups);
+        self.queue.queue().submit(Some(encoder.finish()));
+        pop_scopes(device, "WGPU F32 finiteness check")?;
+        if self.queue.read_wgpu(&status, 0, 4)? != [0, 0, 0, 0] {
+            return Err(PortableError::InvalidDescriptor(
+                "WGPU F32 input or arithmetic intermediate is non-finite",
+            ));
+        }
+        Ok(())
+    }
+
     fn words(&self, buffer: &WgpuBuffer) -> Result<usize> {
         self.queue.check_owner(buffer)?;
         require_usage(buffer, BufferUsages::STORAGE, "WGPU F32 execution")?;
@@ -508,19 +546,7 @@ fn main() {{
         if seed_from_output {
             validated.push(output.raw());
         }
-        let validate_source = format!(
-            "{COMMON}
-@group(0) @binding(0) var<storage, read> input: array<u32>;
-@group(0) @binding(1) var<storage, read_write> status: atomic<u32>;
-
-@compute @workgroup_size(64, 1, 1)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
-    let i = id.x;
-    if (i >= arrayLength(&input)) {{ return; }}
-    if (!nnis_finite(input[i])) {{ atomicOr(&status, 1u); }}
-}}
-"
-        );
+        let validate_source = validate_source();
         for buffer in &validated {
             let bytes = buffer.size();
             let validator_bindings = [
@@ -656,6 +682,22 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
         pass.set_bind_group(0, &bind_group, &[]);
         pass.dispatch_workgroups(groups, 1, 1);
     }
+}
+
+fn validate_source() -> String {
+    format!(
+        "{COMMON}
+@group(0) @binding(0) var<storage, read> input: array<u32>;
+@group(0) @binding(1) var<storage, read_write> status: atomic<u32>;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
+    let i = id.x;
+    if (i >= arrayLength(&input)) {{ return; }}
+    if (!nnis_finite(input[i])) {{ atomicOr(&status, 1u); }}
+}}
+"
+    )
 }
 
 fn read(buffer: &WgpuBuffer) -> Binding<'_> {

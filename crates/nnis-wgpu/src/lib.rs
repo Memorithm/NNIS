@@ -18,6 +18,8 @@
 //! - finite-F32 WGSL reference kernels (add, multiply, ReLU, sum, projection,
 //!   gather, scatter-add) mirroring `nnis-cpu`, each bound as a P4 artifact
 //!   ([`numerical::WgpuF32KernelsV1`]).
+//! - execution of validated portable F32 graph plans through those kernels
+//!   ([`graph::execute_f32_graph`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -32,6 +34,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::sync::{mpsc, Arc, Mutex};
 
+pub mod graph;
 mod memory;
 pub mod numerical;
 
