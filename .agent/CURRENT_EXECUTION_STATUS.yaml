@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 891c22681d4a15d1ce7fbcbb60fff93448452ed4
+  main_head: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
+  previous_recorded_main_head: 891c22681d4a15d1ce7fbcbb60fff93448452ed4
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -463,6 +463,21 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
           no_memory_residency_model_quality_latency_or_throughput_claim
+      - id: portable_p3_wgpu_dsv41_greedy_speculative_verification
+        pull_request: 243
+        qualified_head: 7ea38860b2411abf82876a177e78fcf8e955b170
+        merge_commit: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
+        exact_head_ci: {run_id: 36398662057, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 27}
+        summary: >-
+          WgpuGreedySpeculativeVerifierV1 mirroring CpuGreedySpeculativeVerifierV1;
+          device-resident logits scanned by a WGSL greedy-argmax artifact using a
+          bitwise monotonic order key (-0.0 folded onto +0.0, lowest index wins ties,
+          first non-finite column reported) followed by verify_scheduled_draft on the
+          host; target tokens, outcomes, stats and error variants identical to CPU
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
+          serial_reference_kernel_no_latency_cost_or_throughput_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -481,9 +496,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_slices_merged_PR_237_238_239_240_241_242_selected_next_software
-    completed_pull_requests: [237, 238, 239, 240, 241, 242]
-    next_slice: DSV41_WGPU_greedy_speculative_verification_PR_243
+    status: software_slices_complete_PR_237_to_243_CI_wiring_and_hardware_evidence_open
+    completed_pull_requests: [237, 238, 239, 240, 241, 242, 243]
+    next_slice: wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push_then_hardware_WGPU_adapter_evidence
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a

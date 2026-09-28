@@ -1063,3 +1063,18 @@ v888_portable_evidence_2026_09_28_p3_wgpu_dsv41_fp4_decode:
     - encoding_remains_CPU_reference
     - no_memory_quality_or_performance_claim
   next: NNIS_DSV41_WGPU_greedy_speculative_verification
+v888_portable_evidence_2026_09_28_p3_wgpu_dsv41_speculative_verify:
+  status: NNIS_DSV41_greedy_speculative_verification_on_WGPU_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/243
+  qualified_head: 7ea38860b2411abf82876a177e78fcf8e955b170
+  merge_revision: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
+  exact_head_ci: {run_id: 36398662057, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - device_resident_logits_greedy_argmax_as_bound_P4_artifact
+    - bitwise_order_key_exactly_CPU_F32_comparison_lowest_index_ties
+    - outcomes_stats_and_errors_identical_to_CPU_reference
+  exclusions:
+    - CI_has_no_GPU_SKIP_not_evidence
+    - llvmpipe_runs_are_code_path_only
+    - serial_reference_kernel_no_performance_claim
+  next: NNIS_P3_wire_check_portable_wgpu_into_CI_requires_workflow_scope_then_hardware_WGPU_adapter_evidence
