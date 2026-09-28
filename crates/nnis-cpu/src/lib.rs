@@ -7,6 +7,7 @@
 //! [`replay`] provides the dense DSV41-1 bounded recent-window replay reference.
 //! [`kv_reuse`] consumes a model-supplied DSV41-2 cross-layer KV reuse plan.
 //! [`fp4_kv`] is the DSV41-3 FP4 E2M1 group-scaled KV encode/decode reference.
+//! [`speculative`] is the DSV41-4 greedy speculative-verification reference.
 
 #![forbid(unsafe_code)]
 
@@ -19,6 +20,8 @@ pub mod kv_reuse;
 pub mod numerical;
 
 pub mod replay;
+
+pub mod speculative;
 
 use core::ops::Range;
 

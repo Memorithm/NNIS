@@ -9,6 +9,7 @@ pub mod graph;
 pub mod kv_fp4;
 pub mod kv_reuse_plan;
 pub mod replay_state;
+pub mod speculative_verify;
 
 use core::fmt;
 use core::ops::{BitOr, BitOrAssign};
