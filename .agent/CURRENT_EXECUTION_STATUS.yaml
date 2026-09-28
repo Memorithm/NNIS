@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
+  main_head: 2c22c602433fc6c183cf0f303a87e0559ad33372
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 49b4d0ea589a1c553cc501d485edfeedd19b81e4
+  previous_recorded_main_head: 5e4cf4ed174b31ac29c39561a92d63c4ae355267
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -319,7 +319,7 @@ main_repository_state:
         record: docs/PORTABLE_SPECULATIVE_VERIFICATION_V1.md
         claim_boundary: >-
           counts_only_no_speed_up_claim; NNIS_drafts_nothing_and_invents_no_confidence_policy;
-          not_wired_into_InferenceSession; greedy_acceptance_only_in_v1; no_WGPU_or_CUDA_execution
+          opt_in_InferenceSession_wiring_added_PR_248_not_GPU_executed; greedy_acceptance_only_in_v1; no_WGPU_or_CUDA_execution
       - id: dsv41_5_campaign_preregistration_and_evidence_validator
         pull_request: 234
         qualified_head: e7676057c4508f6c44ae82705278b93c83c2fb2c
@@ -543,6 +543,22 @@ main_repository_state:
         claim_boundary: >-
           software_surface_only_no_hardware_ARM64_or_reviewed_record;
           llvmpipe_code_path_only; no_performance_claim
+      - id: dsv41_4_opt_in_session_speculative_verification_wiring
+        pull_request: 248
+        qualified_head: eb0dff0a2e3163342e02c55a36d6b08c33b60c29
+        merge_commit: 2c22c602433fc6c183cf0f303a87e0559ad33372
+        exact_head_ci: {run_id: 36404277752, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 28}
+        summary: >-
+          opt-in caller-driven InferenceSession::verify_greedy_draft (caller
+          supplies draft plus confidences and schedule): teacher-forces scheduled
+          tokens through unchanged decode_one, judges with the nnis-cpu greedy
+          reference, rewinds KV and position to the accepted prefix via new
+          all-or-nothing KvCache::truncate, decodes the emitted target token;
+          counters only on success, failures rewind; types re-exported from nnis
+        record: docs/PORTABLE_SPECULATIVE_VERIFICATION_V1.md
+        claim_boundary: >-
+          session_method_not_executed_on_a_GPU_CI_has_no_GPU;
+          no_speed_up_acceptance_rate_or_quality_claim; default_paths_unchanged
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -585,8 +601,8 @@ current_execution_order:
     completed_pull_requests: [241, 242, 243]
     action: qualify WGPU replay, reuse binding, FP4 decode and speculative verification against the merged CPU oracles
   - id: DSV41_4_CONFIDENCE_SCHEDULED_SPECULATIVE_VERIFICATION_SURFACE
-    status: completed_software
-    completed_pull_requests: [233]
+    status: completed_software_opt_in_session_wiring_PR_248_not_GPU_executed
+    completed_pull_requests: [233, 248]
   - id: DSV41_3_PORTABLE_FP4_E2M1_GROUP_SCALED_KV_REFERENCE
     status: completed_software
     completed_pull_requests: [232]

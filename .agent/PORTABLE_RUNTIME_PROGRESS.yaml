@@ -397,6 +397,20 @@ completed:
     not_claimed:
       - hardware_or_ARM64_evidence
       - latency_cost_or_throughput
+  DSV41_4_session_wiring:
+    pull_request: 248
+    qualified_head: eb0dff0a2e3163342e02c55a36d6b08c33b60c29
+    merge_commit: 2c22c602433fc6c183cf0f303a87e0559ad33372
+    status: complete_opt_in_InferenceSession_verify_greedy_draft_not_GPU_executed
+    exact_head_ci: {run_id: 36404277752, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - InferenceSession_verify_greedy_draft
+      - KvCache_truncate_all_or_nothing
+      - nnis_facade_reexports_of_speculative_types
+    not_claimed:
+      - GPU_execution_of_the_session_method
+      - speed_up_acceptance_rate_or_quality
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-

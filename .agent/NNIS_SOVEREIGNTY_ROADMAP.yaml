@@ -1125,3 +1125,27 @@ v888_portable_evidence_2026_09_28_p10_evidence_cli:
     - llvmpipe_runs_are_code_path_only
     - no_performance_claim
   next: human_runs_nnis_evidence_cpu_host_on_ARM64_and_nnis_evidence_wgpu_adapter_on_a_real_adapter
+deepseek_v41_runtime_evidence_2026_09_28_dsv41_4_session_wiring:
+  status: DSV41_4_opt_in_caller_driven_InferenceSession_wiring_merged_not_GPU_executed
+  pull_request: https://github.com/Memorithm/NNIS/pull/248
+  qualified_head: eb0dff0a2e3163342e02c55a36d6b08c33b60c29
+  merge_revision: 2c22c602433fc6c183cf0f303a87e0559ad33372
+  exact_head_ci: {run_id: 36404277752, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - InferenceSession_verify_greedy_draft_caller_supplies_draft_confidences_and_schedule
+    - teacher_forcing_through_unchanged_decode_one_and_CPU_greedy_reference_judgement
+    - all_or_nothing_KvCache_truncate_rewind_to_accepted_prefix
+    - counters_updated_only_on_success_failures_rewind
+    - speculative_types_reexported_from_nnis_facade
+  exclusions:
+    - session_method_not_executed_on_a_GPU_CI_has_no_GPU
+    - no_speed_up_acceptance_rate_or_quality_claim
+    - default_generation_paths_unchanged
+    - no_draft_model_or_confidence_estimator
+  supersedes_exclusion: deepseek_v41_runtime_evidence_2026_09_28_dsv41_4.not_wired_into_InferenceSession
+  next: human_or_CUDA_host_executes_verify_greedy_draft_then_DSV41_5_campaign
+  FP4_runtime_KV_mode_not_implemented_reason: >-
+    runtime KV is CUDA device-resident f32 consumed by CUDA attention kernels;
+    no portable CPU/WGPU model session exists; FP4 runtime storage would require
+    new unexecutable CUDA kernels against backend order and DSV41-5 is required
+    before compressed-KV runtime promotion
