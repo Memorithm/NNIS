@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: fbfef08736e15b52c69cf04557758b2aabec73fd
+  main_head: 70edaa1c11d26b414344d9b0ba97c5646ec91745
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: ad429f5ab5c3fca9948de26ff771aa826ba94e6f
+  previous_recorded_main_head: fbfef08736e15b52c69cf04557758b2aabec73fd
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -496,6 +496,18 @@ main_repository_state:
         claim_boundary: >-
           harness_and_format_only_no_hardware_record_produced_or_committed;
           llvmpipe_run_is_code_path_only; CI_pass_is_SKIP_not_evidence
+      - id: retire_stale_exec_plans
+        pull_request: 245
+        qualified_head: f4309e03487dcf6d79f3483c72a809fbbe54a8ac
+        merge_commit: 70edaa1c11d26b414344d9b0ba97c5646ec91745
+        exact_head_ci: {run_id: 36400564614, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          moved all eight docs/exec-plans/active plans (already merged software:
+          PRs 104-106, 137, 138, 154-157, 168, or historical) to
+          docs/exec-plans/completed with status lines naming the merged PR and
+          commit; added docs/exec-plans/README.md stating there is no active plan
+          and that the current selection lives in this .agent ledger
+        claim_boundary: documentation_housekeeping_only_no_new_physical_or_performance_result
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
