@@ -22,7 +22,7 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 01f6ca72c00ea4c0a7591404cde40503bab47533
+  main_head: c22230979f8be930382130d14d95e4d60b4f7a32
   main_head_recorded_on: "2026-09-28"
   previous_recorded_main_head: c58ec1cc11db102a4ea009af0052970e139a10f7
 
@@ -305,26 +305,51 @@ main_repository_state:
           not_wired_into_runtime_KV; no_quality_memory_latency_or_throughput_claim;
           SLHAv2_canonical_FP4_contract_binding_open
 
+      - id: dsv41_4_confidence_scheduled_speculative_verification_surface
+        pull_request: 233
+        qualified_head: 1089bb02353a841709233de34da6cc4898f4760e
+        merge_commit: c22230979f8be930382130d14d95e4d60b4f7a32
+        exact_head_ci: {run_id: 36391322284, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          nnis-core SpeculativeDraftV1 / ConfidenceScheduleV1 (caller-owned
+          leading-above-threshold capped schedule), pure verify_scheduled_draft
+          (longest matching prefix plus one target token), checked
+          SpeculativeAcceptanceStatsV1; nnis-cpu CpuGreedySpeculativeVerifierV1
+          over teacher-forced target logits (lowest-index greedy ties)
+        record: docs/PORTABLE_SPECULATIVE_VERIFICATION_V1.md
+        claim_boundary: >-
+          counts_only_no_speed_up_claim; NNIS_drafts_nothing_and_invents_no_confidence_policy;
+          not_wired_into_InferenceSession; greedy_acceptance_only_in_v1; no_WGPU_or_CUDA_execution
+
 current_execution_order:
-  - id: DSV41_4_CONFIDENCE_SCHEDULED_SPECULATIVE_VERIFICATION_SURFACE
-    status: selected_next_software
+  - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
+    status: next_roadmap_step_requires_physical_execution
     action: >-
-      backend-neutral runtime surface for confidence-scheduled speculative
-      verification: explicit caller-supplied draft/confidence inputs and a
-      deterministic CPU reference verifier that records acceptance counts
-      against the target model's greedy/declared semantics
-    claim_boundary: >-
-      no_speculative_speed_claim_without_measured_acceptance_and_real_runtime_cost;
-      NNIS_does_not_invent_the_confidence_policy
+      same-model same-prompt dense vs DSV41 primitive campaign reporting quality,
+      exact memory, decode latency distribution and tokens/s together at an
+      exact clean green head; cannot be completed by software-only agents
+    claim_boundary: no_result_may_be_recorded_without_actual_execution_on_the_declared_environment
+  - id: DSV41_5_CAMPAIGN_PREREGISTRATION_SOFTWARE
+    status: candidate_next_software
+    action: >-
+      software-only versioned preregistration/evidence schema and fail-closed
+      validator for the DSV41-5 campaign (fixed model, prompts, metrics,
+      environment fingerprint, dense baseline) with no results recorded
+  - id: PORTABLE_P4_KERNEL_ARTIFACT_BINDING
+    status: candidate_next_software
+    action: define_versioned_portable_kernel_artifact_binding_and_capability_identity_per_PORTABLE_RUNTIME_PROGRESS
+  - id: DSV41_WGPU_COUNTERPARTS
+    status: open_blocked_on_portable_WGPU_backend
+    action: qualify WGPU replay, reuse binding, FP4 decode and speculative verification against the merged CPU oracles
+  - id: DSV41_4_CONFIDENCE_SCHEDULED_SPECULATIVE_VERIFICATION_SURFACE
+    status: completed_software
+    completed_pull_requests: [233]
   - id: DSV41_3_PORTABLE_FP4_E2M1_GROUP_SCALED_KV_REFERENCE
     status: completed_software
     completed_pull_requests: [232]
   - id: DSV41_2_CROSS_LAYER_KV_REUSE_PLAN_CONSUMER
     status: completed_software
     completed_pull_requests: [231]
-  - id: DSV41_1_WGPU_COUNTERPART
-    status: open_blocked_on_portable_WGPU_backend
-    action: qualify a WGPU recent-window replay path against the merged CPU oracle once a WGPU backend exists (portable P3)
   - id: DSV41_1_BOUNDED_RECENT_WINDOW_REPLAY_CPU_REFERENCE
     status: completed_software
     completed_pull_requests: [230]
