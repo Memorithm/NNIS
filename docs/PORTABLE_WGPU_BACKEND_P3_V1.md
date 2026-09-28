@@ -224,10 +224,55 @@ Declared tolerance:
 
 Without an adapter every test logs an explicit SKIP.
 
+## DSV41 replay and cross-layer KV reuse on WGPU (P3 slice 5)
+
+`nnis_wgpu::replay::WgpuReplaySourceV1` is the WGPU counterpart of
+`nnis_cpu::replay::CpuReplaySourceV1`:
+
+- it binds a dense row-major F32 payload to one exact
+  `ReplaySourceIdentityV1`, either uploaded from the host (`from_host`) or
+  taken over from a device buffer (`from_buffer`, which needs `STORAGE` and
+  `COPY_SRC`);
+- construction checks run in the CPU order with the same variants (zero row
+  width, range overflow, payload length, first non-finite flat index). A
+  device-buffer payload is checked for finiteness on the device and reports
+  `NonFiniteDeviceValue` without an index;
+- the payload buffer is private and exposed only by shared reference, so it
+  cannot be written after binding;
+- `replay_window` validates the request with `ReplayStateProviderV1` (any
+  provider, source, generation, representation, epoch or range drift fails
+  closed), then copies the window rows into a fresh device buffer with one
+  aligned buffer-to-buffer copy. No shader and no host staging touch the
+  values.
+
+`WgpuCrossLayerKvBindingV1` mirrors `CpuCrossLayerKvBindingV1`: one owner
+source per owning (layer, component), reusing layers resolved to the declared
+owner, and missing, duplicate, reusing-layer, out-of-range and range-mismatch
+errors matching the CPU variants.
+
+Declared tolerance: **bit-exact**. Replayed windows equal the CPU replay bits,
+including `-0.0`, subnormals and extreme normals.
+
+`tests/replay_parity.rs` covers:
+
+- every recent and every interior window of a 12-position source checked
+  bit for bit against the CPU source;
+- device-buffer sources, including the non-finite, byte-length, usage and
+  zero-width errors;
+- replayed windows staying independent of the source after being overwritten;
+- replay and binding errors matching the CPU variants;
+- reads for all layers and components of a four-layer reuse plan equal to
+  the CPU binding, including the foreign-request rejection.
+
+Sharing stays logical. Fewer bound sources is not a memory, residency,
+latency or throughput result. Without an adapter every test logs an explicit
+SKIP.
+
 ## Claim boundary
 
-This slice adds WGPU compilation plus adapter discovery, limit mapping and a
-single-kernel parity check. It contains no performance claim and no hardware
-parity claim. A pass without an adapter, or on a software adapter, is not
-WGPU hardware evidence. `PortableDevice`/`PortableQueue` for WGPU, graph
-execution, and DSV41 WGPU counterparts are still open.
+The P3 slices add WGPU compilation, adapter discovery, limit mapping, the
+portable memory contracts, the WGSL F32 reference kernels, portable graph
+execution and the DSV41 replay/KV-reuse counterparts. They contain no
+performance claim and no hardware parity claim. A pass without an adapter,
+or on a software adapter, is not WGPU hardware evidence. The DSV41 FP4 decode
+and speculative-verification WGPU counterparts are still open.
