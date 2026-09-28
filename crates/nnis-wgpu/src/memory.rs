@@ -53,6 +53,10 @@ impl WgpuBuffer {
     pub fn is_empty(&self) -> bool {
         self.descriptor.size_bytes == 0
     }
+
+    pub(crate) fn raw(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
 }
 
 impl PortableBuffer for WgpuBuffer {
@@ -107,6 +111,14 @@ pub struct WgpuQueue {
 }
 
 impl WgpuQueue {
+    pub(crate) fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub(crate) fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
     pub(crate) fn check_owner(&self, buffer: &WgpuBuffer) -> Result<()> {
         if buffer.device_token == self.device_token {
             Ok(())
@@ -192,6 +204,16 @@ impl WgpuQueue {
         offset_bytes: u64,
         size_bytes: u64,
     ) -> Result<Vec<u8>> {
+        self.read_wgpu(&buffer.buffer, offset_bytes, size_bytes)
+    }
+
+    /// Read a range of any `COPY_SRC` WGPU buffer after all prior submissions.
+    pub(crate) fn read_wgpu(
+        &self,
+        buffer: &wgpu::Buffer,
+        offset_bytes: u64,
+        size_bytes: u64,
+    ) -> Result<Vec<u8>> {
         let mut result = reserve_bytes(size_bytes)?;
         if size_bytes == 0 {
             return Ok(result);
@@ -212,7 +234,7 @@ impl WgpuQueue {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("nnis.wgpu.readback"),
             });
-        encoder.copy_buffer_to_buffer(&buffer.buffer, start, &staging, 0, span);
+        encoder.copy_buffer_to_buffer(buffer, start, &staging, 0, span);
         self.queue.submit(Some(encoder.finish()));
         pop_scopes(&self.device, "WGPU readback")?;
         let slice = staging.slice(..);

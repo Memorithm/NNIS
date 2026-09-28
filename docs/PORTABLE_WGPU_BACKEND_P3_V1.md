@@ -134,6 +134,57 @@ fields must match. The test also covers WGPU-specific admission rules,
 fences, and aligned and unaligned `copy_buffer` against `CpuQueue`. Without
 an adapter every test logs an explicit SKIP.
 
+## WGSL F32 reference kernels (P3 slice 3)
+
+`nnis_wgpu::numerical::WgpuF32KernelsV1` mirrors `nnis_cpu::numerical::CpuF32KernelsV1`
+for `binary` (add, multiply), `relu`, `sum`, `project_kn`, `gather` and
+`scatter_add`. Each operation, and the finiteness validator it uses, is a P4
+`KernelArtifactV1`. The artifact is bound with `WgpuDevice::bind`
+(fingerprint, backend family, capabilities, WGPU binding limits) before any
+pipeline is created. The report records the artifact fingerprint.
+
+Semantics follow the CPU reference:
+
+- Every buffer needs `STORAGE` and a non-zero multiple of four bytes.
+- Every input value, including unselected gather inputs and the whole old
+  scatter destination, must be finite. So must every arithmetic
+  intermediate. Finiteness is tested on raw bits, so it cannot be optimized
+  away.
+- Output goes to a scratch buffer. It is copied to the destination only when
+  no non-finite value was seen, so any error leaves the destination
+  unchanged. This includes a scatter-add that fails partway.
+- Sum and scatter-add run serially in the CPU order, in a single
+  invocation. They are reference paths, not performance paths.
+- When several errors apply at once, the reported variant can differ from
+  the CPU reference. Structural checks run on the host first; finiteness
+  checks run on the device.
+
+| operation | policy | declared tolerance |
+|---|---|---|
+| ReLU, gather | `wgsl-f32-finite-bitwise-exact-v1` | bit-exact, subnormals included (bit manipulation only) |
+| add, multiply, sum, scatter-add | `wgsl-f32-finite-serial-correctly-rounded-normal-range-v1` | bit-exact for normal-range operands and results (WGSL may flush subnormals) |
+| project_kn | `wgsl-f32-finite-fma-inherited-bound-3k-plus-1-ulp-v1` | `|wgpu - cpu| <= (3k + 1) * 2^-24 * sum_r |x_r * w_rj|`; sign of zero not compared |
+
+The projection bound exists because WGSL `fma` accuracy is "inherited from
+`a * b + c`", so a device may round twice where the CPU reference uses a
+fused `mul_add`. Locally on llvmpipe (software, code path only), 51 of 70
+outputs were bit-identical to the fused CPU result, and all 70 were within
+the bound.
+
+`tests/numerical_parity.rs` covers:
+
+- bit-exact add and multiply over 1000 elements, including signed zeros and
+  ties;
+- ReLU and gather, including subnormals and repeated indices;
+- serial sum, including `-0` inputs, cancellation, and large-magnitude
+  terms that cancel;
+- serial scatter-add with repeated indices;
+- the projection bound;
+- error variants matching the CPU reference, with the destination checked
+  unchanged after each error.
+
+Without an adapter every test logs an explicit SKIP.
+
 ## Claim boundary
 
 This slice adds WGPU compilation plus adapter discovery, limit mapping and a
