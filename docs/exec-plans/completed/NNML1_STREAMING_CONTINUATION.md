@@ -1,6 +1,7 @@
 # NNML1 streaming continuation
 
-Status: **completed** (library surface merged; CLI follow-on selected).
+Status: **completed** (library surface merged; CLI follow-on merged as PR #137
+on main `faab2ea`).
 
 ## Merged software
 
@@ -8,7 +9,7 @@ Status: **completed** (library surface merged; CLI follow-on selected).
 - PR #105 — sampled token streaming (`generate_sampled_streaming`, `GenerationStreamControl`)
 - PR #106 — sampled multi-session batch (`SampledSessionBatch`)
 
-Active follow-on software slice: `docs/exec-plans/active/NNML1_CLI_SAMPLED_STREAMING.md`
+Completed follow-on software slice: `docs/exec-plans/completed/NNML1_CLI_SAMPLED_STREAMING.md`
 (`NNML1_CLI_SAMPLED_STREAMING_SURFACE`) — expose sampling/streaming through the
 `nnis` facade and opt-in CLI flags. That slice does not reopen this library plan.
 

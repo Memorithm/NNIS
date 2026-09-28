@@ -1,8 +1,7 @@
 # NNML2 INT4 facade re-export surface
 
-Status: **active** (selected next non-physical software slice after PR #154
-KvCacheTelemetry schema v1 / PR #153 INT4 projection; may land alongside or
-after in-flight PR #155 NVML process-memory CLI).
+Status: **completed** (merged as PR #156 on main `2e99408`). Originally
+selected after PR #154 KvCacheTelemetry schema v1 / PR #153 INT4 projection.
 
 ## Goal
 

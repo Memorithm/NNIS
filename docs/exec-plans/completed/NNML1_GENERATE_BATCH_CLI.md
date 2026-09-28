@@ -1,8 +1,8 @@
 # NNML1 SampledSessionBatch generate-batch CLI
 
-Status: **active** (selected next non-physical software slice after PR #155
-NVML process-memory CLI on main `a9a17ef`; deliberately avoids conflict with
-in-flight PR #156 INT4 facade re-exports by not touching `crates/nnis/src/lib.rs`).
+Status: **completed** (merged as PR #157 on main `1f8aeaa`; rustfmt baseline
+restored by PR #168 on main `cd7aa97`). Originally selected after PR #155 NVML
+process-memory CLI on main `a9a17ef`.
 
 ## Goal
 

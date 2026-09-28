@@ -58,4 +58,4 @@ This CLI does **not** claim:
 - serving performance, latency, or quality;
 - physical Thor parity or residency.
 
-See `docs/exec-plans/active/NNML1_GENERATE_BATCH_CLI.md`.
+See `docs/exec-plans/completed/NNML1_GENERATE_BATCH_CLI.md`.
