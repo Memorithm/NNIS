@@ -3,6 +3,11 @@
 //! DSV41-0 defines only source identity and bounded-window validation. It does
 //! not define model/KV reconstruction semantics, move bytes, allocate memory,
 //! or claim equivalence with an external bounded-replay implementation.
+//!
+//! DSV41-1 adds [`ReplayWindowRequestV1::recent`], which resolves a
+//! caller-supplied recent-window length into an exact inclusive range ending at
+//! the source's last logical position. The window length is policy supplied by
+//! the model/domain owner; NNIS neither chooses nor clamps it.
 
 use core::fmt;
 
@@ -125,6 +130,14 @@ impl ReplaySourceIdentityV1 {
     pub const fn logical_end_position(&self) -> u64 {
         self.logical_end_position
     }
+
+    /// Exact number of logical items declared by this source range.
+    pub fn logical_items(&self) -> Result<u64, ReplayIdentityError> {
+        self.logical_end_position
+            .checked_sub(self.logical_start_position)
+            .and_then(|delta| delta.checked_add(1))
+            .ok_or(ReplayIdentityError::PositionOverflow)
+    }
 }
 
 /// One bounded replay-window request tied to an exact source identity.
@@ -163,6 +176,32 @@ impl ReplayWindowRequestV1 {
             logical_start_position,
             logical_end_position,
         })
+    }
+
+    /// Construct the most recent `window_items` logical positions of `source`.
+    ///
+    /// The resulting inclusive range always ends at the source's last logical
+    /// position. A zero-length window or a window longer than the declared
+    /// source fails closed; the length is never clamped or chosen by NNIS.
+    pub fn recent(
+        source: ReplaySourceIdentityV1,
+        window_items: u64,
+    ) -> Result<Self, ReplayIdentityError> {
+        if window_items == 0 {
+            return Err(ReplayIdentityError::ZeroWindowItems);
+        }
+        // `span` is `items - 1`, which cannot overflow even for a full-range source.
+        let span = source.logical_end_position - source.logical_start_position;
+        let window_span = window_items - 1;
+        if window_span > span {
+            return Err(ReplayIdentityError::RecentWindowExceedsSource {
+                available: source.logical_items()?,
+                requested: window_items,
+            });
+        }
+        let logical_end_position = source.logical_end_position;
+        let logical_start_position = logical_end_position - window_span;
+        Self::new(source, logical_start_position, logical_end_position)
     }
 
     /// Exact source identity expected by this request.
@@ -232,6 +271,10 @@ pub enum ReplayIdentityError {
         requested_start: u64,
         requested_end: u64,
     },
+    /// A recent-window request asked for zero logical items.
+    ZeroWindowItems,
+    /// A recent-window request asked for more items than the source declares.
+    RecentWindowExceedsSource { available: u64, requested: u64 },
     /// Window-length arithmetic overflowed.
     PositionOverflow,
     /// Provider identity changed after the request was constructed.
@@ -265,6 +308,14 @@ impl fmt::Display for ReplayIdentityError {
             } => write!(
                 output,
                 "replay window {requested_start}..={requested_end} is outside source {source_start}..={source_end}"
+            ),
+            Self::ZeroWindowItems => output.write_str("recent replay window must be non-empty"),
+            Self::RecentWindowExceedsSource {
+                available,
+                requested,
+            } => write!(
+                output,
+                "recent replay window of {requested} items exceeds the {available} source items"
             ),
             Self::PositionOverflow => output.write_str("replay logical-position arithmetic overflow"),
             Self::SourceIdentityMismatch => {
@@ -391,6 +442,66 @@ mod tests {
             ),
             Err(ReplayIdentityError::NonCanonicalId { field: "source_id" })
         ));
+    }
+
+    #[test]
+    fn recent_window_ends_at_last_source_position() {
+        let identity = source(2, 5);
+        assert_eq!(identity.logical_items().unwrap(), 192);
+
+        let request = ReplayWindowRequestV1::recent(identity.clone(), 16).unwrap();
+        assert_eq!(request.logical_start_position(), 240);
+        assert_eq!(request.logical_end_position(), 255);
+        assert_eq!(request.logical_items().unwrap(), 16);
+        assert_eq!(request.source(), &identity);
+
+        let full = ReplayWindowRequestV1::recent(identity.clone(), 192).unwrap();
+        assert_eq!(full.logical_start_position(), 64);
+        assert_eq!(full.logical_end_position(), 255);
+
+        let single = ReplayWindowRequestV1::recent(identity, 1).unwrap();
+        assert_eq!(single.logical_start_position(), 255);
+        assert_eq!(single.logical_end_position(), 255);
+    }
+
+    #[test]
+    fn recent_window_is_never_empty_or_clamped() {
+        assert_eq!(
+            ReplayWindowRequestV1::recent(source(1, 1), 0),
+            Err(ReplayIdentityError::ZeroWindowItems)
+        );
+        assert_eq!(
+            ReplayWindowRequestV1::recent(source(1, 1), 193),
+            Err(ReplayIdentityError::RecentWindowExceedsSource {
+                available: 192,
+                requested: 193,
+            })
+        );
+    }
+
+    #[test]
+    fn recent_window_handles_full_u64_source_range_without_overflow() {
+        let identity = ReplaySourceIdentityV1::new(
+            "cpu-reference",
+            "full-range",
+            0,
+            ReplayRepresentationIdentityV1::new("rep", 1, 0).unwrap(),
+            0,
+            u64::MAX,
+        )
+        .unwrap();
+        assert_eq!(
+            identity.logical_items(),
+            Err(ReplayIdentityError::PositionOverflow)
+        );
+
+        let request = ReplayWindowRequestV1::recent(identity.clone(), u64::MAX).unwrap();
+        assert_eq!(request.logical_start_position(), 1);
+        assert_eq!(request.logical_end_position(), u64::MAX);
+        assert_eq!(request.logical_items().unwrap(), u64::MAX);
+
+        let tail = ReplayWindowRequestV1::recent(identity, 4).unwrap();
+        assert_eq!(tail.logical_start_position(), u64::MAX - 3);
     }
 
     #[test]
