@@ -101,11 +101,11 @@ pub struct WgpuF32KernelsV1<'a> {
     queue: WgpuQueue,
 }
 
-struct Binding<'b> {
-    buffer: &'b wgpu::Buffer,
-    kind: KernelBindingKindV1,
-    element: KernelElementTypeV1,
-    bytes: u64,
+pub(crate) struct Binding<'b> {
+    pub(crate) buffer: &'b wgpu::Buffer,
+    pub(crate) kind: KernelBindingKindV1,
+    pub(crate) element: KernelElementTypeV1,
+    pub(crate) bytes: u64,
 }
 
 impl<'a> WgpuF32KernelsV1<'a> {
@@ -471,7 +471,11 @@ fn main() {{
         Ok(buffer)
     }
 
-    fn groups(&self, invocations: usize, workgroup_x: u32) -> Result<u32> {
+    pub(crate) fn queue(&self) -> &WgpuQueue {
+        &self.queue
+    }
+
+    pub(crate) fn groups(&self, invocations: usize, workgroup_x: u32) -> Result<u32> {
         let groups = (invocations as u64).div_ceil(u64::from(workgroup_x));
         u32::try_from(groups)
             .ok()
@@ -603,7 +607,7 @@ fn main() {{
         })
     }
 
-    fn artifact(
+    pub(crate) fn artifact(
         &self,
         artifact_id: &str,
         policy: &str,
@@ -640,7 +644,7 @@ fn main() {{
         Ok(artifact)
     }
 
-    fn dispatch(
+    pub(crate) fn dispatch(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         artifact: &KernelArtifactV1,
@@ -742,7 +746,7 @@ fn validate_indices(indices: &[usize], limit: usize) -> Result<Vec<u32>> {
         .collect()
 }
 
-fn pop_scopes(device: &wgpu::Device, operation: &str) -> Result<()> {
+pub(crate) fn pop_scopes(device: &wgpu::Device, operation: &str) -> Result<()> {
     let validation = block_on(device.pop_error_scope());
     let out_of_memory = block_on(device.pop_error_scope());
     match validation.or(out_of_memory) {

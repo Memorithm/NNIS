@@ -268,11 +268,61 @@ Sharing stays logical. Fewer bound sources is not a memory, residency,
 latency or throughput result. Without an adapter every test logs an explicit
 SKIP.
 
+## DSV41 FP4 E2M1 decode on WGPU (P3 slice 6)
+
+`nnis_wgpu::fp4::WgpuFp4E2M1KvBlockV1` holds the packed codes and raw scale
+bytes of one `Fp4E2M1KvLayoutV1` block in device buffers.
+
+`from_parts` validates on the host in the same order, and with the same
+variants, as `CpuFp4E2M1KvBlockV1::from_parts`:
+
+1. code and scale byte lengths;
+2. then, for each row and each position in turn: zero padding nibbles, a
+   valid scale (F32 finite and not sign-negative, E8M0 not `0xFF`), and a
+   finite decoded value.
+
+Blocks whose value count or byte counts exceed `u32` indexing are rejected.
+
+`decode` runs one WGSL kernel, bound as a P4 artifact
+(`wgsl-fp4-e2m1-integer-exact-product-single-rne-rounding-v1`), using integer
+arithmetic only:
+
+- The magnitude `m/2` (`m` in `{0,1,2,3,4,6,8,12}`) times the scale `S·2^E`
+  (F32 significand and exponent, or `2^(k-127)` for E8M0) is the exact integer
+  product `m·S < 2^28` at exponent `E-1`.
+- That product is rounded once to binary32 with round-to-nearest-even,
+  including subnormal results.
+- The sign bit is applied last.
+
+This matches the CPU reference, which forms the product exactly in F64 and
+rounds once. Because no floating-point operation runs on the device,
+subnormal flushing cannot affect the result.
+
+Declared tolerance: **bit-exact** with the CPU decode, including `-0.0`,
+subnormal scales and subnormal results. Encoding remains a CPU reference
+operation.
+
+`tests/fp4_decode_parity.rs` covers:
+
+- all 255 valid E8M0 exponents × all 16 codes;
+- 4096 F32 scales (zero, every subnormal significand 1..=600 for tie and
+  sticky rounding, boundary values, `f32::MAX`, and deterministic
+  pseudo-random finite scales) × all 16 codes, with overflowing codes
+  replaced by their sign so each block stays valid;
+- CPU-encoded blocks with row padding and several groups per row, for both
+  encodings;
+- malformed parts (lengths, padding, NaN/inf/`-0.0`/negative F32 scales,
+  E8M0 `0xFF`, decode overflow) returning the CPU error variants.
+
+This is a correctness path only. It makes no memory, residency,
+model-quality, latency or throughput claim. Without an adapter every test
+logs an explicit SKIP.
+
 ## Claim boundary
 
 The P3 slices add WGPU compilation, adapter discovery, limit mapping, the
 portable memory contracts, the WGSL F32 reference kernels, portable graph
-execution and the DSV41 replay/KV-reuse counterparts. They contain no
-performance claim and no hardware parity claim. A pass without an adapter,
-or on a software adapter, is not WGPU hardware evidence. The DSV41 FP4 decode
-and speculative-verification WGPU counterparts are still open.
+execution and the DSV41 replay/KV-reuse and FP4 decode counterparts. They
+contain no performance claim and no hardware parity claim. A pass without an
+adapter, or on a software adapter, is not WGPU hardware evidence. The DSV41
+speculative-verification WGPU counterpart is still open.
