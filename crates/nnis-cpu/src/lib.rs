@@ -6,8 +6,11 @@
 //! process-wide memory budget. General model scheduling remains separate.
 //! [`replay`] provides the dense DSV41-1 bounded recent-window replay reference.
 //! [`kv_reuse`] consumes a model-supplied DSV41-2 cross-layer KV reuse plan.
+//! [`fp4_kv`] is the DSV41-3 FP4 E2M1 group-scaled KV encode/decode reference.
 
 #![forbid(unsafe_code)]
+
+pub mod fp4_kv;
 
 pub mod graph;
 
