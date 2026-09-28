@@ -15,7 +15,8 @@ done
 cargo check --locked -p nnis-core -p nnis-cpu --all-targets
 cargo test --locked -p nnis-core -p nnis-cpu --all-targets
 cargo test --locked -p nnis-core --release --test graph_contract
-cargo test --locked -p nnis-cpu --release --test numerical_reference --test graph_execution
+cargo test --locked -p nnis-cpu --release --test numerical_reference --test graph_execution \
+  --test cpu_host_evidence_harness
 RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo doc --locked -p nnis-core -p nnis-cpu --no-deps
 cargo run --locked -p nnis-cpu --example portable_buffers
 cargo run --locked -p nnis-cpu --example portable_f32_graph
