@@ -2,20 +2,17 @@
 //! through the portable validator, and checks the integer oracle itself on
 //! hand-derived binary32 cases. No timing is measured.
 
-#[path = "../examples/cpu_host_evidence/suites.rs"]
-mod suites;
-
 use nnis_core::adapter_evidence::{EvidenceSourceV1, SuiteOutcomeV1};
 use nnis_core::host_evidence::{
     cpu_host_evidence_from_json, cpu_host_evidence_to_json, validate_cpu_host_evidence,
     CpuHostEvidenceVerdictV1, PortableCpuHostEvidenceV1,
 };
-use nnis_cpu::evidence::{host_identity, CPU_HOST_QUALIFICATION_SUITES_V1};
-use suites::{exact, product, round, sum};
+use nnis_cpu::evidence::oracle::{exact, product, round, sum};
+use nnis_cpu::evidence::{host_identity, run_cpu_host_suites, CPU_HOST_QUALIFICATION_SUITES_V1};
 
 #[test]
 fn harness_suites_pass_and_record_validates() {
-    let suites = suites::run_all();
+    let suites = run_cpu_host_suites();
     let ids: Vec<&str> = suites.iter().map(|suite| suite.suite_id.as_str()).collect();
     assert_eq!(ids, CPU_HOST_QUALIFICATION_SUITES_V1);
     for suite in &suites {

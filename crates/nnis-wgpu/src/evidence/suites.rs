@@ -5,11 +5,21 @@
 //! mismatches. A backend error or panic becomes a failed suite with a detail
 //! string. Nothing is timed.
 //!
-//! Shared by the `wgpu_adapter_evidence` example and the
-//! `adapter_evidence_harness` integration test.
+//! Used by the `wgpu_adapter_evidence` example, the `nnis evidence
+//! wgpu-adapter` CLI and the `adapter_evidence_harness` integration test
+//! through [`run_wgpu_suites`](super::run_wgpu_suites).
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use crate::fp4::{WgpuFp4E2M1KvBlockV1, WGSL_FP4_DECODE_NUMERICAL_POLICY};
+use crate::graph::execute_f32_graph as wgpu_graph;
+use crate::numerical::{
+    WgpuF32BinaryOp, WgpuF32KernelsV1, WGSL_F32_EXACT_NUMERICAL_POLICY,
+    WGSL_F32_PROJECTION_NUMERICAL_POLICY,
+};
+use crate::replay::WgpuReplaySourceV1;
+use crate::speculative::{WgpuGreedySpeculativeVerifierV1, WGSL_GREEDY_ARGMAX_NUMERICAL_POLICY};
+use crate::{WgpuBuffer, WgpuDevice};
 use nnis_core::adapter_evidence::{SuiteOutcomeV1, SuiteResultV1};
 use nnis_core::graph::{
     F32GraphLimitsV1, F32GraphV1, F32NodeV1, F32OpV1, F32ShapeV1, F32_GRAPH_POLICY,
@@ -27,17 +37,6 @@ use nnis_cpu::numerical::{CpuF32BinaryOp, CpuF32KernelsV1};
 use nnis_cpu::replay::CpuReplaySourceV1;
 use nnis_cpu::speculative::CpuGreedySpeculativeVerifierV1;
 use nnis_cpu::{CpuBuffer, CpuDevice};
-use nnis_wgpu::fp4::{WgpuFp4E2M1KvBlockV1, WGSL_FP4_DECODE_NUMERICAL_POLICY};
-use nnis_wgpu::graph::execute_f32_graph as wgpu_graph;
-use nnis_wgpu::numerical::{
-    WgpuF32BinaryOp, WgpuF32KernelsV1, WGSL_F32_EXACT_NUMERICAL_POLICY,
-    WGSL_F32_PROJECTION_NUMERICAL_POLICY,
-};
-use nnis_wgpu::replay::WgpuReplaySourceV1;
-use nnis_wgpu::speculative::{
-    WgpuGreedySpeculativeVerifierV1, WGSL_GREEDY_ARGMAX_NUMERICAL_POLICY,
-};
-use nnis_wgpu::{WgpuBuffer, WgpuDevice};
 
 type SuiteResult = Result<(), String>;
 
@@ -68,8 +67,8 @@ impl Tally {
     }
 }
 
-/// Run every suite of `nnis_wgpu::evidence::WGPU_QUALIFICATION_SUITES_V1`.
-pub fn run_all(device: &WgpuDevice) -> Vec<SuiteResultV1> {
+/// Run every suite of `WGPU_QUALIFICATION_SUITES_V1`.
+pub(crate) fn run_all(device: &WgpuDevice) -> Vec<SuiteResultV1> {
     vec![
         run("wgpu.add_f32", "bit-exact-normal-range", device, add_f32),
         run(

@@ -25,15 +25,13 @@
 //! scoped to that exact adapter, driver, commit and toolchain and is not a
 //! performance result. The harness measures no time.
 
-mod suites;
-
 use std::process::ExitCode;
 
 use nnis_core::adapter_evidence::{
     adapter_evidence_from_json, adapter_evidence_to_json, validate_adapter_evidence,
-    AdapterEvidenceVerdictV1, EvidenceSourceV1, PortableAdapterEvidenceV1,
+    AdapterEvidenceVerdictV1, EvidenceSourceV1,
 };
-use nnis_wgpu::evidence::{adapter_identity, WGPU_QUALIFICATION_SUITES_V1};
+use nnis_wgpu::evidence::{wgpu_adapter_evidence_record, WGPU_QUALIFICATION_SUITES_V1};
 use nnis_wgpu::WgpuDevice;
 
 struct Arguments {
@@ -134,17 +132,16 @@ fn main() -> ExitCode {
         device.adapter().name,
         device.adapter().class
     );
-    let record = PortableAdapterEvidenceV1 {
-        source: EvidenceSourceV1 {
+    let record = wgpu_adapter_evidence_record(
+        &device,
+        EvidenceSourceV1 {
             git_commit: arguments.commit,
             worktree_clean: arguments.worktree_clean,
             crate_version: env!("CARGO_PKG_VERSION").to_owned(),
             toolchain: arguments.toolchain.trim().to_owned(),
             target: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
         },
-        adapter: adapter_identity(device.adapter()),
-        suites: suites::run_all(&device),
-    };
+    );
     for suite in &record.suites {
         eprintln!(
             "  {} {:?} checks={} mismatches={} {}",

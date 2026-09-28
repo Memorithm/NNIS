@@ -27,16 +27,14 @@
 //! is scoped to that exact host, toolchain and commit and is not a
 //! performance result. The harness measures no time and touches no GPU.
 
-mod suites;
-
 use std::process::ExitCode;
 
 use nnis_core::adapter_evidence::EvidenceSourceV1;
 use nnis_core::host_evidence::{
     cpu_host_evidence_from_json, cpu_host_evidence_to_json, validate_cpu_host_evidence,
-    CpuHostEvidenceVerdictV1, PortableCpuHostEvidenceV1,
+    CpuHostEvidenceVerdictV1,
 };
-use nnis_cpu::evidence::{host_identity, CPU_HOST_QUALIFICATION_SUITES_V1};
+use nnis_cpu::evidence::{cpu_host_evidence_record, CPU_HOST_QUALIFICATION_SUITES_V1};
 
 struct Arguments {
     commit: String,
@@ -126,22 +124,21 @@ fn main() -> ExitCode {
             return ExitCode::from(64);
         }
     };
-    let host = host_identity(&arguments.cpu_model);
-    eprintln!(
-        "nnis-cpu host evidence: arch={} os={} endian={} pointer_width={}",
-        host.arch, host.os, host.endian, host.pointer_width
-    );
-    let record = PortableCpuHostEvidenceV1 {
-        source: EvidenceSourceV1 {
+    let record = cpu_host_evidence_record(
+        EvidenceSourceV1 {
             git_commit: arguments.commit,
             worktree_clean: arguments.worktree_clean,
             crate_version: env!("CARGO_PKG_VERSION").to_owned(),
             toolchain: arguments.toolchain.trim().to_owned(),
             target: arguments.target.trim().to_owned(),
         },
-        host,
-        suites: suites::run_all(),
-    };
+        &arguments.cpu_model,
+    );
+    let host = &record.host;
+    eprintln!(
+        "nnis-cpu host evidence: arch={} os={} endian={} pointer_width={}",
+        host.arch, host.os, host.endian, host.pointer_width
+    );
     for suite in &record.suites {
         eprintln!(
             "  {} {:?} checks={} mismatches={} {}",

@@ -168,6 +168,19 @@ selected CUDA device (default `0`). Human text is the default; `--json` emits
 versioned JSON with `schema_version`. This is software observability only and
 does not claim physical residency, weight-only attribution, or performance.
 
+Portable evidence records (CUDA-independent) can be produced and reviewed with:
+
+```bash
+nnis evidence cpu-host --commit "$(git rev-parse HEAD)" --worktree-clean true|false --toolchain "$(rustc -V)" [--cpu-model TEXT] [--out FILE] [--json]
+nnis evidence wgpu-adapter --commit "$(git rev-parse HEAD)" --worktree-clean true|false --toolchain "$(rustc -V)" [--out FILE] [--json]
+nnis evidence validate --input FILE [--json]
+```
+
+See [CPU host evidence](docs/PORTABLE_CPU_HOST_EVIDENCE_V1.md) and
+[adapter evidence](docs/PORTABLE_ADAPTER_EVIDENCE_V1.md). The records carry no
+timing fields; a software adapter is code-path evidence only, and every verdict
+is scoped to the exact host or adapter, toolchain and commit.
+
 To compile and launch custom CUDA source through the complete stack, run:
 
 ```bash
@@ -190,7 +203,7 @@ cargo run --release -p nnis-jit --example inspect_kernel
 | Crate | Responsibility |
 | --- | --- |
 | `nnis` | Stable facade, common re-exports, and low-level `Session` |
-| `nnis-cli` | User-facing `nnis generate` / `generate-batch` frontend and `nvml-process-memory` debug CLI |
+| `nnis-cli` | User-facing `nnis generate` / `generate-batch` frontend, `nvml-process-memory` debug CLI and `nnis evidence` portable evidence records |
 | `nnis-model` | Decoder-only model config, weights, KV-backed inference sessions, and generation |
 | `nnis-kernels` | Reusable native kernel families and CPU-oracle tests |
 | `nnis-jit` | NVRTC compilation/cache, modules, functions, and launches |

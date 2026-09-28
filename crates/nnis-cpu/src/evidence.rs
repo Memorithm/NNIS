@@ -1,12 +1,18 @@
-//! Suite ids and host identity for CPU host evidence records.
+//! Suites, host identity and record assembly for CPU host evidence.
 //!
 //! The record format and validator live in [`nnis_core::host_evidence`]. This
-//! module fixes the suite ids that the `cpu_host_evidence` example runs and
-//! that a record must pass, and reports the compiled host identity. Nothing
-//! here runs a suite or claims any result.
+//! module fixes the suite ids a record must pass, reports the compiled host
+//! identity, and runs the suites ([`run_cpu_host_suites`]) that compare the
+//! CPU reference bit for bit with the integer-only [`oracle`]. It is used by
+//! the `cpu_host_evidence` example and the `nnis evidence cpu-host` CLI.
+//! Running the suites measures no time; a record is scoped to the exact host,
+//! toolchain and commit it names.
 
-use nnis_core::adapter_evidence::MAX_EVIDENCE_TEXT_BYTES;
-use nnis_core::host_evidence::CpuHostIdentityV1;
+pub mod oracle;
+mod suites;
+
+use nnis_core::adapter_evidence::{EvidenceSourceV1, SuiteResultV1, MAX_EVIDENCE_TEXT_BYTES};
+use nnis_core::host_evidence::{CpuHostIdentityV1, PortableCpuHostEvidenceV1};
 
 /// Suite ids of the CPU host qualification harness, version 1, in run order.
 ///
@@ -39,6 +45,29 @@ pub fn host_identity(cpu_model: &str) -> CpuHostIdentityV1 {
         .to_owned(),
         pointer_width: (core::mem::size_of::<usize>() * 8) as u32,
         cpu_model: canonical(cpu_model),
+    }
+}
+
+/// Run every suite of [`CPU_HOST_QUALIFICATION_SUITES_V1`], in order.
+///
+/// Backend errors and panics become failed suites with a detail string.
+pub fn run_cpu_host_suites() -> Vec<SuiteResultV1> {
+    suites::run_all()
+}
+
+/// Run the suites on this host and assemble an unvalidated record.
+///
+/// The caller supplies the exact source identity; call
+/// [`validate_cpu_host_evidence`](nnis_core::host_evidence::validate_cpu_host_evidence)
+/// before writing or citing the record.
+pub fn cpu_host_evidence_record(
+    source: EvidenceSourceV1,
+    cpu_model: &str,
+) -> PortableCpuHostEvidenceV1 {
+    PortableCpuHostEvidenceV1 {
+        source,
+        host: host_identity(cpu_model),
+        suites: run_cpu_host_suites(),
     }
 }
 
