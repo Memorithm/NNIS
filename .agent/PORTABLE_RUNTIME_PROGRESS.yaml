@@ -302,6 +302,23 @@ completed:
       - hardware_WGPU_evidence
       - end_to_end_equality_for_graphs_with_projections
       - performance
+  P3_WGPU_DSV41_replay_and_KV_reuse:
+    pull_request: 241
+    qualified_head: 245b53a4a66cd778b749ee045fe2f74ccd3ac9ca
+    merge_commit: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
+    status: complete_WGPU_counterparts_of_CpuReplaySourceV1_and_CpuCrossLayerKvBindingV1
+    exact_head_ci: {run_id: 36397619860, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - WgpuReplaySourceV1_from_host_and_from_buffer
+      - WgpuCrossLayerKvBindingV1
+      - tolerance_bit_exact_including_negative_zero_and_subnormals
+      - error_variants_match_CPU_reference
+    record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+    not_claimed:
+      - hardware_WGPU_evidence
+      - physical_memory_or_residency_savings
+      - performance
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-
@@ -310,10 +327,10 @@ completed:
       speculative verification surface, DSV41-5 campaign preregistration and
       evidence validator (CPU/core only; see sovereignty roadmap DSV41 evidence)
 current:
-  earliest_open_slice: DSV41_WGPU_counterparts_replay_KV_reuse_FP4_decode_speculative_verification
+  earliest_open_slice: DSV41_WGPU_FP4_decode_and_speculative_verification
   status: P3_discovery_portable_memory_and_all_CPU_reference_ops_merged_on_WGPU_hardware_evidence_absent
 next:
-  - DSV41_WGPU_counterparts_replay_reuse_FP4_decode_speculative_verification
+  - DSV41_WGPU_counterparts_FP4_decode_then_speculative_verification
   - wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push
   - obtain_hardware_WGPU_adapter_evidence_separately_software_adapters_do_not_count
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately

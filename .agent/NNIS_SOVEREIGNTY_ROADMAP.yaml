@@ -1030,3 +1030,20 @@ v888_portable_evidence_2026_09_28_p3_wgpu_f32_graph_execution:
     - no_end_to_end_equality_claim_for_graphs_with_projections
     - no_performance_claim
   next: NNIS_DSV41_WGPU_counterparts_replay_KV_reuse_FP4_decode_speculative_verification
+v888_portable_evidence_2026_09_28_p3_wgpu_dsv41_replay_kv_reuse:
+  status: NNIS_DSV41_replay_and_cross_layer_KV_reuse_on_WGPU_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/241
+  qualified_head: 245b53a4a66cd778b749ee045fe2f74ccd3ac9ca
+  merge_revision: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
+  exact_head_ci: {run_id: 36397619860, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - device_resident_replay_source_bound_to_exact_identity
+    - fail_closed_identity_drift_via_ReplayStateProviderV1
+    - aligned_device_copy_replay_bit_exact_with_CPU
+    - cross_layer_KV_binding_owner_resolution_and_errors_matching_CPU
+  exclusions:
+    - CI_has_no_GPU_SKIP_not_evidence
+    - llvmpipe_runs_are_code_path_only
+    - sharing_is_logical_no_memory_or_residency_claim
+    - no_performance_claim
+  next: NNIS_DSV41_WGPU_FP4_E2M1_decode_then_speculative_verification

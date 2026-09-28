@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
+  main_head: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: cdd1416d33f7bc297420b02b6f9e071bd1facb31
+  previous_recorded_main_head: b68b01a1507ad8c3ebbd34836e42764b7c83dc40
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -433,6 +433,21 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
           no_end_to_end_equality_claim_for_graphs_with_projections; no_performance_claim
+      - id: portable_p3_wgpu_dsv41_replay_and_kv_reuse
+        pull_request: 241
+        qualified_head: 245b53a4a66cd778b749ee045fe2f74ccd3ac9ca
+        merge_commit: b972ea5e7920086c137a34bfd1ce5349b1a2f51d
+        exact_head_ci: {run_id: 36397619860, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 19}
+        summary: >-
+          WgpuReplaySourceV1 (immutable device-resident payload bound to one exact
+          ReplaySourceIdentityV1, from_host or from_buffer, ReplayStateProviderV1
+          validation then one aligned device copy per window) and
+          WgpuCrossLayerKvBindingV1 mirroring CpuCrossLayerKvBindingV1; bit-exact
+          with the CPU replay including -0.0 and subnormals; error variants match CPU
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
+          sharing_is_logical_no_memory_residency_latency_or_throughput_claim
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -451,9 +466,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_slices_merged_PR_237_238_239_240_selected_next_software
-    completed_pull_requests: [237, 238, 239, 240]
-    next_slice: DSV41_WGPU_counterparts_replay_and_cross_layer_KV_reuse_then_FP4_decode_then_speculative_verification
+    status: in_progress_slices_merged_PR_237_238_239_240_241_selected_next_software
+    completed_pull_requests: [237, 238, 239, 240, 241]
+    next_slice: DSV41_WGPU_FP4_E2M1_decode_then_speculative_verification
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
