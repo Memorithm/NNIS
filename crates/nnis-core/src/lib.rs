@@ -6,7 +6,9 @@
 #![forbid(unsafe_code)]
 
 pub mod dsv41_campaign;
+pub mod dsv41_campaign_json;
 pub mod graph;
+mod json;
 pub mod kernel_artifact;
 pub mod kv_fp4;
 pub mod kv_reuse_plan;
