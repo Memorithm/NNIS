@@ -15,6 +15,9 @@
 //!   [`PortableBuffer`](nnis_core::PortableBuffer) /
 //!   [`PortableFence`](nnis_core::PortableFence) contracts over WGPU buffers
 //!   ([`WgpuBuffer`], [`WgpuQueue`], [`WgpuFence`]).
+//! - finite-F32 WGSL reference kernels (add, multiply, ReLU, sum, projection,
+//!   gather, scatter-add) mirroring `nnis-cpu`, each bound as a P4 artifact
+//!   ([`numerical::WgpuF32KernelsV1`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -30,6 +33,7 @@ use std::pin::pin;
 use std::sync::{mpsc, Arc, Mutex};
 
 mod memory;
+pub mod numerical;
 
 pub use memory::{WgpuBuffer, WgpuFence, WgpuQueue};
 use std::task::{Context, Poll, Wake, Waker};
