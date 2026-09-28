@@ -65,6 +65,12 @@ pub mod model {
         WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
         NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
     };
+    /// Opt-in DSV41-4 caller-driven speculative verification surface.
+    pub use nnis_model::{
+        ConfidenceScheduleV1, SessionSpeculativeStepV1, SpeculativeAcceptanceStatsV1,
+        SpeculativeDraftV1, SpeculativeError, SpeculativeVerificationV1,
+        NNIS_SPECULATIVE_VERIFICATION_VERSION,
+    };
 }
 
 pub use jit::{
@@ -108,6 +114,11 @@ pub use nnis_model::{
     WeightFullModelCampaignArtifactV2, WeightFullModelCampaignV1, WeightRepresentationFamilyV1,
     WeightRepresentationQualificationRecordV1, NNIS_INT2_REFERENCE_STORAGE_VERSION,
     NNIS_SPARSE_CSC_REFERENCE_VERSION, NNIS_WEIGHT_CAPABILITY_MANIFEST_VERSION,
+};
+pub use nnis_model::{
+    ConfidenceScheduleV1, SessionSpeculativeStepV1, SpeculativeAcceptanceStatsV1,
+    SpeculativeDraftV1, SpeculativeError, SpeculativeVerificationV1,
+    NNIS_SPECULATIVE_VERIFICATION_VERSION,
 };
 
 /// Imports for the typical NNIS execution path.

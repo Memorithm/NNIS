@@ -66,6 +66,20 @@ pub struct KvCache<T: DevicePod> {
     lengths: Vec<usize>,
 }
 
+fn truncate_lengths(lengths: &mut [usize], length: usize) -> Result<()> {
+    if let Some((layer, &current)) = lengths
+        .iter()
+        .enumerate()
+        .find(|(_, &current)| current < length)
+    {
+        return Err(NnisError::invalid_input(format!(
+            "cannot truncate KV cache to {length} positions: layer {layer} holds {current}"
+        )));
+    }
+    lengths.fill(length);
+    Ok(())
+}
+
 impl<T: DevicePod> core::fmt::Debug for KvCache<T> {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter
@@ -155,6 +169,17 @@ impl<T: DevicePod> KvCache<T> {
     /// Reset logical lengths without clearing device memory.
     pub fn reset(&mut self) {
         self.lengths.fill(0);
+    }
+
+    /// Shorten every layer to exactly `length` token positions without
+    /// clearing device memory.
+    ///
+    /// Fails, leaving every length unchanged, if any layer holds fewer than
+    /// `length` positions. The caller must have retired every in-flight
+    /// append on this cache's stream first; later positions are overwritten
+    /// by subsequent appends.
+    pub fn truncate(&mut self, length: usize) -> Result<()> {
+        truncate_lengths(&mut self.lengths, length)
     }
 
     /// Reset one layer without clearing device memory.
@@ -478,6 +503,44 @@ mod tests {
             assert!(KvCacheConfig::new(config.0, config.1, config.2, config.3).is_err());
         }
         assert!(KvCacheConfig::new(usize::MAX, 2, 2, 2).is_err());
+    }
+
+    #[test]
+    fn truncate_lengths_is_all_or_nothing() {
+        let mut lengths = vec![5, 5, 4];
+        truncate_lengths(&mut lengths, 4).unwrap();
+        assert_eq!(lengths, [4, 4, 4]);
+        truncate_lengths(&mut lengths, 4).unwrap();
+        let error = truncate_lengths(&mut lengths, 5).unwrap_err();
+        assert!(error.to_string().contains("layer 0 holds 4"), "{error}");
+        assert_eq!(lengths, [4, 4, 4]);
+        let mut uneven = vec![3, 1];
+        assert!(truncate_lengths(&mut uneven, 2).is_err());
+        assert_eq!(uneven, [3, 1]);
+        truncate_lengths(&mut uneven, 0).unwrap();
+        assert_eq!(uneven, [0, 0]);
+    }
+
+    #[test]
+    fn truncate_shortens_every_layer_on_gpu() {
+        let Some(context) = gpu_context() else {
+            eprintln!("skipped: no CUDA device");
+            return;
+        };
+        let stream = Stream::new(&context).unwrap();
+        let config = KvCacheConfig::new(2, 1, 1, 4).unwrap();
+        let mut cache = KvCache::<f32>::new(&stream, config).unwrap();
+        for layer in 0..2 {
+            let keys =
+                Arc::new(DeviceBuffer::from_host(&context, &stream, &[1.0, 2.0, 3.0]).unwrap());
+            let values =
+                Arc::new(DeviceBuffer::from_host(&context, &stream, &[4.0, 5.0, 6.0]).unwrap());
+            cache.append_layer(layer, keys, values, 3).unwrap();
+        }
+        cache.truncate(1).unwrap();
+        assert_eq!((cache.len(0).unwrap(), cache.len(1).unwrap()), (1, 1));
+        assert!(cache.truncate(2).is_err());
+        assert_eq!(cache.len(1).unwrap(), 1);
     }
 
     #[test]

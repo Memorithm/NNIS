@@ -13,6 +13,12 @@ use nnis_rt::{
     observe_kv_cache, Context, DeviceBuffer, KvAppend, KvCache, KvCacheConfig, KvCacheTelemetry,
     NnisError, Result, Stream,
 };
+use crate::speculative_session::{
+    judge_greedy, recorded, teacher_forced_logits, SessionSpeculativeStepV1,
+};
+use nnis_core::speculative_verify::{
+    ConfidenceScheduleV1, SpeculativeAcceptanceStatsV1, SpeculativeDraftV1,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -652,6 +658,95 @@ impl<'model> InferenceSession<'model> {
         self.pending_appends.clear();
         self.cache.reset();
         self.position = 0;
+        Ok(())
+    }
+
+    /// Opt-in, caller-driven greedy speculative verification of one draft.
+    ///
+    /// Requires a prior `prefill` (position > 0). The logits of the current
+    /// position are read back from the session, every draft token scheduled
+    /// by `schedule` is teacher-forced through `decode_one`, and the target
+    /// logits are judged with the CPU greedy reference semantics (finite
+    /// logits, lowest index wins ties). The KV cache and position are then
+    /// rewound to the accepted prefix and the single emitted target token is
+    /// decoded, so on success the session holds exactly
+    /// `start_position + emitted_tokens.len()` positions and `next_logits` are
+    /// its current logits. `stats` is updated only when the whole step
+    /// succeeds.
+    ///
+    /// On failure after decoding started, the session is rewound to
+    /// `start_position` when possible; if the rewind itself fails the error
+    /// says so and the caller must `reset`. This verifies one token at a time
+    /// and is not a speed-up; no latency, throughput or quality claim is made.
+    pub fn verify_greedy_draft(
+        &mut self,
+        draft: &SpeculativeDraftV1,
+        schedule: &ConfidenceScheduleV1,
+        stats: &mut SpeculativeAcceptanceStatsV1,
+    ) -> Result<SessionSpeculativeStepV1> {
+        let start_position = self.position;
+        if start_position == 0 {
+            return Err(NnisError::invalid_input(
+                "speculative verification requires a prefilled session",
+            ));
+        }
+        for &token in draft.tokens() {
+            self.validate_token(token)?;
+        }
+        let scheduled = schedule.scheduled_len(draft) as usize;
+        let required = start_position
+            .checked_add(scheduled)
+            .and_then(|end| end.checked_add(1))
+            .ok_or_else(|| NnisError::invalid_input("speculative positions overflow usize"))?;
+        if required > self.capacity() {
+            return Err(NnisError::invalid_input(format!(
+                "speculative step requires {required} positions; session capacity is {}",
+                self.capacity()
+            )));
+        }
+        self.stream.synchronize()?;
+        self.pending_appends.clear();
+        let current_logits = self.workspace.logits.to_vec(&self.stream)?;
+        let step = (|| {
+            let rows = teacher_forced_logits(current_logits, draft, schedule, |token| {
+                self.decode_one(token)
+            })?;
+            let verification =
+                judge_greedy(self.model.config.vocab_size, draft, schedule, &rows)?;
+            let next_stats = recorded(stats, &verification)?;
+            self.rewind_to(start_position + verification.accepted as usize)?;
+            let emitted = *verification
+                .emitted_tokens
+                .last()
+                .ok_or_else(|| NnisError::invalid_input("verification emitted no token"))?;
+            let next_logits = self.decode_one(emitted)?;
+            Ok((verification, next_stats, next_logits))
+        })();
+        match step {
+            Ok((verification, next_stats, next_logits)) => {
+                *stats = next_stats;
+                Ok(SessionSpeculativeStepV1 {
+                    verification,
+                    start_position,
+                    next_logits,
+                })
+            }
+            Err(error) => match self.rewind_to(start_position) {
+                Ok(()) => Err(error),
+                Err(rewind) => Err(NnisError::invalid_input(format!(
+                    "{error}; rewinding to position {start_position} also failed ({rewind}); \
+                     reset the session"
+                ))),
+            },
+        }
+    }
+
+    /// Retire outstanding work and shorten the KV cache and position.
+    fn rewind_to(&mut self, position: usize) -> Result<()> {
+        self.stream.synchronize()?;
+        self.pending_appends.clear();
+        self.cache.truncate(position)?;
+        self.position = position;
         Ok(())
     }
 

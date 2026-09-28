@@ -47,6 +47,7 @@ mod smollm2_weight_qualification_protocol;
 mod sparse_csc_reference;
 mod sparse_model_storage;
 mod sparse_reference;
+mod speculative_session;
 mod streaming;
 mod weight_campaign_environment;
 mod weight_campaign_recipe;
@@ -156,6 +157,10 @@ pub use int4_reference::{
     NNIS_INT4_REFERENCE_STORAGE_VERSION,
 };
 pub use kernels::F32DecoderKernels;
+pub use nnis_core::speculative_verify::{
+    ConfidenceScheduleV1, SpeculativeAcceptanceStatsV1, SpeculativeDraftV1, SpeculativeError,
+    SpeculativeVerificationV1, NNIS_SPECULATIVE_VERIFICATION_VERSION,
+};
 pub use nnis_rt::KvCacheTelemetry;
 pub use projection_plan::{F32ProjectionKernel, F32ProjectionPlan};
 pub use qualified_weight_capability_record::{
@@ -206,6 +211,7 @@ pub use sparse_reference::{
     densify_sparse_reference_v1, sparsify_magnitude_reference_v1, SparseReferenceTensorV1,
     NNIS_SPARSE_REFERENCE_SERIALIZED_HEADER_BYTES, NNIS_SPARSE_REFERENCE_STORAGE_VERSION,
 };
+pub use speculative_session::SessionSpeculativeStepV1;
 pub use streaming::GenerationStreamControl;
 pub use weight_campaign_environment::{
     WeightCampaignEnvironmentV1, NNIS_WEIGHT_CAMPAIGN_ENVIRONMENT_VERSION,

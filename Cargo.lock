@@ -821,6 +821,8 @@ dependencies = [
 name = "nnis-model"
 version = "0.1.0"
 dependencies = [
+ "nnis-core",
+ "nnis-cpu",
  "nnis-jit",
  "nnis-kernels",
  "nnis-rt",

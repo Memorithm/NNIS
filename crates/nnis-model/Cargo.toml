@@ -7,6 +7,8 @@ license.workspace = true
 description = "Model-neutral decoder runtime and weight containers for NNIS"
 
 [dependencies]
+nnis-core = { workspace = true }
+nnis-cpu = { workspace = true }
 nnis-jit = { workspace = true }
 nnis-kernels = { workspace = true }
 nnis-rt = { workspace = true }

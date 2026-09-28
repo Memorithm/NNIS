@@ -57,9 +57,30 @@ Host-only unit tests cover:
 
 No model, GPU, or physical run was performed.
 
+## Opt-in session API
+
+`InferenceSession::verify_greedy_draft(&draft, &schedule, &mut stats)` (re-exported with the surface types from the `nnis` facade) is the caller-driven runtime entry point. The CUDA decoder session is the only real-model session today.
+
+1. It requires a prefilled session and checks every draft token against the vocabulary. It also checks that `position + scheduled + 1` fits the session capacity.
+2. It reads back the current logits.
+3. It teacher-forces each scheduled draft token through the unchanged `decode_one` path.
+4. It judges the collected rows with `CpuGreedySpeculativeVerifierV1` (same greedy semantics as the reference).
+5. It rewinds the KV cache (new `KvCache::truncate`, all layers, all-or-nothing) and the position to the accepted prefix.
+6. It decodes the one emitted target token and returns `SessionSpeculativeStepV1 { verification, start_position, next_logits }`.
+
+`stats` changes only when the whole step succeeds. On failure the session is rewound to `start_position`. If that rewind also fails, the error says so and the caller must `reset`.
+
+Nothing runs unless the method is called, and `generate`, `prefill`, `decode_one` and batch paths are unchanged. Verification goes one token at a time, so it is a correctness surface, not a speed-up.
+
+Tests:
+
+- **On CPU:** the teacher-forcing, judging and counter steps (scheduled-token decoding only, schedule cap, reject/accept outcomes, logits-length, decode, non-finite, out-of-vocabulary and counter-overflow failures) are unit-tested with a fake decoder. `KvCache` truncation length logic is unit-tested.
+- **GPU-gated:** a truncate test is added. It SKIPs without CUDA.
+- **Not run:** the session method itself has not been executed on a GPU. CI has no GPU and no GPU run is claimed.
+
 ## Claim boundary
 
 - Counts only. Acceptance counts are **not** a speed-up. Any throughput claim needs measured acceptance and real runtime cost, from both draft and target, on the exact environment (DSV41-5).
-- The surface is not wired into `InferenceSession` generation. No draft model and no confidence estimator ship with it.
+- The surface is reachable from `InferenceSession` only through the opt-in, caller-driven `verify_greedy_draft`. Default generation does not use it. No draft model and no confidence estimator ship with it. The session method has not been executed on a GPU.
 - Sampling-based (non-greedy) acceptance rules are out of scope for v1.
-- No WGPU or CUDA execution. No novelty claim and no DeepSeek-V4.1 equivalence claim.
+- No WGPU or CUDA execution was performed. No novelty claim and no DeepSeek-V4.1 equivalence claim.
