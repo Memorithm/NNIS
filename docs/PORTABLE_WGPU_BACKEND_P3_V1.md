@@ -318,11 +318,52 @@ This is a correctness path only. It makes no memory, residency,
 model-quality, latency or throughput claim. Without an adapter every test
 logs an explicit SKIP.
 
+## DSV41 greedy speculative verification on WGPU (P3 slice 7)
+
+`nnis_wgpu::speculative::WgpuGreedySpeculativeVerifierV1` is the WGPU
+counterpart of `CpuGreedySpeculativeVerifierV1`:
+
+- Target logits stay in a device buffer (`verify`, which needs `STORAGE` and
+  a buffer owned by the device) or are uploaded from the host
+  (`verify_host`).
+- One WGSL kernel, bound as a P4 artifact
+  (`wgsl-f32-finite-greedy-argmax-bitwise-ordered-lowest-index-ties-v1`),
+  scans each scheduled row serially from column 0.
+- For each row it returns the greedy token (strict `>` over finite values,
+  lowest index wins ties) and the first non-finite column.
+- The comparison maps raw bits to a monotonic `u32` key, folding `-0.0` onto
+  `+0.0`, so it equals the CPU F32 comparison, including subnormals.
+- The host reports the first row that has a non-finite logit, then applies
+  `verify_scheduled_draft`.
+
+Checks run in the CPU order: vocabulary, draft tokens, logits length, then
+finiteness row by row, then the contract. A device buffer that is not a whole
+number of F32 values reports `LogitsByteLengthMismatch`.
+`verify_and_record` leaves the statistics unchanged on failure.
+
+Declared tolerance: target tokens, verification outcomes, acceptance
+statistics and error variants are **identical** to the CPU reference.
+
+`tests/speculative_parity.rs` covers:
+
+- 160 randomized drafts and schedules over vocabularies from 1 to 1000, with
+  frequent ties, signed zeros, subnormals and extreme values; target tokens,
+  outcomes and statistics are checked;
+- the CPU reference cases and tie cases;
+- a 50 000-token vocabulary;
+- the error variants, including a non-finite logit after the first mismatch,
+  plus the device-buffer length and usage errors.
+
+The kernel is a serial reference path. It makes no latency, cost or
+throughput claim. Without an adapter every test logs an explicit SKIP.
+
 ## Claim boundary
 
 The P3 slices add WGPU compilation, adapter discovery, limit mapping, the
 portable memory contracts, the WGSL F32 reference kernels, portable graph
-execution and the DSV41 replay/KV-reuse and FP4 decode counterparts. They
-contain no performance claim and no hardware parity claim. A pass without an
-adapter, or on a software adapter, is not WGPU hardware evidence. The DSV41
-speculative-verification WGPU counterpart is still open.
+execution and the DSV41 replay/KV-reuse, FP4 decode and greedy
+speculative-verification counterparts. They contain no performance claim and
+no hardware parity claim. A pass without an adapter, or on a software
+adapter, is not WGPU hardware evidence. Hardware adapter evidence and wiring
+`scripts/check-portable-wgpu.sh` into CI (which needs a workflow-scope push)
+are still open.

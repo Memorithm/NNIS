@@ -25,6 +25,8 @@
 //!   [`replay::WgpuCrossLayerKvBindingV1`]).
 //! - integer-exact WGSL decode of FP4 E2M1 group-scaled KV blocks
 //!   ([`fp4::WgpuFp4E2M1KvBlockV1`]).
+//! - greedy speculative-draft verification over device-resident target logits
+//!   ([`speculative::WgpuGreedySpeculativeVerifierV1`]).
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -44,6 +46,7 @@ pub mod graph;
 mod memory;
 pub mod numerical;
 pub mod replay;
+pub mod speculative;
 
 pub use memory::{WgpuBuffer, WgpuFence, WgpuQueue};
 use std::task::{Context, Poll, Wake, Waker};
