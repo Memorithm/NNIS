@@ -978,3 +978,20 @@ v888_portable_evidence_2026_09_28_p3_wgpu_first_slice:
     - no_performance_claim
     - no_WGPU_PortableDevice_or_graph_execution_yet
   next: NNIS_P3_WGPU_PortableDevice_Queue_Buffer_and_remaining_reference_ops_parity
+
+v888_portable_evidence_2026_09_28_p3_wgpu_portable_memory:
+  status: NNIS_P3_WGPU_portable_data_movement_contracts_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/238
+  qualified_head: 5aac8ebf0ce60d5d47cab3b6699c95e28073ce2c
+  merge_revision: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
+  exact_head_ci: {run_id: 36395085123, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - WgpuDevice_PortableDevice_WgpuBuffer_WgpuQueue_WgpuFence_copy_buffer
+    - CPU_equivalent_descriptor_usage_range_and_failure_preservation_semantics
+    - generic_scripted_parity_vs_CpuDevice_explicit_SKIP_without_adapter
+  exclusions:
+    - no_new_kernels
+    - CI_has_no_GPU_SKIP_not_evidence
+    - llvmpipe_runs_are_code_path_only
+    - no_residency_or_performance_claim
+  next: NNIS_P3_WGSL_relu_sum_project_gather_scatter_add_parity_vs_CPU_reference

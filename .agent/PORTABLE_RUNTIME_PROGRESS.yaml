@@ -239,6 +239,29 @@ completed:
       - performance_or_throughput
       - WGPU_PortableDevice_PortableQueue_graph_execution
       - Thor_or_any_physical_device_result
+  P3_WGPU_portable_memory:
+    pull_request: 238
+    qualified_head: 5aac8ebf0ce60d5d47cab3b6699c95e28073ce2c
+    merge_commit: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
+    status: complete_portable_data_movement_contracts_on_WGPU
+    exact_head_ci: {run_id: 36395085123, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - WgpuDevice_implements_PortableDevice_WgpuBuffer_WgpuQueue_WgpuFence
+      - descriptor_revalidation_zero_init_usage_enforcement_checked_ranges_failure_preserves_payload
+      - arbitrary_byte_offsets_via_4_byte_padding_and_read_modify_write_padding_unobservable
+      - Host_memory_rejected_Shared_DeviceLocal_declared_intent_only_buffers_bound_to_device
+      - generic_scripted_parity_vs_CpuDevice_and_copy_buffer_vs_CpuQueue
+    local_software_adapter_findings: >-
+      llvmpipe (code path only): concurrent device creation/teardown SIGSEGV ->
+      discover serialized and tests share never-dropped devices; work-done
+      callback race -> fence wait records completion after wait_for poll;
+      140 repeated runs passed under 1.77.0 and stable after fixes
+    record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+    not_claimed:
+      - hardware_WGPU_evidence
+      - physical_memory_residency
+      - performance
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-
@@ -250,7 +273,7 @@ current:
   earliest_open_slice: WGPU_PortableDevice_Queue_Buffer_and_graph_ops_against_CPU_reference
   status: P3_first_slice_merged_wgpu_23_discovery_capability_mapping_add_parity_hardware_evidence_absent
 next:
-  - implement_WGPU_PortableDevice_PortableQueue_PortableBuffer_and_remaining_CPU_reference_ops_relu_sum_project_gather_scatter_on_nnis_wgpu
+  - implement_remaining_CPU_reference_ops_relu_sum_project_gather_scatter_add_binary_as_WGSL_P4_artifacts_on_nnis_wgpu
   - wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push
   - obtain_hardware_WGPU_adapter_evidence_separately_software_adapters_do_not_count
   - qualify_ARM64_and_actual_non_NVIDIA_backend_evidence_separately

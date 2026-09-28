@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
+  main_head: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
+  previous_recorded_main_head: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -384,6 +384,22 @@ main_repository_state:
         claim_boundary: >-
           CI_pass_is_SKIP_not_evidence; local_lavapipe_run_is_software_API_path_only;
           no_hardware_parity_or_performance_claim; check_portable_wgpu_script_not_in_ci_yml_workflow_scope_missing
+      - id: portable_p3_wgpu_portable_memory
+        pull_request: 238
+        qualified_head: 5aac8ebf0ce60d5d47cab3b6699c95e28073ce2c
+        merge_commit: cf82fa5ed3e5f80bbbb8e06db585579b33612c6e
+        merge_note: single_parent_commit_with_tree_identical_to_qualified_head_956fd979
+        exact_head_ci: {run_id: 36395085123, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          WgpuDevice implements PortableDevice with WgpuBuffer/WgpuQueue/WgpuFence
+          and copy_buffer mirroring nnis-cpu (revalidated descriptors, zero init,
+          usage enforcement, checked ranges before mutation, arbitrary byte
+          offsets via padding and read-modify-write, Host memory rejected,
+          buffers bound to their device); generic scripted parity vs CpuDevice
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          data_movement_only; CI_pass_is_SKIP_not_evidence; llvmpipe_runs_code_path_only;
+          llvmpipe_found_concurrent_discovery_SIGSEGV_and_fence_callback_race_both_fixed
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -402,9 +418,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: in_progress_first_slice_merged_PR_237_selected_next_software
-    completed_pull_requests: [237]
-    next_slice: WGPU_PortableDevice_Queue_Buffer_and_remaining_CPU_reference_ops_parity
+    status: in_progress_slices_merged_PR_237_238_selected_next_software
+    completed_pull_requests: [237, 238]
+    next_slice: WGSL_relu_sum_project_gather_scatter_add_binary_parity_vs_CPU_reference
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
