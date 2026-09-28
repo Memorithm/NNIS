@@ -5,9 +5,6 @@
 //! that pass is not evidence. On a software adapter the verdict must be
 //! code-path-only. No timing is measured.
 
-#[path = "../examples/wgpu_adapter_evidence/suites.rs"]
-mod suites;
-
 use std::io::Write;
 
 use nnis_core::adapter_evidence::{
@@ -15,7 +12,7 @@ use nnis_core::adapter_evidence::{
     AdapterClassV1, AdapterEvidenceVerdictV1, EvidenceSourceV1, PortableAdapterEvidenceV1,
     SuiteOutcomeV1,
 };
-use nnis_wgpu::evidence::{adapter_identity, WGPU_QUALIFICATION_SUITES_V1};
+use nnis_wgpu::evidence::{adapter_identity, run_wgpu_suites, WGPU_QUALIFICATION_SUITES_V1};
 use nnis_wgpu::WgpuDevice;
 
 #[test]
@@ -34,7 +31,7 @@ fn harness_suites_pass_and_record_validates() {
         device.adapter().name,
         device.adapter().class
     );
-    let suites = suites::run_all(&device);
+    let suites = run_wgpu_suites(&device);
     let ids: Vec<&str> = suites.iter().map(|suite| suite.suite_id.as_str()).collect();
     assert_eq!(ids, WGPU_QUALIFICATION_SUITES_V1);
     for suite in &suites {

@@ -10,11 +10,17 @@
 //! binary32 fails the suite. A backend error or panic becomes a failed suite
 //! with a detail string. Nothing is timed.
 //!
-//! Shared by the `cpu_host_evidence` example and the
-//! `cpu_host_evidence_harness` integration test.
+//! Used by the `cpu_host_evidence` example, the `nnis evidence cpu-host` CLI
+//! and the `cpu_host_evidence_harness` integration test through
+//! [`run_cpu_host_suites`](super::run_cpu_host_suites).
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use super::oracle::{exact, product, round, sum, Exact};
+use crate::fp4_kv::CpuFp4E2M1KvBlockV1;
+use crate::graph::execute_f32_graph;
+use crate::numerical::{CpuF32BinaryOp, CpuF32KernelsV1, CPU_F32_NUMERICAL_POLICY};
+use crate::{CpuBuffer, CpuDevice};
 use nnis_core::adapter_evidence::{SuiteOutcomeV1, SuiteResultV1};
 use nnis_core::graph::{
     F32GraphLimitsV1, F32GraphV1, F32NodeV1, F32OpV1, F32ShapeV1, F32_GRAPH_POLICY,
@@ -22,10 +28,6 @@ use nnis_core::graph::{
 };
 use nnis_core::kv_fp4::{Fp4E2M1KvLayoutV1, Fp4ScaleEncodingV1};
 use nnis_core::{BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableQueue};
-use nnis_cpu::fp4_kv::CpuFp4E2M1KvBlockV1;
-use nnis_cpu::graph::execute_f32_graph;
-use nnis_cpu::numerical::{CpuF32BinaryOp, CpuF32KernelsV1, CPU_F32_NUMERICAL_POLICY};
-use nnis_cpu::{CpuBuffer, CpuDevice};
 
 type SuiteResult = Result<(), String>;
 type BinaryOracle = fn(u32, u32) -> u32;
@@ -52,8 +54,8 @@ impl Tally {
     }
 }
 
-/// Run every suite of `nnis_cpu::evidence::CPU_HOST_QUALIFICATION_SUITES_V1`.
-pub fn run_all() -> Vec<SuiteResultV1> {
+/// Run every suite of `CPU_HOST_QUALIFICATION_SUITES_V1`.
+pub(crate) fn run_all() -> Vec<SuiteResultV1> {
     let exact = "integer-oracle-bit-exact";
     let fused = format!("{CPU_F32_NUMERICAL_POLICY}+integer-oracle-bit-exact");
     vec![
@@ -97,142 +99,6 @@ fn run(suite_id: &str, tolerance: &str, suite: fn(&mut Tally) -> SuiteResult) ->
             .filter(|c| !c.is_control())
             .take(400)
             .collect(),
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Integer oracle.
-// ---------------------------------------------------------------------------
-
-/// Exact value `(-1)^negative * mantissa * 2^exponent`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Exact {
-    negative: bool,
-    mantissa: u128,
-    exponent: i32,
-}
-
-/// Decompose a finite binary32 bit pattern exactly.
-pub fn exact(bits: u32) -> Exact {
-    let biased = ((bits >> 23) & 0xff) as i32;
-    assert!(biased != 0xff, "oracle input must be finite");
-    let fraction = u128::from(bits & 0x007f_ffff);
-    let (mantissa, exponent) = if biased == 0 {
-        (fraction, -149)
-    } else {
-        (fraction | 0x0080_0000, biased - 150)
-    };
-    Exact {
-        negative: bits >> 31 != 0,
-        mantissa,
-        exponent,
-    }
-}
-
-fn bit_length(value: u128) -> i32 {
-    128 - value.leading_zeros() as i32
-}
-
-/// Round an exact value once to nearest-even binary32 bits, with gradual
-/// underflow; overflow gives infinity (which the reference rejects).
-pub fn round(value: Exact) -> u32 {
-    let sign = u32::from(value.negative) << 31;
-    if value.mantissa == 0 {
-        return sign;
-    }
-    assert!(value.mantissa < 1 << 112, "oracle mantissa out of range");
-    let top = value.exponent + bit_length(value.mantissa) - 1;
-    let normal = top >= -126;
-    let shift = if normal {
-        bit_length(value.mantissa) - 24
-    } else {
-        -149 - value.exponent
-    };
-    let mut quotient = if shift <= 0 {
-        value.mantissa << (-shift) as u32
-    } else if shift >= 120 {
-        0
-    } else {
-        let quotient = value.mantissa >> shift as u32;
-        let remainder = value.mantissa & ((1u128 << shift as u32) - 1);
-        let half = 1u128 << (shift as u32 - 1);
-        if remainder > half || (remainder == half && quotient & 1 == 1) {
-            quotient + 1
-        } else {
-            quotient
-        }
-    };
-    if !normal {
-        // Raw subnormal bits; a carry to 2^23 is the smallest normal.
-        return sign | quotient as u32;
-    }
-    let mut biased = top + 127;
-    if quotient == 1 << 24 {
-        quotient >>= 1;
-        biased += 1;
-    }
-    if biased >= 255 {
-        return sign | 0x7f80_0000;
-    }
-    sign | ((biased as u32) << 23) | (quotient as u32 & 0x007f_ffff)
-}
-
-/// Exact product.
-pub fn product(left: Exact, right: Exact) -> Exact {
-    Exact {
-        negative: left.negative != right.negative,
-        mantissa: left.mantissa * right.mantissa,
-        exponent: left.exponent + right.exponent,
-    }
-}
-
-/// Sum that rounds identically to the exact sum.
-///
-/// A term more than 60 binary orders below the other only acts as a sticky
-/// bit, so it is replaced by a one at 61 orders below, which lies strictly
-/// inside the same rounding interval and keeps the sign.
-pub fn sum(left: Exact, right: Exact) -> Exact {
-    if left.mantissa == 0 && right.mantissa == 0 {
-        return Exact {
-            negative: left.negative && right.negative,
-            mantissa: 0,
-            exponent: 0,
-        };
-    }
-    if right.mantissa == 0 {
-        return left;
-    }
-    if left.mantissa == 0 {
-        return right;
-    }
-    let top = |value: Exact| value.exponent + bit_length(value.mantissa);
-    let sticky = |tiny: Exact, big: Exact| Exact {
-        negative: tiny.negative,
-        mantissa: 1,
-        exponent: top(big) - 61,
-    };
-    let (left, right) = if top(right) < top(left) - 60 {
-        (left, sticky(right, left))
-    } else if top(left) < top(right) - 60 {
-        (sticky(left, right), right)
-    } else {
-        (left, right)
-    };
-    let exponent = left.exponent.min(right.exponent);
-    let signed = |value: Exact| {
-        let magnitude = (value.mantissa << (value.exponent - exponent) as u32) as i128;
-        if value.negative {
-            -magnitude
-        } else {
-            magnitude
-        }
-    };
-    let total = signed(left) + signed(right);
-    Exact {
-        // Exact cancellation gives +0 under round-to-nearest-even.
-        negative: total < 0,
-        mantissa: total.unsigned_abs(),
-        exponent,
     }
 }
 

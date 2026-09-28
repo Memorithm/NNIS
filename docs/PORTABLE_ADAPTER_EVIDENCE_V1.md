@@ -104,7 +104,7 @@ Reviewers can re-check a record without running any suite:
 cargo run --locked -p nnis-wgpu --example wgpu_adapter_evidence -- --validate adapter-evidence.json
 ```
 
-`tests/adapter_evidence_harness.rs` runs the same suites (shared source file) in CI. There it logs SKIP, because CI has no GPU. When an adapter is present, it requires every suite to pass, round-trips the record through JSON, and checks that the verdict matches the adapter class.
+The suites live in the library (`nnis_wgpu::evidence::run_wgpu_suites`, with `wgpu_adapter_evidence_record` assembling a record), so the example, the CLI and `tests/adapter_evidence_harness.rs` run the same code. The test runs in CI. There it logs SKIP, because CI has no GPU. When an adapter is present, it requires every suite to pass, round-trips the record through JSON, and checks that the verdict matches the adapter class.
 
 ## Local run on this box (code path only)
 
@@ -129,3 +129,7 @@ The validator correctly gives `CodePathOnlySoftwareAdapter` on a clean tree, or 
 - Software adapters never give a hardware verdict.
 - No timing is recorded or implied.
 - Wiring `scripts/check-portable-wgpu.sh` into CI still needs a workflow-scope push.
+
+## CLI
+
+The same harness is available as `nnis evidence wgpu-adapter` (same flags plus `--target`, `--json` to print the record, `--out` to write it). Without an adapter the CLI prints the SKIP line and exits with status 3. `nnis evidence validate --input FILE [--json]` re-checks a record of either kind without running anything. See [CPU host evidence](PORTABLE_CPU_HOST_EVIDENCE_V1.md) for the CPU counterpart.

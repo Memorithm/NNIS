@@ -90,6 +90,15 @@ cargo run --locked -p nnis-cpu --example cpu_host_evidence -- --validate cpu-hos
 
 The harness touches no GPU and measures no time. `scripts/check-portable-cpu.sh` also runs the harness test in release mode.
 
+The suites and oracle live in the library (`nnis_cpu::evidence::run_cpu_host_suites`, `nnis_cpu::evidence::oracle`, with `cpu_host_evidence_record` assembling a record). The example, the CLI and the test therefore run the same code. The same run is available as:
+
+```text
+nnis evidence cpu-host --commit SHA --worktree-clean true|false --toolchain TEXT [--target TEXT] [--cpu-model TEXT] [--out FILE] [--json]
+nnis evidence validate --input FILE [--json]
+```
+
+`--json` prints the record on stdout. `validate` detects the record kind and prints the verdict; `--json` prints a versioned `{schema_version, record_kind, verdict}` envelope.
+
 ## Local run on this box
 
 Development box: x86_64 Linux, virtualized "Intel(R) Xeon(R) Processor", `rustc 1.98.1` and `1.77.0`, uncommitted worktree, so the verdict was `DirtyWorktree`. Every suite passed with zero mismatches:

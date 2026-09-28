@@ -8,7 +8,6 @@ description = "Portable WGPU backend qualification surface for the Native Neural
 
 [dependencies]
 nnis-core.workspace = true
-wgpu = "23.0.1"
-
-[dev-dependencies]
+# CPU reference that the evidence suites compare against (pure Rust, portable).
 nnis-cpu.workspace = true
+wgpu = "23.0.1"

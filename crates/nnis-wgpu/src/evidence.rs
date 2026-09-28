@@ -1,14 +1,21 @@
-//! Mapping from WGPU adapter reports to portable adapter evidence records.
+//! Suites, adapter identity and record assembly for WGPU adapter evidence.
 //!
 //! The record format and validator live in
-//! [`nnis_core::adapter_evidence`]. This module fixes the suite ids that the
-//! `wgpu_adapter_evidence` example runs and that a hardware record must pass,
-//! and converts a [`WgpuAdapterReportV1`] into the record's adapter identity.
-//! Nothing here runs a suite or claims any result.
+//! [`nnis_core::adapter_evidence`]. This module fixes the suite ids that a
+//! hardware record must pass, converts a [`WgpuAdapterReportV1`] into the
+//! record's adapter identity, and runs the parity suites
+//! ([`run_wgpu_suites`]) against the `nnis-cpu` reference. It is used by the
+//! `wgpu_adapter_evidence` example and the `nnis evidence wgpu-adapter` CLI.
+//! Running the suites measures no time; a record on a software adapter is
+//! code-path evidence only.
 
-use nnis_core::adapter_evidence::{AdapterClassV1, AdapterIdentityV1};
+mod suites;
 
-use crate::{WgpuAdapterClassV1, WgpuAdapterReportV1};
+use nnis_core::adapter_evidence::{
+    AdapterClassV1, AdapterIdentityV1, EvidenceSourceV1, PortableAdapterEvidenceV1, SuiteResultV1,
+};
+
+use crate::{WgpuAdapterClassV1, WgpuAdapterReportV1, WgpuDevice};
 
 /// Suite ids of the WGPU qualification harness, version 1, in run order.
 ///
@@ -43,6 +50,31 @@ pub fn adapter_identity(report: &WgpuAdapterReportV1) -> AdapterIdentityV1 {
             WgpuAdapterClassV1::Software => AdapterClassV1::Software,
             WgpuAdapterClassV1::Unknown => AdapterClassV1::Unknown,
         },
+    }
+}
+
+/// Run every suite of [`WGPU_QUALIFICATION_SUITES_V1`] on `device`, in order.
+///
+/// Each suite compares the adapter with the `nnis-cpu` reference under the
+/// tolerance of the slice it covers. Backend errors and panics become failed
+/// suites with a detail string.
+pub fn run_wgpu_suites(device: &WgpuDevice) -> Vec<SuiteResultV1> {
+    suites::run_all(device)
+}
+
+/// Run the suites on `device` and assemble an unvalidated record.
+///
+/// The caller supplies the exact source identity; call
+/// [`validate_adapter_evidence`](nnis_core::adapter_evidence::validate_adapter_evidence)
+/// before writing or citing the record.
+pub fn wgpu_adapter_evidence_record(
+    device: &WgpuDevice,
+    source: EvidenceSourceV1,
+) -> PortableAdapterEvidenceV1 {
+    PortableAdapterEvidenceV1 {
+        source,
+        adapter: adapter_identity(device.adapter()),
+        suites: run_wgpu_suites(device),
     }
 }
 

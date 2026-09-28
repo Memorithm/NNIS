@@ -778,7 +778,10 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "nnis",
+ "nnis-core",
+ "nnis-cpu",
  "nnis-model",
+ "nnis-wgpu",
  "serde",
  "serde_json",
  "sha2",
