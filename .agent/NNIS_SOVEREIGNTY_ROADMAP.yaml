@@ -959,3 +959,22 @@ v888_portable_evidence_2026_09_28_p4:
     - no_WGPU_backend_or_WGSL_validation
     - no_correctness_parity_or_performance_claim
   next: NNIS_P3_WGPU_backend_qualified_against_CPU_reference_graph_semantics_and_P4_binding
+
+v888_portable_evidence_2026_09_28_p3_wgpu_first_slice:
+  status: NNIS_P3_first_WGPU_slice_merged_hardware_evidence_absent
+  pull_request: https://github.com/Memorithm/NNIS/pull/237
+  qualified_head: b5c908efad2df486e838484b3147fc0d64f8252d
+  merge_revision: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
+  exact_head_ci: {run_id: 36393781266, rust_quality_cpu: success, rust_1_77_check: success}
+  wgpu: 23.0.1_newest_with_declared_MSRV_le_1_77_verified_under_cargo_1_77_0
+  scope:
+    - separate_nnis_wgpu_crate_core_and_cpu_remain_dependency_free
+    - adapter_discovery_and_software_adapter_classification
+    - granted_WGPU_limits_to_CapabilitySet_for_P4_bind_plus_WGPU_per_binding_limits
+    - WGSL_F32_add_P4_artifact_bit_exact_vs_CPU_reference_when_adapter_exists
+  exclusions:
+    - CI_has_no_GPU_adapter_test_logs_SKIP_not_evidence
+    - software_adapter_runs_are_not_hardware_evidence
+    - no_performance_claim
+    - no_WGPU_PortableDevice_or_graph_execution_yet
+  next: NNIS_P3_WGPU_PortableDevice_Queue_Buffer_and_remaining_reference_ops_parity

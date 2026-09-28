@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
+  main_head: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 095cf1d8c762c3495cb25a14cf64e42fdd3ae858
+  previous_recorded_main_head: f2a0fa123d50bd9dc5338f06a7f44f8aefb19881
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -368,6 +368,22 @@ main_repository_state:
         claim_boundary: >-
           serialization_only_no_campaign_executed_no_results; parsing_evidence_does_not_validate_it;
           synthetic_values_only_in_cfg_test
+      - id: portable_p3_wgpu_first_slice
+        pull_request: 237
+        qualified_head: b5c908efad2df486e838484b3147fc0d64f8252d
+        merge_commit: da312304d266f0fd6ea557f6023ab7ebeef8e2ac
+        exact_head_ci: {run_id: 36393781266, rust_quality_cpu: success, rust_1_77_check: success}
+        summary: >-
+          new crates/nnis-wgpu on wgpu 23.0.1 (newest with declared MSRV <= 1.77,
+          verified with cargo +1.77.0); adapter discovery, granted limits mapped
+          to CapabilitySet for KernelArtifactV1::bind plus WGPU per-binding
+          limits, WGSL F32 add artifact bit-exact vs nnis-cpu add when an adapter
+          exists; explicit SKIP logged in CI (no GPU); core/cpu boundary scripts
+          reject wgpu
+        record: docs/PORTABLE_WGPU_BACKEND_P3_V1.md
+        claim_boundary: >-
+          CI_pass_is_SKIP_not_evidence; local_lavapipe_run_is_software_API_path_only;
+          no_hardware_parity_or_performance_claim; check_portable_wgpu_script_not_in_ci_yml_workflow_scope_missing
 
 current_execution_order:
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
@@ -386,7 +402,9 @@ current_execution_order:
       validator for the DSV41-5 campaign (fixed model, prompts, metrics,
       environment fingerprint, dense baseline) with no results recorded
   - id: PORTABLE_P3_WGPU_BACKEND_QUALIFICATION
-    status: selected_next_software
+    status: in_progress_first_slice_merged_PR_237_selected_next_software
+    completed_pull_requests: [237]
+    next_slice: WGPU_PortableDevice_Queue_Buffer_and_remaining_CPU_reference_ops_parity
     action: >-
       qualify a WGPU backend implementing PortableDevice/Queue/Buffer against the
       merged CPU reference, graph semantics and P4 artifact binding; requires a
