@@ -5,6 +5,10 @@
 //! portable counterpart shape to CUDA InferenceSession (encode / decode_one /
 //! KV advance / truncate) without touching `nnis-rt` or any NVIDIA path.
 //!
+//! An opt-in [`PortableKvStorageModeV1::Fp4E2M1`] keeps the dense F32 reference
+//! and maintains a DSV41-3 FP4 E2M1 shadow via [`PortableFp4KvShadowV1`] for
+//! exact storage accounting only.
+//!
 //! Synthetic fixtures and unit tests are structural only: they are not
 //! model-quality, latency, throughput or hardware evidence.
 
@@ -13,14 +17,16 @@ use nnis_core::graph::{
     F32_GRAPH_VERSION,
 };
 use nnis_core::session::{
-    PortableKvCacheV1, PortableSessionError, PortableSessionV1, SyntheticPortableModelSpecV1,
-    PORTABLE_SESSION_POLICY, PORTABLE_SESSION_VERSION,
+    PortableKvCacheV1, PortableKvStorageModeV1, PortableKvStorageTelemetryV1, PortableSessionError,
+    PortableSessionV1, SyntheticPortableModelSpecV1, PORTABLE_SESSION_POLICY,
+    PORTABLE_SESSION_VERSION,
 };
 use nnis_core::{
     BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableError, PortableQueue,
 };
 
 use crate::graph::execute_f32_graph;
+use crate::kv_fp4_shadow::PortableFp4KvShadowV1;
 use crate::numerical::{CpuF32BinaryOp, CpuF32KernelsV1};
 use crate::{CpuBuffer, CpuDevice};
 
@@ -35,6 +41,7 @@ pub struct CpuPortableSession {
     /// Row-major `[hidden, vocab]` LM-head weights (`ProjectKn` layout).
     lm_head: CpuBuffer,
     kv: PortableKvCacheV1,
+    fp4_shadow: Option<PortableFp4KvShadowV1>,
     running_sum: Vec<f32>,
     pending_row: Option<Vec<f32>>,
     logits: Vec<f32>,
@@ -42,14 +49,32 @@ pub struct CpuPortableSession {
 }
 
 impl CpuPortableSession {
-    /// Build a session for [`SyntheticPortableModelSpecV1::tiny`] with identity LM head.
+    /// Build a session for [`SyntheticPortableModelSpecV1::tiny`] with dense F32 KV.
     pub fn tiny() -> Result<Self, PortableSessionError> {
         Self::new(SyntheticPortableModelSpecV1::tiny())
     }
 
-    /// Build a session for `spec` with one-hot embeddings and an identity LM head
-    /// when `hidden_size == vocab_size`, otherwise a truncated/padded identity.
+    /// Tiny synthetic session with opt-in FP4 E2M1 KV shadow (group 4, F32 scales).
+    pub fn tiny_fp4() -> Result<Self, PortableSessionError> {
+        Self::with_storage_mode(
+            SyntheticPortableModelSpecV1::tiny(),
+            PortableKvStorageModeV1::tiny_fp4(),
+        )
+    }
+
+    /// Build a session for `spec` with dense F32 KV (default).
     pub fn new(spec: SyntheticPortableModelSpecV1) -> Result<Self, PortableSessionError> {
+        Self::with_storage_mode(spec, PortableKvStorageModeV1::DenseF32)
+    }
+
+    /// Build a session with an explicit portable KV storage mode.
+    ///
+    /// Dense F32 remains the semantic reference. FP4 mode adds a DSV41-3 shadow
+    /// for exact storage accounting only.
+    pub fn with_storage_mode(
+        spec: SyntheticPortableModelSpecV1,
+        mode: PortableKvStorageModeV1,
+    ) -> Result<Self, PortableSessionError> {
         if PORTABLE_SESSION_POLICY != "finite-f32-le-ordered-fma-v1" {
             return Err(PortableSessionError::Invalid(
                 "portable session policy identity mismatch",
@@ -60,7 +85,13 @@ impl CpuPortableSession {
             .map_err(map_portable)?;
         let embedding = one_hot_embedding(&device, &spec)?;
         let lm_head = identity_lm_head(&device, &spec)?;
-        let kv = PortableKvCacheV1::new(spec.layers, spec.capacity, spec.hidden_size)?;
+        let kv = PortableKvCacheV1::with_storage_mode(
+            spec.layers,
+            spec.capacity,
+            spec.hidden_size,
+            mode,
+        )?;
+        let fp4_shadow = PortableFp4KvShadowV1::new(&kv, mode)?;
         let running_sum = vec![0.0; spec.hidden_size];
         Ok(Self {
             spec,
@@ -69,6 +100,7 @@ impl CpuPortableSession {
             embedding,
             lm_head,
             kv,
+            fp4_shadow,
             running_sum,
             pending_row: None,
             logits: Vec::new(),
@@ -92,6 +124,39 @@ impl CpuPortableSession {
     /// Exact host KV logical payload bytes for the committed length.
     pub fn kv_logical_payload_bytes(&self) -> u64 {
         self.kv.logical_payload_bytes()
+    }
+
+    /// Configured KV storage mode.
+    pub const fn kv_storage_mode(&self) -> PortableKvStorageModeV1 {
+        self.kv.storage_mode()
+    }
+
+    /// Dense + optional FP4 shadow storage accounting (not RSS / not a claim).
+    pub fn kv_storage_telemetry(
+        &self,
+    ) -> Result<PortableKvStorageTelemetryV1, PortableSessionError> {
+        match &self.fp4_shadow {
+            Some(shadow) => shadow.telemetry(&self.kv),
+            None => Ok(self.kv.dense_telemetry()),
+        }
+    }
+
+    /// CPU oracle decode of the FP4 shadow for one layer (empty when dense-only).
+    pub fn fp4_shadow_decode_layer(
+        &self,
+        layer: usize,
+    ) -> Result<Option<Vec<f32>>, PortableSessionError> {
+        match &self.fp4_shadow {
+            Some(shadow) => Ok(Some(shadow.decode_layer(layer)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn sync_fp4_shadow(&mut self) -> Result<(), PortableSessionError> {
+        if let Some(shadow) = self.fp4_shadow.as_mut() {
+            shadow.sync_from_dense(&self.kv)?;
+        }
+        Ok(())
     }
 
     fn validate_token(&self, token: u32) -> Result<usize, PortableSessionError> {
@@ -279,6 +344,7 @@ impl PortableSessionV1 for CpuPortableSession {
             .ok_or(PortableSessionError::Invalid(
                 "portable session position overflow",
             ))?;
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 
@@ -338,6 +404,7 @@ impl PortableSessionV1 for CpuPortableSession {
         } else {
             self.refresh_logits_from_sum()?;
         }
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 
@@ -347,6 +414,7 @@ impl PortableSessionV1 for CpuPortableSession {
         self.running_sum.fill(0.0);
         self.logits.clear();
         self.position = 0;
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 }
@@ -477,5 +545,45 @@ mod tests {
         session.stage_token(0).unwrap();
         assert!(session.stage_token(1).is_err());
         assert!(session.encode(&[0]).is_err()); // not fresh
+    }
+
+    #[test]
+    fn fp4_shadow_round_trips_and_reports_exact_storage() {
+        let mut dense = CpuPortableSession::tiny().unwrap();
+        let mut fp4 = CpuPortableSession::tiny_fp4().unwrap();
+        assert!(!dense.kv_storage_mode().is_fp4());
+        assert!(fp4.kv_storage_mode().is_fp4());
+        let tokens = [0u32, 1, 2, 0];
+        dense.encode(&tokens).unwrap();
+        fp4.encode(&tokens).unwrap();
+        assert_eq!(dense.logits(), fp4.logits());
+        let decoded = fp4.fp4_shadow_decode_layer(0).unwrap().unwrap();
+        // One-hot rows: token t -> e_t in R^4.
+        let mut expected = Vec::new();
+        for &token in &tokens {
+            let mut row = [0.0; 4];
+            row[token as usize] = 1.0;
+            expected.extend_from_slice(&row);
+        }
+        assert_eq!(decoded, expected);
+        let telemetry = fp4.kv_storage_telemetry().unwrap();
+        assert_eq!(
+            telemetry.dense_logical_payload_bytes,
+            fp4.kv_logical_payload_bytes()
+        );
+        let fp4_logical = telemetry
+            .fp4_logical
+            .expect("fp4 mode reports logical storage");
+        assert_eq!(fp4_logical.logical_values, (tokens.len() * 4) as u64);
+        assert!(fp4_logical.total_bytes > 0);
+        assert!(telemetry.fp4_capacity.unwrap().total_bytes >= fp4_logical.total_bytes);
+        // Dense default still has no FP4 telemetry.
+        assert!(dense.kv_storage_telemetry().unwrap().fp4_logical.is_none());
+        fp4.truncate(2).unwrap();
+        let decoded = fp4.fp4_shadow_decode_layer(0).unwrap().unwrap();
+        assert_eq!(decoded.len(), 2 * 4);
+        fp4.reset().unwrap();
+        assert!(fp4.fp4_shadow_decode_layer(0).unwrap().unwrap().is_empty());
+        assert!(fp4.kv_storage_telemetry().unwrap().fp4_logical.is_none());
     }
 }

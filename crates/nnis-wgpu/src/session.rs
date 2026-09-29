@@ -2,19 +2,25 @@
 //!
 //! [`WgpuPortableSession`] mirrors [`nnis_cpu::session::CpuPortableSession`] on
 //! the same synthetic analytical model, using the existing WGSL F32 kernels
-//! for gather / add / project. Host-dense [`PortableKvCacheV1`] remains the KV
-//! layout. Without an adapter there is no session to construct; integration
+//! for gather / add / project. Host-dense [`PortableKvCacheV1`] remains the
+//! semantic KV reference. An opt-in FP4 E2M1 shadow (DSV41-3) is maintained for
+//! exact storage accounting and may be decoded with the WGSL FP4 path for
+//! parity. Without an adapter there is no session to construct; integration
 //! tests SKIP explicitly. Software adapters are code-path only, never hardware
 //! evidence. CUDA paths are untouched.
 
+use nnis_core::kv_fp4::Fp4E2M1KvLayoutV1;
 use nnis_core::session::{
-    PortableKvCacheV1, PortableSessionError, PortableSessionV1, SyntheticPortableModelSpecV1,
-    PORTABLE_SESSION_POLICY, PORTABLE_SESSION_VERSION,
+    PortableKvCacheV1, PortableKvStorageModeV1, PortableKvStorageTelemetryV1, PortableSessionError,
+    PortableSessionV1, SyntheticPortableModelSpecV1, PORTABLE_SESSION_POLICY,
+    PORTABLE_SESSION_VERSION,
 };
 use nnis_core::{
     BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableError, PortableQueue,
 };
+use nnis_cpu::kv_fp4_shadow::PortableFp4KvShadowV1;
 
+use crate::fp4::WgpuFp4E2M1KvBlockV1;
 use crate::numerical::{WgpuF32BinaryOp, WgpuF32KernelsV1};
 use crate::{WgpuBuffer, WgpuDevice};
 
@@ -26,6 +32,7 @@ pub struct WgpuPortableSession<'a> {
     embedding: WgpuBuffer,
     lm_head: WgpuBuffer,
     kv: PortableKvCacheV1,
+    fp4_shadow: Option<PortableFp4KvShadowV1>,
     running_sum: Vec<f32>,
     pending_row: Option<Vec<f32>>,
     logits: Vec<f32>,
@@ -33,10 +40,19 @@ pub struct WgpuPortableSession<'a> {
 }
 
 impl<'a> WgpuPortableSession<'a> {
-    /// Build a session on an already-opened device.
+    /// Build a dense-F32 session on an already-opened device.
     pub fn new(
         device: &'a WgpuDevice,
         spec: SyntheticPortableModelSpecV1,
+    ) -> Result<Self, PortableSessionError> {
+        Self::with_storage_mode(device, spec, PortableKvStorageModeV1::DenseF32)
+    }
+
+    /// Build a session with an explicit portable KV storage mode.
+    pub fn with_storage_mode(
+        device: &'a WgpuDevice,
+        spec: SyntheticPortableModelSpecV1,
+        mode: PortableKvStorageModeV1,
     ) -> Result<Self, PortableSessionError> {
         if PORTABLE_SESSION_POLICY != "finite-f32-le-ordered-fma-v1" {
             return Err(PortableSessionError::Invalid(
@@ -45,13 +61,20 @@ impl<'a> WgpuPortableSession<'a> {
         }
         let embedding = one_hot_embedding(device, &spec)?;
         let lm_head = identity_lm_head(device, &spec)?;
-        let kv = PortableKvCacheV1::new(spec.layers, spec.capacity, spec.hidden_size)?;
+        let kv = PortableKvCacheV1::with_storage_mode(
+            spec.layers,
+            spec.capacity,
+            spec.hidden_size,
+            mode,
+        )?;
+        let fp4_shadow = PortableFp4KvShadowV1::new(&kv, mode)?;
         Ok(Self {
             spec,
             device,
             embedding,
             lm_head,
             kv,
+            fp4_shadow,
             running_sum: vec![0.0; spec.hidden_size],
             pending_row: None,
             logits: Vec::new(),
@@ -59,9 +82,18 @@ impl<'a> WgpuPortableSession<'a> {
         })
     }
 
-    /// Build a tiny synthetic session on `device`.
+    /// Build a tiny synthetic session on `device` (dense F32 default).
     pub fn tiny(device: &'a WgpuDevice) -> Result<Self, PortableSessionError> {
         Self::new(device, SyntheticPortableModelSpecV1::tiny())
+    }
+
+    /// Tiny synthetic session with opt-in FP4 E2M1 KV shadow.
+    pub fn tiny_fp4(device: &'a WgpuDevice) -> Result<Self, PortableSessionError> {
+        Self::with_storage_mode(
+            device,
+            SyntheticPortableModelSpecV1::tiny(),
+            PortableKvStorageModeV1::tiny_fp4(),
+        )
     }
 
     pub const fn spec(&self) -> SyntheticPortableModelSpecV1 {
@@ -82,6 +114,61 @@ impl<'a> WgpuPortableSession<'a> {
 
     pub fn kv_logical_payload_bytes(&self) -> u64 {
         self.kv.logical_payload_bytes()
+    }
+
+    pub const fn kv_storage_mode(&self) -> PortableKvStorageModeV1 {
+        self.kv.storage_mode()
+    }
+
+    pub fn kv_storage_telemetry(
+        &self,
+    ) -> Result<PortableKvStorageTelemetryV1, PortableSessionError> {
+        match &self.fp4_shadow {
+            Some(shadow) => shadow.telemetry(&self.kv),
+            None => Ok(self.kv.dense_telemetry()),
+        }
+    }
+
+    /// Decode layer 0 of the FP4 shadow with the WGSL FP4 path (None if dense-only).
+    pub fn fp4_shadow_decode_layer_wgpu(
+        &self,
+        layer: usize,
+    ) -> Result<Option<Vec<f32>>, PortableSessionError> {
+        let Some(shadow) = self.fp4_shadow.as_ref() else {
+            return Ok(None);
+        };
+        if shadow.length() == 0 {
+            return Ok(Some(Vec::new()));
+        }
+        let layout = Fp4E2M1KvLayoutV1::new(
+            shadow.length() as u64,
+            self.spec.hidden_size as u32,
+            shadow.group_size(),
+            shadow.scale_encoding(),
+        )
+        .map_err(|error| {
+            PortableSessionError::Backend(format!("WGPU FP4 shadow layout failed: {error}"))
+        })?;
+        let block = WgpuFp4E2M1KvBlockV1::from_parts(
+            self.device,
+            layout,
+            shadow.layer_codes(layer)?,
+            shadow.layer_scales(layer)?,
+        )
+        .map_err(|error| {
+            PortableSessionError::Backend(format!("WGPU FP4 shadow from_parts failed: {error}"))
+        })?;
+        let values = block.decode_to_host(self.device).map_err(|error| {
+            PortableSessionError::Backend(format!("WGPU FP4 shadow decode failed: {error}"))
+        })?;
+        Ok(Some(values))
+    }
+
+    fn sync_fp4_shadow(&mut self) -> Result<(), PortableSessionError> {
+        if let Some(shadow) = self.fp4_shadow.as_mut() {
+            shadow.sync_from_dense(&self.kv)?;
+        }
+        Ok(())
     }
 
     fn kernels(&self) -> Result<WgpuF32KernelsV1<'_>, PortableSessionError> {
@@ -210,6 +297,7 @@ impl<'a> PortableSessionV1 for WgpuPortableSession<'a> {
             .ok_or(PortableSessionError::Invalid(
                 "portable session position overflow",
             ))?;
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 
@@ -269,6 +357,7 @@ impl<'a> PortableSessionV1 for WgpuPortableSession<'a> {
         } else {
             self.refresh_logits_from_sum()?;
         }
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 
@@ -278,6 +367,7 @@ impl<'a> PortableSessionV1 for WgpuPortableSession<'a> {
         self.running_sum.fill(0.0);
         self.logits.clear();
         self.position = 0;
+        self.sync_fp4_shadow()?;
         Ok(())
     }
 }
