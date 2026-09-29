@@ -122,3 +122,44 @@ fn reset_clears_both_backends_identically() {
     let wgpu_logits = wgpu.encode(&[0]).unwrap().to_vec();
     assert_eq!(cpu_logits, wgpu_logits);
 }
+
+#[test]
+fn fp4_shadow_decode_matches_cpu_and_dense() {
+    let Some(device) = adapter_or_skip("fp4_shadow_decode_matches_cpu_and_dense") else {
+        return;
+    };
+    let mut cpu = nnis_cpu::session::CpuPortableSession::tiny_fp4().unwrap();
+    let mut wgpu = WgpuPortableSession::tiny_fp4(device).unwrap();
+    let tokens = [0u32, 3, 1, 2];
+    cpu.encode(&tokens).unwrap();
+    wgpu.encode(&tokens).unwrap();
+    assert_eq!(cpu.logits(), wgpu.logits());
+    let cpu_decoded = cpu.fp4_shadow_decode_layer(0).unwrap().unwrap();
+    let wgpu_decoded = wgpu.fp4_shadow_decode_layer_wgpu(0).unwrap().unwrap();
+    assert_eq!(cpu_decoded, wgpu_decoded);
+    let mut expected = Vec::new();
+    for &token in &tokens {
+        let mut row = [0.0f32; 4];
+        row[token as usize] = 1.0;
+        expected.extend_from_slice(&row);
+    }
+    assert_eq!(cpu_decoded, expected);
+    let cpu_tel = cpu.kv_storage_telemetry().unwrap();
+    let wgpu_tel = wgpu.kv_storage_telemetry().unwrap();
+    assert_eq!(cpu_tel.fp4_logical, wgpu_tel.fp4_logical);
+    assert!(cpu_tel.fp4_logical.unwrap().total_bytes > 0);
+}
+
+#[test]
+fn dense_default_has_no_fp4_telemetry_on_either_backend() {
+    let Some(device) = adapter_or_skip("dense_default_has_no_fp4_telemetry_on_either_backend")
+    else {
+        return;
+    };
+    let mut cpu = CpuPortableSession::tiny().unwrap();
+    let mut wgpu = WgpuPortableSession::tiny(device).unwrap();
+    cpu.encode(&[0, 1]).unwrap();
+    wgpu.encode(&[0, 1]).unwrap();
+    assert!(cpu.kv_storage_telemetry().unwrap().fp4_logical.is_none());
+    assert!(wgpu.kv_storage_telemetry().unwrap().fp4_logical.is_none());
+}

@@ -74,7 +74,10 @@ No GPU, model, or physical run was performed.
 
 - This is an isolated reference-error oracle only. It makes no model-quality, KV memory, latency, or throughput claim.
   - Compressed-KV runtime promotion requires quality, memory, decode latency, and tokens/s reported together from a real-model campaign (DSV41-5).
-- This is not a runtime KV path. Nothing is wired into sessions or attention, and the dense reference stays the default.
+- An opt-in portable-session FP4 *shadow* storage mode exists (`PortableKvStorageModeV1::Fp4E2M1`
+  on `CpuPortableSession` / `WgpuPortableSession`) for exact accounting only; the dense
+  F32 reference stays the default and the semantic path. This is still not an attention
+  or CUDA runtime KV path and authorizes no quality/memory/latency claim.
 - There is no WGPU or CUDA execution. A later portable GPU path must match this oracle.
 - This is not INT4, and no INT4 evidence carries over.
 - Semantic ownership: the DSV41 programme assigns compressed-KV representation semantics to SLHAv2.

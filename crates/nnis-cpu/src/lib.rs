@@ -9,6 +9,7 @@
 //! [`fp4_kv`] is the DSV41-3 FP4 E2M1 group-scaled KV encode/decode reference.
 //! [`speculative`] is the DSV41-4 greedy speculative-verification reference.
 //! [`session`] is the portable encode/decode_one/KV-advance/truncate session surface.
+//! [`kv_fp4_shadow`] is the opt-in DSV41-3 FP4 E2M1 shadow for portable KV storage accounting.
 //! [`evidence`] fixes the suite ids and host identity of CPU host evidence
 //! records produced by the `cpu_host_evidence` example.
 
@@ -17,6 +18,8 @@
 pub mod evidence;
 
 pub mod fp4_kv;
+
+pub mod kv_fp4_shadow;
 
 pub mod graph;
 
@@ -29,8 +32,10 @@ pub mod replay;
 pub mod session;
 pub mod speculative;
 
+pub use kv_fp4_shadow::PortableFp4KvShadowV1;
 pub use nnis_core::session::{
-    PortableKvCacheV1, PortableSessionError, PortableSessionV1, SyntheticPortableModelSpecV1,
+    PortableKvCacheV1, PortableKvStorageModeV1, PortableKvStorageTelemetryV1, PortableSessionError,
+    PortableSessionV1, SyntheticPortableModelSpecV1, PORTABLE_KV_FP4_STORAGE_ID,
     PORTABLE_KV_LAYOUT_ID, PORTABLE_SESSION_POLICY, PORTABLE_SESSION_VERSION,
 };
 pub use session::CpuPortableSession;

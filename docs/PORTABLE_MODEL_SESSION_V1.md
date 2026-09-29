@@ -45,14 +45,25 @@ identity `nnis.kv.host-dense-f32.v1`. `logical_payload_bytes` and
 `capacity_payload_bytes` count only addressed f32 payload. They are not process
 RSS, physical pages, or a compression ratio.
 
+### Opt-in FP4 E2M1 storage mode
+
+`PortableKvStorageModeV1::DenseF32` is the default. `Fp4E2M1 { group_size,
+scale_encoding }` keeps the dense F32 reference and additionally maintains a
+DSV41-3 FP4 E2M1 group-scaled shadow (`PortableFp4KvShadowV1` in nnis-cpu) with
+exact `Fp4KvStorageV1` accounting exposed by `kv_storage_telemetry`. Session
+logits still come from the dense path. WGPU may decode the shadow with
+`WgpuFp4E2M1KvBlockV1` for parity. Identity `nnis.kv.host-fp4-e2m1.group-scaled.v1`.
+Selecting FP4 is not a quality, memory, latency or throughput claim; DSV41-5
+remains required before any compressed-KV promotion.
+
 ## Claim boundary
 
 - No latency, throughput, acceptance-rate or quality claim.
 - No physical, Thor, ARM64 or hardware result.
 - No change to the CUDA generation path.
 - WGPU software-adapter runs are code-path only, never hardware evidence.
-- FP4 KV storage is not authorized by this surface; it remains blocked until
-  DSV41-5 campaign evidence is reviewed on top of the portable session.
+- Opt-in FP4 shadow storage is accounting-only; DSV41-5 remains required before
+  any compressed-KV runtime promotion or quality/memory/latency claim.
 
 ## Numerical policy
 

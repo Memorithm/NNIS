@@ -4,8 +4,10 @@
 //! shape: encode (prefill),
 //! decode_one, explicit KV advance, and truncate. It owns no vendor API and
 //! invents no model science. Concrete backends (CPU reference, later WGPU)
-//! implement [`PortableSessionV1`] over host-visible dense F32 KV storage
-//! described by [`PortableKvCacheV1`].
+//! implement [`PortableSessionV1`] over host-visible KV storage described by
+//! [`PortableKvCacheV1`]. Dense F32 is the default and remains the semantic
+//! reference. An opt-in FP4 E2M1 group-scaled storage mode records a DSV41-3
+//! shadow with exact storage accounting; it is not a quality or memory claim.
 //!
 //! The synthetic model dimensions in [`SyntheticPortableModelSpecV1`] exist so
 //! unit tests can exercise the session without downloading weights. Synthetic
@@ -25,8 +27,108 @@ pub const PORTABLE_SESSION_POLICY: &str = "finite-f32-le-ordered-fma-v1";
 /// Stable identity for the host-dense F32 KV layout used by portable sessions.
 pub const PORTABLE_KV_LAYOUT_ID: &str = "nnis.kv.host-dense-f32.v1";
 
+/// Stable identity for the opt-in FP4 E2M1 group-scaled portable KV storage mode.
+pub const PORTABLE_KV_FP4_STORAGE_ID: &str = "nnis.kv.host-fp4-e2m1.group-scaled.v1";
+
 /// Largest accepted vocabulary, hidden size, capacity or layer count in v1.
 pub const MAX_SYNTHETIC_SESSION_DIM: usize = 1024;
+
+/// Opt-in host KV storage mode for portable sessions.
+///
+/// [`PortableKvStorageModeV1::DenseF32`] is the default and the semantic
+/// reference path. [`PortableKvStorageModeV1::Fp4E2M1`] keeps that dense
+/// reference and additionally maintains a DSV41-3 FP4 E2M1 group-scaled shadow
+/// for exact storage accounting. Selecting FP4 does not authorize quality,
+/// memory, latency or throughput claims.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum PortableKvStorageModeV1 {
+    /// Host-dense little-endian F32 rows (default).
+    #[default]
+    DenseF32,
+    /// Dense F32 reference plus FP4 E2M1 group-scaled shadow storage.
+    Fp4E2M1 {
+        /// Even group size in `2..=MAX_FP4_GROUP_SIZE`, never crossing rows.
+        group_size: u32,
+        /// Per-group scale encoding (`F32` or `E8M0`).
+        scale_encoding: crate::kv_fp4::Fp4ScaleEncodingV1,
+    },
+}
+
+impl PortableKvStorageModeV1 {
+    /// Default FP4 fixture mode for synthetic tests: group size 4, F32 scales.
+    pub const fn tiny_fp4() -> Self {
+        Self::Fp4E2M1 {
+            group_size: 4,
+            scale_encoding: crate::kv_fp4::Fp4ScaleEncodingV1::F32,
+        }
+    }
+
+    /// Return true when the FP4 shadow path is requested.
+    pub const fn is_fp4(self) -> bool {
+        matches!(self, Self::Fp4E2M1 { .. })
+    }
+
+    /// Validate mode parameters against the DSV41-3 layout rules and `row_width`.
+    pub fn validate_for_row_width(self, row_width: usize) -> Result<Self, PortableSessionError> {
+        match self {
+            Self::DenseF32 => Ok(self),
+            Self::Fp4E2M1 {
+                group_size,
+                scale_encoding,
+            } => {
+                let width = u32::try_from(row_width).map_err(|_| {
+                    PortableSessionError::Invalid("portable KV row width exceeds u32")
+                })?;
+                // Validate via layout construction for a single placeholder row.
+                crate::kv_fp4::Fp4E2M1KvLayoutV1::new(1, width, group_size, scale_encoding)
+                    .map_err(|error| {
+                        PortableSessionError::Backend(format!(
+                            "portable FP4 KV mode rejected by DSV41-3 layout: {error}"
+                        ))
+                    })?;
+                Ok(self)
+            }
+        }
+    }
+}
+
+/// Exact host KV storage accounting for one portable session / cache snapshot.
+///
+/// Dense payload bytes always describe the semantic F32 reference. FP4 fields
+/// are present only when the opted-in shadow is active and report DSV41-3
+/// `Fp4KvStorageV1` totals summed across layers. No process RSS or physical
+/// page residency is claimed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortableKvStorageTelemetryV1 {
+    pub mode: PortableKvStorageModeV1,
+    pub layers: usize,
+    pub length: usize,
+    pub capacity: usize,
+    pub row_width: usize,
+    pub dense_logical_payload_bytes: u64,
+    pub dense_capacity_payload_bytes: u64,
+    /// Sum of per-layer DSV41-3 storage for the committed length, when FP4.
+    pub fp4_logical: Option<crate::kv_fp4::Fp4KvStorageV1>,
+    /// Sum of per-layer DSV41-3 storage for full capacity, when FP4.
+    pub fp4_capacity: Option<crate::kv_fp4::Fp4KvStorageV1>,
+}
+
+impl PortableKvStorageTelemetryV1 {
+    /// Build dense-only telemetry.
+    pub fn dense(cache: &PortableKvCacheV1) -> Self {
+        Self {
+            mode: cache.storage_mode(),
+            layers: cache.layers(),
+            length: cache.len(),
+            capacity: cache.capacity(),
+            row_width: cache.row_width(),
+            dense_logical_payload_bytes: cache.logical_payload_bytes(),
+            dense_capacity_payload_bytes: cache.capacity_payload_bytes(),
+            fp4_logical: None,
+            fp4_capacity: None,
+        }
+    }
+}
 
 /// Fail-closed errors for the portable session surface and host KV layout.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,15 +223,34 @@ pub struct PortableKvCacheV1 {
     capacity: usize,
     row_width: usize,
     length: usize,
+    mode: PortableKvStorageModeV1,
     storage: Vec<f32>,
 }
 
 impl PortableKvCacheV1 {
-    /// Allocate zero-filled storage for the declared layout.
+    /// Allocate zero-filled dense F32 storage (default mode).
     pub fn new(
         layers: usize,
         capacity: usize,
         row_width: usize,
+    ) -> Result<Self, PortableSessionError> {
+        Self::with_storage_mode(
+            layers,
+            capacity,
+            row_width,
+            PortableKvStorageModeV1::DenseF32,
+        )
+    }
+
+    /// Allocate zero-filled dense F32 storage and record an opt-in storage mode.
+    ///
+    /// The dense buffer is always the semantic reference. FP4 mode is validated
+    /// here; backends maintain the DSV41-3 shadow and fill FP4 telemetry.
+    pub fn with_storage_mode(
+        layers: usize,
+        capacity: usize,
+        row_width: usize,
+        mode: PortableKvStorageModeV1,
     ) -> Result<Self, PortableSessionError> {
         if layers == 0 || capacity == 0 || row_width == 0 {
             return Err(PortableSessionError::Invalid(
@@ -144,6 +265,7 @@ impl PortableKvCacheV1 {
                 "portable KV dimension exceeds v1 maximum",
             ));
         }
+        let mode = mode.validate_for_row_width(row_width)?;
         let total = layers
             .checked_mul(capacity)
             .and_then(|v| v.checked_mul(row_width))
@@ -160,6 +282,7 @@ impl PortableKvCacheV1 {
             capacity,
             row_width,
             length: 0,
+            mode,
             storage,
         })
     }
@@ -182,6 +305,28 @@ impl PortableKvCacheV1 {
 
     pub const fn is_empty(&self) -> bool {
         self.length == 0
+    }
+
+    /// Configured host storage mode (dense default, or opt-in FP4 shadow).
+    pub const fn storage_mode(&self) -> PortableKvStorageModeV1 {
+        self.mode
+    }
+
+    /// Dense telemetry only; FP4 shadow bytes are filled by the backend.
+    pub fn dense_telemetry(&self) -> PortableKvStorageTelemetryV1 {
+        PortableKvStorageTelemetryV1::dense(self)
+    }
+
+    /// Contiguous dense row-major view of one layer's committed prefix.
+    pub fn layer_prefix(&self, layer: usize) -> Result<&[f32], PortableSessionError> {
+        if layer >= self.layers {
+            return Err(PortableSessionError::Invalid(
+                "portable KV layer index out of range",
+            ));
+        }
+        let start = self.row_offset(layer, 0);
+        let end = start + self.length * self.row_width;
+        Ok(&self.storage[start..end])
     }
 
     /// Exact host payload bytes currently addressed by the logical length.
@@ -326,5 +471,25 @@ mod tests {
         assert!(kv.append(&[&[3.0, 4.0]]).is_err());
         kv.reset();
         assert!(kv.append(&[&[f32::NAN, 0.0]]).is_err());
+    }
+
+    #[test]
+    fn fp4_mode_validates_group_size_against_row_width() {
+        let ok = PortableKvCacheV1::with_storage_mode(1, 4, 4, PortableKvStorageModeV1::tiny_fp4())
+            .unwrap();
+        assert!(ok.storage_mode().is_fp4());
+        assert!(PortableKvCacheV1::with_storage_mode(
+            1,
+            4,
+            4,
+            PortableKvStorageModeV1::Fp4E2M1 {
+                group_size: 3, // odd, rejected by DSV41-3
+                scale_encoding: crate::kv_fp4::Fp4ScaleEncodingV1::F32,
+            },
+        )
+        .is_err());
+        let dense = PortableKvCacheV1::new(1, 2, 4).unwrap();
+        assert_eq!(dense.storage_mode(), PortableKvStorageModeV1::DenseF32);
+        assert!(dense.dense_telemetry().fp4_logical.is_none());
     }
 }
