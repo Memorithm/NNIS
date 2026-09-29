@@ -1182,3 +1182,21 @@ v888_portable_evidence_2026_09_29_portable_model_session_wgpu:
     - CUDA_path_unchanged
     - no_FP4_KV_runtime_mode
   next: stop_before_FP4_KV_wiring_DSV41_5_required_plus_optional_session_hardening
+
+v888_portable_evidence_2026_09_29_portable_kv_fp4_shadow:
+  status: NNIS_portable_FP4_E2M1_KV_shadow_storage_merged_accounting_only
+  pull_request: https://github.com/Memorithm/NNIS/pull/251
+  qualified_head: 8141b90c2586e9c62948405d3ca6a9fa78a98f15
+  merge_revision: 799a6f650b6e9e0824be83aa0f9984c1dceecbd0
+  exact_head_ci: {run_id: 36575726446, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - PortableKvStorageModeV1_DenseF32_default_Fp4E2M1_opt_in
+    - PortableFp4KvShadowV1_DSV41_3_encode_decode_and_Fp4KvStorageV1_accounting
+    - CpuPortableSession_and_WgpuPortableSession_with_storage_mode
+    - WGPU_FP4_decode_parity_on_session_shadow
+  exclusions:
+    - no_quality_memory_latency_or_throughput_claim
+    - dense_F32_remains_semantic_default
+    - CUDA_path_unchanged
+    - DSV41_5_required_before_compressed_KV_promotion
+  next: caller_driven_speculative_verification_on_PortableSessionV1_optional

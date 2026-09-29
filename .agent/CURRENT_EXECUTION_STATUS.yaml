@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 72f69ebfbfd2a3d55b0155e7fa5daa9d4bc21f57
+  main_head: 799a6f650b6e9e0824be83aa0f9984c1dceecbd0
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 5d1cef2a534d9a16052db1ed7f0dc7a225c224b3
+  previous_recorded_main_head: 72f69ebfbfd2a3d55b0155e7fa5daa9d4bc21f57
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -586,6 +586,20 @@ main_repository_state:
         claim_boundary: >-
           synthetic_fixture_only_not_model_quality_or_hardware_evidence;
           CUDA_path_unchanged; no_performance_claim
+      - id: portable_kv_fp4_shadow_storage
+        pull_request: 251
+        qualified_head: 8141b90c2586e9c62948405d3ca6a9fa78a98f15
+        merge_commit: 799a6f650b6e9e0824be83aa0f9984c1dceecbd0
+        exact_head_ci: {run_id: 36575726446, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 34}
+        summary: >-
+          PortableKvStorageModeV1 DenseF32 default / Fp4E2M1 opt-in; dense F32
+          remains semantic reference; PortableFp4KvShadowV1 encodes DSV41-3
+          shadow with exact Fp4KvStorageV1 accounting via kv_storage_telemetry;
+          WGPU FP4 decode parity on session_parity; CUDA untouched
+        record: docs/PORTABLE_MODEL_SESSION_V1.md
+        claim_boundary: >-
+          accounting_only_no_quality_memory_latency_or_throughput_claim;
+          DSV41_5_still_required_before_compressed_KV_promotion; CUDA_unchanged
 
 current_execution_order:
   - id: PORTABLE_MODEL_SESSION_CPU_SURFACE
@@ -595,9 +609,14 @@ current_execution_order:
   - id: PORTABLE_MODEL_SESSION_WGPU_PARITY
     status: completed_software
     completed_pull_requests: [250]
+    action: WgpuPortableSession parity vs CPU on synthetic model
+  - id: PORTABLE_KV_FP4_SHADOW_STORAGE
+    status: completed_software_accounting_only
+    completed_pull_requests: [251]
     action: >-
-      WgpuPortableSession parity vs CPU on synthetic model; FP4 KV wiring still
-      requires DSV41-5 review
+      opt-in FP4 E2M1 shadow on portable sessions; DSV41-5 still required before
+      any compressed-KV promotion; next software candidate is portable
+      speculative verification on PortableSessionV1
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
     status: next_roadmap_step_requires_physical_execution
     action: >-
