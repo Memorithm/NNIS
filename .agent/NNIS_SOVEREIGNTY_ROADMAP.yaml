@@ -1149,3 +1149,21 @@ deepseek_v41_runtime_evidence_2026_09_28_dsv41_4_session_wiring:
     no portable CPU/WGPU model session exists; FP4 runtime storage would require
     new unexecutable CUDA kernels against backend order and DSV41-5 is required
     before compressed-KV runtime promotion
+v888_portable_evidence_2026_09_29_portable_model_session_cpu:
+  status: NNIS_portable_model_session_CPU_surface_merged_synthetic_fixture_only
+  pull_request: https://github.com/Memorithm/NNIS/pull/249
+  qualified_head: 824c60380a38a9608c660af40dd00ec6eaf4c62c
+  merge_revision: 5d1cef2a534d9a16052db1ed7f0dc7a225c224b3
+  exact_head_ci: {run_id: 36573225878, rust_quality_cpu: success, rust_1_77_check: success}
+  scope:
+    - PortableSessionV1_stage_advance_encode_decode_truncate_reset
+    - PortableKvCacheV1_host_dense_f32_layout_and_payload_accounting
+    - CpuPortableSession_over_P2b_kernels_and_optional_P2c_graph
+    - SyntheticPortableModelSpecV1_tiny_one_hot_identity_fixture
+  exclusions:
+    - synthetic_fixture_not_model_quality_or_performance_evidence
+    - CUDA_path_unchanged
+    - no_WGPU_session_yet
+    - no_FP4_KV_runtime_mode
+  next: WgpuPortableSession_parity_vs_CPU_on_same_synthetic_model_SKIP_without_adapter
+  then: FP4_KV_storage_mode_still_requires_DSV41_5_and_portable_session_maturity
