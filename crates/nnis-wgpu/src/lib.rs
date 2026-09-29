@@ -30,6 +30,8 @@
 //! - the suite ids and adapter-identity mapping of the WGPU hardware-evidence
 //!   harness ([`evidence`]); the record format lives in
 //!   [`nnis_core::adapter_evidence`].
+//! - portable encode/decode_one/KV-advance/truncate session over the synthetic
+//!   model ([`session::WgpuPortableSession`]), parity-tested against CPU.
 //!
 //! An adapter whose device type is CPU, or whose name identifies a known
 //! software rasterizer, is reported as software. Software adapters exercise
@@ -50,9 +52,11 @@ pub mod graph;
 mod memory;
 pub mod numerical;
 pub mod replay;
+pub mod session;
 pub mod speculative;
 
 pub use memory::{WgpuBuffer, WgpuFence, WgpuQueue};
+pub use session::WgpuPortableSession;
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 
