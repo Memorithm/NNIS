@@ -177,7 +177,9 @@ nnis evidence validate --input FILE [--json]
 ```
 
 See [CPU host evidence](docs/PORTABLE_CPU_HOST_EVIDENCE_V1.md) and
-[adapter evidence](docs/PORTABLE_ADAPTER_EVIDENCE_V1.md). The records carry no
+[adapter evidence](docs/PORTABLE_ADAPTER_EVIDENCE_V1.md). See also
+[portable model session](docs/PORTABLE_MODEL_SESSION_V1.md) (CPU reference over a
+synthetic fixture; not model-quality evidence). The records carry no
 timing fields; a software adapter is code-path evidence only, and every verdict
 is scoped to the exact host or adapter, toolchain and commit.
 

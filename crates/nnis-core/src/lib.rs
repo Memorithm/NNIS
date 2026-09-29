@@ -16,6 +16,7 @@ pub mod kernel_artifact;
 pub mod kv_fp4;
 pub mod kv_reuse_plan;
 pub mod replay_state;
+pub mod session;
 pub mod sha256;
 pub mod speculative_verify;
 
