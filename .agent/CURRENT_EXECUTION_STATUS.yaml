@@ -22,9 +22,9 @@ qualified_history:
     combination_with_fused_mlp_qualified: false
 
 main_repository_state:
-  main_head: 5d1cef2a534d9a16052db1ed7f0dc7a225c224b3
+  main_head: 72f69ebfbfd2a3d55b0155e7fa5daa9d4bc21f57
   main_head_recorded_on: "2026-09-28"
-  previous_recorded_main_head: 2c22c602433fc6c183cf0f303a87e0559ad33372
+  previous_recorded_main_head: 5d1cef2a534d9a16052db1ed7f0dc7a225c224b3
 
   combined_f16_candidate_harness:
     status: merged_unqualified_combination
@@ -573,14 +573,31 @@ main_repository_state:
         claim_boundary: >-
           synthetic_fixture_only_not_model_quality_or_performance;
           CUDA_InferenceSession_and_nnis_rt_KvCache_unchanged; no_hardware_claim
+      - id: portable_model_session_wgpu_parity
+        pull_request: 250
+        qualified_head: 5df1239bcd3c031f93a783aa795a9ebe38a40b2c
+        merge_commit: 72f69ebfbfd2a3d55b0155e7fa5daa9d4bc21f57
+        exact_head_ci: {run_id: 36574178124, rust_quality_cpu: success, rust_1_77_check: success, skip_lines_in_ci_log: 32}
+        summary: >-
+          nnis-wgpu WgpuPortableSession implements PortableSessionV1 on the same
+          synthetic fixture via WGSL F32 kernels; session_parity bit-exact vs
+          CpuPortableSession; SKIP without adapter; software adapters code-path only
+        record: docs/PORTABLE_MODEL_SESSION_V1.md
+        claim_boundary: >-
+          synthetic_fixture_only_not_model_quality_or_hardware_evidence;
+          CUDA_path_unchanged; no_performance_claim
 
 current_execution_order:
   - id: PORTABLE_MODEL_SESSION_CPU_SURFACE
     status: completed_software
     completed_pull_requests: [249]
+    action: PortableSessionV1 trait and CpuPortableSession synthetic fixture
+  - id: PORTABLE_MODEL_SESSION_WGPU_PARITY
+    status: completed_software
+    completed_pull_requests: [250]
     action: >-
-      PortableSessionV1 trait and CpuPortableSession synthetic fixture; WGPU
-      parity and FP4 KV wiring remain follow-ups
+      WgpuPortableSession parity vs CPU on synthetic model; FP4 KV wiring still
+      requires DSV41-5 review
   - id: DSV41_5_REAL_MODEL_QUALITY_MEMORY_LATENCY_THROUGHPUT_CAMPAIGN
     status: next_roadmap_step_requires_physical_execution
     action: >-

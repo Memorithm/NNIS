@@ -427,6 +427,21 @@ completed:
       - WGPU_session_parity
       - FP4_KV_runtime_storage
       - latency_cost_or_throughput
+  portable_model_session_wgpu:
+    pull_request: 250
+    qualified_head: 5df1239bcd3c031f93a783aa795a9ebe38a40b2c
+    merge_commit: 72f69ebfbfd2a3d55b0155e7fa5daa9d4bc21f57
+    status: complete_WgpuPortableSession_parity_synthetic_only
+    exact_head_ci: {run_id: 36574178124, conclusion: success}
+    Rust_1_77_check: success
+    scope:
+      - WgpuPortableSession
+      - session_parity_vs_CpuPortableSession
+    not_claimed:
+      - hardware_WGPU_evidence
+      - model_quality_or_trained_weights
+      - FP4_KV_runtime_storage
+      - latency_cost_or_throughput
   DSV41_CPU_references:
     pull_requests: [230, 231, 232, 233, 234]
     scope: >-
@@ -435,10 +450,9 @@ completed:
       speculative verification surface, DSV41-5 campaign preregistration and
       evidence validator (CPU/core only; see sovereignty roadmap DSV41 evidence)
 current:
-  earliest_open_slice: WgpuPortableSession_parity_then_workflow_scope_and_human_evidence_runs
-  status: P3_and_P10_complete_portable_model_session_CPU_merged_WGPU_session_open
+  earliest_open_slice: workflow_scope_and_human_evidence_runs_FP4_KV_blocked_on_DSV41_5
+  status: P3_P10_and_portable_model_session_CPU_plus_WGPU_parity_merged_no_hardware_record
 next:
-  - WgpuPortableSession_parity_vs_CpuPortableSession_on_synthetic_model
   - wire_scripts_check_portable_wgpu_sh_into_ci_yml_requires_workflow_scope_push
   - human_runs_wgpu_adapter_evidence_example_PR_244_on_a_real_adapter_software_adapters_do_not_count
   - human_runs_cpu_host_evidence_example_PR_246_on_an_ARM64_host_and_actual_non_NVIDIA_backend_evidence_separately
