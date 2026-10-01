@@ -16,10 +16,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
+#[cfg(unix)]
+use std::fs::OpenOptions;
+#[cfg(unix)]
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-const HF_CONFIG: &str = "config.json";
+pub(crate) const HF_CONFIG: &str = "config.json";
 const SINGLE_SAFETENSORS: &str = "model.safetensors";
 const SAFETENSORS_INDEX: &str = "model.safetensors.index.json";
 
@@ -112,9 +118,11 @@ enum HostTensor {
 }
 
 fn parse_metadata(directory: &Path) -> Result<SafetensorsMetadata> {
-    let path = directory.join(HF_CONFIG);
-    let bytes =
-        fs::read(&path).map_err(|error| NnisError::io("read Hugging Face config.json", error))?;
+    let bytes = read_confined_model_file(
+        directory,
+        Path::new(HF_CONFIG),
+        "read Hugging Face config.json",
+    )?;
     parse_metadata_bytes(&bytes)
 }
 
@@ -220,18 +228,175 @@ fn metadata_to_model_config(metadata: &SafetensorsMetadata) -> Result<ModelConfi
     Ok(config)
 }
 
-fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
-    let single = directory.join(SINGLE_SAFETENSORS);
-    let index = directory.join(SAFETENSORS_INDEX);
-    if single.exists() && index.exists() {
+fn confined_regular_file_exists(directory: &Path, relative: &Path) -> Result<bool> {
+    checked_relative_path(relative)?;
+    let directory_metadata = fs::symlink_metadata(directory)
+        .map_err(|error| NnisError::io("inspect local model directory", error))?;
+    if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+        return Err(NnisError::invalid_input(
+            "local model directory must be a real directory, not a symlink",
+        ));
+    }
+    let normal_components: Vec<_> = relative
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value),
+            Component::CurDir => None,
+            _ => None,
+        })
+        .collect();
+    let mut target = directory.to_path_buf();
+    for (index, component) in normal_components.iter().enumerate() {
+        target.push(*component);
+        let metadata = match fs::symlink_metadata(&target) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(NnisError::io(
+                    format!("inspect model source entry {}", relative.display()),
+                    error,
+                ))
+            }
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(NnisError::invalid_input(format!(
+                "model source path {} may not contain symbolic links",
+                relative.display()
+            )));
+        }
+        let is_last = index + 1 == normal_components.len();
+        if (!is_last && !metadata.is_dir()) || (is_last && !metadata.is_file()) {
+            return Err(NnisError::invalid_input(format!(
+                "model source path {} does not resolve to a regular file beneath the model directory",
+                relative.display()
+            )));
+        }
+    }
+    Ok(true)
+}
+
+fn checked_relative_path(path: &Path) -> Result<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(NnisError::invalid_input(format!(
+            "model source path {:?} must be relative and may not traverse parents",
+            path
+        )));
+    }
+    Ok(())
+}
+
+/// Read one regular model file through the shared loader/preflight boundary.
+///
+/// Model directories are local, immutable inputs for the duration of admission.
+/// On Unix every path component is rejected if it is a symlink, the canonical
+/// target must remain under the canonical model root, the final open uses
+/// `O_NOFOLLOW`, and the opened inode must match the inode that was inspected.
+/// Other platforms fail closed until an equivalent handle-relative resolver is
+/// implemented.
+pub(crate) fn read_confined_model_file(
+    directory: &Path,
+    relative: &Path,
+    operation: &str,
+) -> Result<Vec<u8>> {
+    checked_relative_path(relative)?;
+
+    #[cfg(not(unix))]
+    {
+        let _ = (directory, operation);
+        return Err(NnisError::unsupported(
+            "confined Safetensors model loading requires a Unix no-follow resolver",
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        let directory_metadata = fs::symlink_metadata(directory)
+            .map_err(|error| NnisError::io("inspect local model directory", error))?;
+        if directory_metadata.file_type().is_symlink() || !directory_metadata.is_dir() {
+            return Err(NnisError::invalid_input(
+                "local model directory must be a real directory, not a symlink",
+            ));
+        }
+        let root = fs::canonicalize(directory)
+            .map_err(|error| NnisError::io("canonicalize local model directory", error))?;
+        let mut target = root.clone();
+        let normal_components: Vec<_> = relative
+            .components()
+            .filter_map(|component| match component {
+                Component::Normal(value) => Some(value),
+                Component::CurDir => None,
+                _ => None,
+            })
+            .collect();
+        for (index, component) in normal_components.iter().enumerate() {
+            target.push(*component);
+            let metadata = fs::symlink_metadata(&target).map_err(|error| {
+                NnisError::io(format!("inspect model source path {}", target.display()), error)
+            })?;
+            if metadata.file_type().is_symlink() {
+                return Err(NnisError::invalid_input(format!(
+                    "model source path {} may not contain symbolic links",
+                    relative.display()
+                )));
+            }
+            let is_last = index + 1 == normal_components.len();
+            if (!is_last && !metadata.is_dir()) || (is_last && !metadata.is_file()) {
+                return Err(NnisError::invalid_input(format!(
+                    "model source path {} does not resolve to a regular file beneath the model directory",
+                    relative.display()
+                )));
+            }
+        }
+        let canonical_target = fs::canonicalize(&target)
+            .map_err(|error| NnisError::io(format!("canonicalize {}", target.display()), error))?;
+        if !canonical_target.starts_with(&root) {
+            return Err(NnisError::invalid_input(format!(
+                "model source path {} escapes the local model directory",
+                relative.display()
+            )));
+        }
+        let inspected = fs::symlink_metadata(&target)
+            .map_err(|error| NnisError::io(format!("inspect {}", target.display()), error))?;
+        let mut file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
+            .open(&target)
+            .map_err(|error| NnisError::io(operation, error))?;
+        let opened = file
+            .metadata()
+            .map_err(|error| NnisError::io(format!("inspect opened {}", target.display()), error))?;
+        if !opened.is_file() || opened.dev() != inspected.dev() || opened.ino() != inspected.ino() {
+            return Err(NnisError::invalid_input(format!(
+                "model source path {} changed while it was being opened",
+                relative.display()
+            )));
+        }
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|error| NnisError::io(operation, error))?;
+        Ok(bytes)
+    }
+}
+
+pub(crate) fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
+    let single = Path::new(SINGLE_SAFETENSORS);
+    let index = Path::new(SAFETENSORS_INDEX);
+    let has_single = confined_regular_file_exists(directory, single)?;
+    let has_index = confined_regular_file_exists(directory, index)?;
+    if has_single && has_index {
         return Err(NnisError::invalid_input(
             "both model.safetensors and model.safetensors.index.json are present; refusing ambiguous source",
         ));
     }
-    if single.is_file() {
-        return Ok(vec![single]);
+    if has_single {
+        return Ok(vec![single.to_path_buf()]);
     }
-    if !index.is_file() {
+    if !has_index {
         return Err(NnisError::io(
             "discover Hugging Face Safetensors weights",
             std::io::Error::new(
@@ -241,8 +406,11 @@ fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
         ));
     }
 
-    let bytes =
-        fs::read(&index).map_err(|error| NnisError::io("read Safetensors shard index", error))?;
+    let bytes = read_confined_model_file(
+        directory,
+        index,
+        "read Safetensors shard index",
+    )?;
     let index: SafetensorsIndex = serde_json::from_slice(&bytes).map_err(|error| {
         NnisError::invalid_input(format!("invalid Safetensors shard index: {error}"))
     })?;
@@ -254,35 +422,20 @@ fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
 
     let mut files = BTreeSet::new();
     for file in index.weight_map.values() {
-        let relative = checked_relative_path(file)?;
-        let path = directory.join(relative);
-        if !path.is_file() {
+        let relative = Path::new(file);
+        checked_relative_path(relative)?;
+        if !confined_regular_file_exists(directory, relative)? {
             return Err(NnisError::io(
                 "read Safetensors shard",
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("referenced shard {} does not exist", path.display()),
+                    format!("referenced shard {} does not exist", relative.display()),
                 ),
             ));
         }
-        files.insert(path);
+        files.insert(relative.to_path_buf());
     }
     Ok(files.into_iter().collect())
-}
-
-fn checked_relative_path(file: &str) -> Result<&Path> {
-    let path = Path::new(file);
-    if file.is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
-    {
-        return Err(NnisError::invalid_input(format!(
-            "Safetensors shard path {file:?} must be relative and may not traverse parents"
-        )));
-    }
-    Ok(path)
 }
 
 fn tensor_spec(hf_name: &str, metadata: &SafetensorsMetadata) -> Option<TensorSpec> {
@@ -537,13 +690,17 @@ fn insert_tensor(
 fn load_shard(
     context: &Arc<Context>,
     stream: &Stream,
+    directory: &Path,
     path: &Path,
     metadata: &SafetensorsMetadata,
     execution_dtype: WeightDType,
     tensors: &mut HashMap<String, (Vec<usize>, DeviceTensor)>,
 ) -> Result<()> {
-    let data =
-        fs::read(path).map_err(|error| NnisError::io(format!("read {}", path.display()), error))?;
+    let data = read_confined_model_file(
+        directory,
+        path,
+        &format!("read Safetensors shard {}", path.display()),
+    )?;
     let safetensors = SafeTensors::deserialize(&data).map_err(|error| {
         NnisError::invalid_input(format!("invalid {}: {error}", path.display()))
     })?;
@@ -751,6 +908,7 @@ fn load_model_from_safetensors_inner(
         load_shard(
             context,
             stream,
+            directory,
             path,
             &metadata,
             model_config.weight_dtype,
@@ -917,8 +1075,85 @@ mod tests {
 
     #[test]
     fn shard_paths_fail_closed_on_parent_traversal() {
-        assert!(checked_relative_path("model-00001-of-00002.safetensors").is_ok());
-        assert!(checked_relative_path("../escape.safetensors").is_err());
-        assert!(checked_relative_path("/tmp/escape.safetensors").is_err());
+        assert!(checked_relative_path(Path::new("model-00001-of-00002.safetensors")).is_ok());
+        assert!(checked_relative_path(Path::new("../escape.safetensors")).is_err());
+        assert!(checked_relative_path(Path::new("/tmp/escape.safetensors")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn single_file_symlink_outside_model_root_is_rejected() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("nnis-model-source-{nonce}"));
+        let model = base.join("model");
+        fs::create_dir_all(&model).unwrap();
+        let outside = base.join("outside.safetensors");
+        fs::write(&outside, b"outside").unwrap();
+        symlink(&outside, model.join(SINGLE_SAFETENSORS)).unwrap();
+
+        let error = discover_weight_files(&model).unwrap_err().to_string();
+        assert!(error.contains("symbolic link"));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn indexed_shard_symlink_outside_model_root_is_rejected() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("nnis-model-index-{nonce}"));
+        let model = base.join("model");
+        fs::create_dir_all(&model).unwrap();
+        let outside = base.join("outside.safetensors");
+        fs::write(&outside, b"outside").unwrap();
+        fs::write(
+            model.join(SAFETENSORS_INDEX),
+            br#"{"weight_map":{"model.embed_tokens.weight":"shard.safetensors"}}"#,
+        )
+        .unwrap();
+        symlink(&outside, model.join("shard.safetensors")).unwrap();
+
+        let error = discover_weight_files(&model).unwrap_err().to_string();
+        assert!(error.contains("symbolic link"));
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn indexed_shard_through_symlinked_directory_is_rejected() {
+        use std::os::unix::fs::symlink;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("nnis-model-parent-{nonce}"));
+        let model = base.join("model");
+        let outside = base.join("outside");
+        fs::create_dir_all(&model).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("shard.safetensors"), b"outside").unwrap();
+        fs::write(
+            model.join(SAFETENSORS_INDEX),
+            br#"{"weight_map":{"model.embed_tokens.weight":"nested/shard.safetensors"}}"#,
+        )
+        .unwrap();
+        symlink(&outside, model.join("nested")).unwrap();
+
+        let error = discover_weight_files(&model).unwrap_err().to_string();
+        assert!(error.contains("symbolic links"));
+        fs::remove_dir_all(base).unwrap();
     }
 }
