@@ -336,7 +336,10 @@ pub(crate) fn read_confined_model_file(
         for (index, component) in normal_components.iter().enumerate() {
             target.push(*component);
             let metadata = fs::symlink_metadata(&target).map_err(|error| {
-                NnisError::io(format!("inspect model source path {}", target.display()), error)
+                NnisError::io(
+                    format!("inspect model source path {}", target.display()),
+                    error,
+                )
             })?;
             if metadata.file_type().is_symlink() {
                 return Err(NnisError::invalid_input(format!(
@@ -367,9 +370,9 @@ pub(crate) fn read_confined_model_file(
             .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
             .open(&target)
             .map_err(|error| NnisError::io(operation, error))?;
-        let opened = file
-            .metadata()
-            .map_err(|error| NnisError::io(format!("inspect opened {}", target.display()), error))?;
+        let opened = file.metadata().map_err(|error| {
+            NnisError::io(format!("inspect opened {}", target.display()), error)
+        })?;
         if !opened.is_file() || opened.dev() != inspected.dev() || opened.ino() != inspected.ino() {
             return Err(NnisError::invalid_input(format!(
                 "model source path {} changed while it was being opened",
@@ -406,11 +409,7 @@ pub(crate) fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
         ));
     }
 
-    let bytes = read_confined_model_file(
-        directory,
-        index,
-        "read Safetensors shard index",
-    )?;
+    let bytes = read_confined_model_file(directory, index, "read Safetensors shard index")?;
     let index: SafetensorsIndex = serde_json::from_slice(&bytes).map_err(|error| {
         NnisError::invalid_input(format!("invalid Safetensors shard index: {error}"))
     })?;
