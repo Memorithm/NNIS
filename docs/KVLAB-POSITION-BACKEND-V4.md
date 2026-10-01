@@ -4,6 +4,14 @@
 
 The backend reads one canonical JSON request from stdin. It validates the exact model/runtime provenance supplied on the command line, recomputes the canonical position-trace SHA-256, validates a strictly increasing in-range `retained_positions` set, loads the requested local Safetensors model, and prefills the exact `model_input_token_ids` sequence. Duplicate vocabulary token ids are valid and remain distinct because KV row identity is the sequence position.
 
+## Request resource envelope
+
+The backend reads at most 1 MiB from stdin, including the canonical JSON syntax. It reads through a limiting adapter and inspects at most one byte beyond that budget, so an oversized producer is rejected before JSON parsing, canonicalisation, SHA-256 calculation, model-file hashing, or CUDA initialization. The request must be UTF-8. Each free-text identity or policy field is limited to 1,024 bytes and remains subject to the existing non-empty ASCII rule.
+
+Before any model execution, `model_input_token_ids`, `evaluation_token_ids`, and `retained_positions` are checked against the admitted checkpoint's exact `max_position_embeddings`. The input plus decoded evaluation length must fit that same capacity, and the retained-position collection cannot be larger than the input sequence.
+
+The binary processes one request and exits; it does not supervise its caller. A caller launching it MUST apply an independent wall-clock deadline, bounded stdout/stderr drains, and whole-process-group termination on timeout. A successful exit is not evidence that those caller-side controls exist. KVLab or another orchestrator remains responsible for qualifying that supervision contract.
+
 ## Exact checkpoint admission
 
 KVLab v4 real-model evidence is fail-closed to NNIS checkpoints that already have an `ExactDecoderCheckpointSpec`. The `--model-id` and `--model-revision` pair must identify one of those frozen specs. Before creating a CUDA device/context, the backend streams the local `model.safetensors` file through SHA-256 and requires an exact match with the spec's `source_model_sha256`. After loading, the parsed `ModelConfig` must also pass the same spec's exact geometry/capability validation before `Model::new` is called.

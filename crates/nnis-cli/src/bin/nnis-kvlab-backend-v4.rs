@@ -17,6 +17,8 @@ const RESPONSE_SCHEMA: &str = "kvlab.prospect-kv-backend-response/v4";
 const TRACE_SCHEMA: &str = "kvlab.prospect-kv-real-model-position-trace/v1";
 const ARTIFACT_SCHEMA: &str = "nnis.kvlab-position-teacher-forced-evaluation/v1";
 const DEFAULT_RUNTIME_BACKEND: &str = "nnis-kvlab-v4";
+const MAX_REQUEST_BYTES: usize = 1024 * 1024;
+const MAX_REQUEST_TEXT_BYTES: usize = 1024;
 
 const USAGE: &str = "Usage:\n  nnis-kvlab-backend-v4 --model DIR --model-id ID --model-revision REV --tokenizer-revision REV --runtime-revision REV [--runtime-backend ID] [--device N]\n\nReads one canonical KVLab backend request v4 from stdin and writes one canonical response v4 to stdout. KV row identity is the zero-based input-sequence position. The first evaluation token is a bridge token processed after candidate compaction; metrics score only the remaining teacher-forced evaluation tokens.";
 
@@ -270,6 +272,35 @@ fn validate_request(request: &RequestV4, args: &Args) -> Result<(), String> {
             "NNIS backend requires at least two evaluation tokens: one bridge and one scored target"
                 .to_string(),
         );
+    }
+
+    let checkpoint_spec = exact_checkpoint_spec(args)?;
+    let max_positions = checkpoint_spec.max_position_embeddings;
+    if request.model_input_token_ids.len() > max_positions {
+        return Err(format!(
+            "model_input_token_ids length {} exceeds exact checkpoint {} capacity {max_positions}",
+            request.model_input_token_ids.len(),
+            checkpoint_spec.name
+        ));
+    }
+    let decoded_evaluation_tokens = request
+        .evaluation_token_ids
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| "evaluation token length underflow".to_string())?;
+    let required_positions = request
+        .model_input_token_ids
+        .len()
+        .checked_add(decoded_evaluation_tokens)
+        .ok_or_else(|| "model input plus evaluation length overflows usize".to_string())?;
+    if required_positions > max_positions {
+        return Err(format!(
+            "model input plus decoded evaluation requires {required_positions} logical positions but exact checkpoint {} capacity is {max_positions}",
+            checkpoint_spec.name
+        ));
+    }
+    if request.retained_positions.len() > request.model_input_token_ids.len() {
+        return Err("retained_positions has more entries than model_input_token_ids".to_string());
     }
     validate_retained_positions(
         request.model_input_token_ids.len(),
@@ -677,12 +708,35 @@ fn require_ascii_text(name: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err(format!("{name} must be non-empty"));
     }
+    if value.len() > MAX_REQUEST_TEXT_BYTES {
+        return Err(format!(
+            "{name} exceeds the {MAX_REQUEST_TEXT_BYTES}-byte text limit"
+        ));
+    }
     if !value.is_ascii() {
         return Err(format!(
             "{name} must be ASCII for canonical JSON interoperability"
         ));
     }
     Ok(())
+}
+
+fn read_bounded_request<R: Read>(reader: &mut R) -> Result<String, String> {
+    let read_limit = u64::try_from(MAX_REQUEST_BYTES)
+        .map_err(|_| "request byte limit is not representable as u64".to_string())?
+        .checked_add(1)
+        .ok_or_else(|| "request byte limit overflows u64".to_string())?;
+    let mut bytes = Vec::new();
+    reader
+        .take(read_limit)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read backend request: {error}"))?;
+    if bytes.len() > MAX_REQUEST_BYTES {
+        return Err(format!(
+            "backend request exceeds the {MAX_REQUEST_BYTES}-byte limit"
+        ));
+    }
+    String::from_utf8(bytes).map_err(|error| format!("backend request is not UTF-8: {error}"))
 }
 
 fn run(args: &Args, payload: &str) -> Result<String, String> {
@@ -706,11 +760,17 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let mut payload = String::new();
-    if let Err(error) = io::stdin().read_to_string(&mut payload) {
-        eprintln!("failed to read backend request: {error}");
-        return ExitCode::from(2);
-    }
+    let payload = {
+        let stdin = io::stdin();
+        let mut locked = stdin.lock();
+        match read_bounded_request(&mut locked) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::from(2);
+            }
+        }
+    };
     match run(&args, &payload) {
         Ok(response) => {
             let mut stdout = io::stdout();
@@ -734,8 +794,8 @@ mod tests {
     fn args() -> Args {
         Args {
             model_dir: PathBuf::from("/tmp/model"),
-            model_id: "example/model".to_string(),
-            model_revision: "model-r1".to_string(),
+            model_id: SMOLLM2_135M_BF16.source_repo.to_string(),
+            model_revision: SMOLLM2_135M_BF16.source_revision.to_string(),
             tokenizer_revision: "tok-r1".to_string(),
             runtime_backend: DEFAULT_RUNTIME_BACKEND.to_string(),
             runtime_revision: "1fc4dc6d5f45e7d306d8e35823197afc2cf9846c".to_string(),
@@ -781,7 +841,7 @@ mod tests {
         request.insert("mode".to_string(), Value::String("candidate".to_string()));
         request.insert(
             "model_id".to_string(),
-            Value::String("example/model".to_string()),
+            Value::String(SMOLLM2_135M_BF16.source_repo.to_string()),
         );
         request.insert(
             "model_input_token_ids".to_string(),
@@ -789,7 +849,7 @@ mod tests {
         );
         request.insert(
             "model_revision".to_string(),
-            Value::String("model-r1".to_string()),
+            Value::String(SMOLLM2_135M_BF16.source_revision.to_string()),
         );
         request.insert("policy".to_string(), Value::String("lru".to_string()));
         request.insert(
@@ -822,6 +882,44 @@ mod tests {
     }
 
     #[test]
+    fn bounded_request_reader_accepts_limit_and_rejects_one_extra_byte() {
+        let exact = vec![b'a'; MAX_REQUEST_BYTES];
+        assert_eq!(
+            read_bounded_request(&mut std::io::Cursor::new(exact))
+                .unwrap()
+                .len(),
+            MAX_REQUEST_BYTES
+        );
+
+        let oversized = vec![b'a'; MAX_REQUEST_BYTES + 1];
+        let error = read_bounded_request(&mut std::io::Cursor::new(oversized)).unwrap_err();
+        assert!(error.contains("exceeds"), "{error}");
+    }
+
+    #[test]
+    fn bounded_request_reader_rejects_invalid_utf8() {
+        let error = read_bounded_request(&mut std::io::Cursor::new(vec![0xff])).unwrap_err();
+        assert!(error.contains("not UTF-8"), "{error}");
+    }
+
+    #[test]
+    fn request_sequences_are_bounded_before_execution() {
+        let payload = request_json();
+        let mut value: Value = serde_json::from_str(&payload).unwrap();
+        let capacity = SMOLLM2_135M_BF16.max_position_embeddings;
+        value["model_input_token_ids"] = serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
+        let oversized = serde_json::to_string(&value).unwrap();
+        let error = parse_request(&oversized, &args()).unwrap_err();
+        assert!(error.contains("capacity"), "{error}");
+
+        let mut value: Value = serde_json::from_str(&payload).unwrap();
+        value["evaluation_token_ids"] = serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
+        let oversized = serde_json::to_string(&value).unwrap();
+        let error = parse_request(&oversized, &args()).unwrap_err();
+        assert!(error.contains("capacity"), "{error}");
+    }
+
+    #[test]
     fn exact_checkpoint_kv_byte_accounting_matches_f32_runtime_geometry() {
         assert_eq!(
             exact_checkpoint_kv_bytes_per_token(&SMOLLM2_135M_BF16).unwrap(),
@@ -843,7 +941,9 @@ mod tests {
 
         configured.model_revision = "deadbeef".to_string();
         assert!(exact_checkpoint_spec(&configured).is_err());
-        assert!(exact_checkpoint_spec(&args()).is_err());
+        configured.model_id = "unregistered/model".to_string();
+        configured.model_revision = SMOLLM2_135M_BF16.source_revision.to_string();
+        assert!(exact_checkpoint_spec(&configured).is_err());
     }
 
     #[test]
