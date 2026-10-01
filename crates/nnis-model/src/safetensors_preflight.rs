@@ -4,8 +4,8 @@
 //! but stops before CUDA context creation, allocation, transposition, or upload.
 
 use crate::safetensors_loader::{
-    discover_weight_files, read_confined_model_file, SafetensorsLoadConfig,
-    SafetensorsMetadata, HF_CONFIG,
+    discover_weight_files, read_confined_model_file, SafetensorsLoadConfig, SafetensorsMetadata,
+    HF_CONFIG,
 };
 use crate::{Activation, ModelConfig, WeightDType};
 use nnis_rt::{NnisError, Result};
