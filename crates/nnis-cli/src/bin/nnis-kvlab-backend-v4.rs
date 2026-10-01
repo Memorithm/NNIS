@@ -907,15 +907,13 @@ mod tests {
         let payload = request_json();
         let mut value: Value = serde_json::from_str(&payload).unwrap();
         let capacity = SMOLLM2_135M_BF16.max_position_embeddings;
-        value["model_input_token_ids"] =
-            serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
+        value["model_input_token_ids"] = serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
         let oversized = serde_json::to_string(&value).unwrap();
         let error = parse_request(&oversized, &args()).unwrap_err();
         assert!(error.contains("capacity"), "{error}");
 
         let mut value: Value = serde_json::from_str(&payload).unwrap();
-        value["evaluation_token_ids"] =
-            serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
+        value["evaluation_token_ids"] = serde_json::to_value(vec![1_u32; capacity + 1]).unwrap();
         let oversized = serde_json::to_string(&value).unwrap();
         let error = parse_request(&oversized, &args()).unwrap_err();
         assert!(error.contains("capacity"), "{error}");
@@ -943,7 +941,9 @@ mod tests {
 
         configured.model_revision = "deadbeef".to_string();
         assert!(exact_checkpoint_spec(&configured).is_err());
-        assert!(exact_checkpoint_spec(&args()).is_err());
+        configured.model_id = "unregistered/model".to_string();
+        configured.model_revision = SMOLLM2_135M_BF16.source_revision.to_string();
+        assert!(exact_checkpoint_spec(&configured).is_err());
     }
 
     #[test]
