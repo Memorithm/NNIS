@@ -3,19 +3,17 @@
 //! The preflight mirrors the current local Safetensors loader admission rules
 //! but stops before CUDA context creation, allocation, transposition, or upload.
 
-use crate::safetensors_loader::{SafetensorsLoadConfig, SafetensorsMetadata};
+use crate::safetensors_loader::{
+    discover_weight_files, read_confined_model_file, SafetensorsLoadConfig,
+    SafetensorsMetadata, HF_CONFIG,
+};
 use crate::{Activation, ModelConfig, WeightDType};
 use nnis_rt::{NnisError, Result};
 use safetensors::{Dtype, SafeTensors};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeSet, HashMap};
-use std::fs;
-use std::path::{Component, Path, PathBuf};
-
-const HF_CONFIG: &str = "config.json";
-const SINGLE_SAFETENSORS: &str = "model.safetensors";
-const SAFETENSORS_INDEX: &str = "model.safetensors.index.json";
+use std::collections::BTreeSet;
+use std::path::Path;
 
 /// Version of the CPU-only Hugging Face Safetensors preflight report.
 pub const NNIS_HF_SAFETENSORS_PREFLIGHT_VERSION: u32 = 1;
@@ -83,11 +81,6 @@ enum EosTokenId {
     Multiple(Vec<u32>),
 }
 
-#[derive(Debug, Deserialize)]
-struct SafetensorsIndex {
-    weight_map: HashMap<String, String>,
-}
-
 #[derive(Debug)]
 struct TensorSpec {
     logical_name: String,
@@ -95,8 +88,11 @@ struct TensorSpec {
 }
 
 fn parse_metadata(directory: &Path) -> Result<SafetensorsMetadata> {
-    let bytes = fs::read(directory.join(HF_CONFIG))
-        .map_err(|error| NnisError::io("read Hugging Face config.json", error))?;
+    let bytes = read_confined_model_file(
+        directory,
+        Path::new(HF_CONFIG),
+        "read Hugging Face config.json",
+    )?;
     parse_metadata_bytes(&bytes)
 }
 
@@ -201,70 +197,6 @@ fn metadata_to_model_config(metadata: &SafetensorsMetadata) -> Result<ModelConfi
     };
     config.validate_execution_support()?;
     Ok(config)
-}
-
-fn checked_relative_path(file: &str) -> Result<&Path> {
-    let path = Path::new(file);
-    if file.is_empty()
-        || path.is_absolute()
-        || path
-            .components()
-            .any(|component| !matches!(component, Component::Normal(_) | Component::CurDir))
-    {
-        return Err(NnisError::invalid_input(format!(
-            "Safetensors shard path {file:?} must be relative and may not traverse parents"
-        )));
-    }
-    Ok(path)
-}
-
-fn discover_weight_files(directory: &Path) -> Result<Vec<PathBuf>> {
-    let single = directory.join(SINGLE_SAFETENSORS);
-    let index_path = directory.join(SAFETENSORS_INDEX);
-    if single.exists() && index_path.exists() {
-        return Err(NnisError::invalid_input(
-            "both model.safetensors and model.safetensors.index.json are present; refusing ambiguous source",
-        ));
-    }
-    if single.is_file() {
-        return Ok(vec![single]);
-    }
-    if !index_path.is_file() {
-        return Err(NnisError::io(
-            "discover Hugging Face Safetensors weights",
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "neither model.safetensors nor model.safetensors.index.json exists",
-            ),
-        ));
-    }
-
-    let bytes = fs::read(&index_path)
-        .map_err(|error| NnisError::io("read Safetensors shard index", error))?;
-    let index: SafetensorsIndex = serde_json::from_slice(&bytes).map_err(|error| {
-        NnisError::invalid_input(format!("invalid Safetensors shard index: {error}"))
-    })?;
-    if index.weight_map.is_empty() {
-        return Err(NnisError::invalid_input(
-            "Safetensors shard index has an empty weight_map",
-        ));
-    }
-
-    let mut files = BTreeSet::new();
-    for file in index.weight_map.values() {
-        let path = directory.join(checked_relative_path(file)?);
-        if !path.is_file() {
-            return Err(NnisError::io(
-                "read Safetensors shard",
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("referenced shard {} does not exist", path.display()),
-                ),
-            ));
-        }
-        files.insert(path);
-    }
-    Ok(files.into_iter().collect())
 }
 
 fn tensor_spec(hf_name: &str, metadata: &SafetensorsMetadata) -> Option<TensorSpec> {
@@ -378,12 +310,16 @@ fn validate_logical_set(
 }
 
 fn validate_shard(
+    directory: &Path,
     path: &Path,
     metadata: &SafetensorsMetadata,
     logical: &mut BTreeSet<String>,
 ) -> Result<(usize, usize)> {
-    let data =
-        fs::read(path).map_err(|error| NnisError::io(format!("read {}", path.display()), error))?;
+    let data = read_confined_model_file(
+        directory,
+        path,
+        &format!("read Safetensors shard {}", path.display()),
+    )?;
     let tensors = SafeTensors::deserialize(&data).map_err(|error| {
         NnisError::invalid_input(format!("invalid {}: {error}", path.display()))
     })?;
@@ -454,7 +390,7 @@ pub fn preflight_hf_safetensors_source(
     let mut ignored_tensor_count = 0_usize;
 
     for path in &files {
-        let (recognized, ignored) = validate_shard(path, &metadata, &mut logical)?;
+        let (recognized, ignored) = validate_shard(directory, path, &metadata, &mut logical)?;
         recognized_tensor_count = recognized_tensor_count
             .checked_add(recognized)
             .ok_or_else(|| NnisError::invalid_input("recognized tensor count overflows usize"))?;
@@ -482,12 +418,7 @@ pub fn preflight_hf_safetensors_source(
 
     let weight_files = files
         .iter()
-        .map(|path| {
-            path.strip_prefix(directory)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .into_owned()
-        })
+        .map(|path| path.to_string_lossy().into_owned())
         .collect();
 
     Ok(HfSafetensorsPreflightReportV1 {
