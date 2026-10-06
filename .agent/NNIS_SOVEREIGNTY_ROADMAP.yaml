@@ -1200,3 +1200,53 @@ v888_portable_evidence_2026_09_29_portable_kv_fp4_shadow:
     - CUDA_path_unchanged
     - DSV41_5_required_before_compressed_KV_promotion
   next: caller_driven_speculative_verification_on_PortableSessionV1_optional
+pascal_vector_projection_program_2026_10_06:
+  status: active_portable_runtime_research
+  naming_direction: Native_Neural_Inference_Stack_for_this_program
+  role:
+    - optional_runtime_carrier_for_versioned_PVP_layouts_and_kernels
+    - CPU_and_WGPU_session_level_qualification
+    - end_to_end_runtime_evidence_after_SciRust_and_FLAT_component_qualification
+  SML_boundary:
+    - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
+    - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
+    - future_SML_HARNESS_is_separate_and_NNIS_does_not_own_it
+  hardware_sovereignty:
+    effective_for_new_SML_PVP_work: true
+    allowed_vendor_specific_software:
+      - installed_GPU_driver_required_by_WGPU_backend
+    forbidden_required_software:
+      - CUDA
+      - NVRTC
+      - cuDNN
+      - TensorRT
+      - TensorRT_LLM
+      - NVML
+      - CUTLASS
+      - CUBIN_specific_execution_contract
+    note: >-
+      Existing CUDA/NVRTC/NVML/TensorRT-oriented NNIS code and historical
+      evidence remain factual legacy/reference capabilities. They are not
+      selected for the new SML/PVP path and are not evidence for portable PVP.
+  consume:
+    from_SciRust:
+      - versioned_bitplane_layout
+      - CPU_reference_and_SIMD_oracles
+      - capability_metadata_when_general
+    from_FLAT_ATTENTION:
+      - versioned_WGPU_PVP_kernel_contract_after_exact_qualification
+      - device_capability_and_kernel_evidence
+    from_SML_GENIUS:
+      - frozen_model_side_ANF_bank_and_PVP_semantics
+  ordered_sequence:
+    - NNIS_PVP0_publish_portable_runtime_layout_adapter
+    - NNIS_PVP1_CPU_PortableSession_reference_execution
+    - NNIS_PVP2_WgpuPortableSession_execution
+    - NNIS_PVP3_cross_session_exact_parity_and_resource_accounting
+    - NNIS_PVP4_same_device_physical_measurement_without_vendor_runtime_dependencies
+    - NNIS_PVP5_optional_integration_evidence_returned_to_SML_for_internalization_decision
+  forbid:
+    - reusing_CUDA_or_NVRTC_just_because_the_machine_is_NVIDIA
+    - treating_legacy_NVIDIA_microbenchmarks_as_portable_PVP_evidence
+    - moving_SML_model_semantics_into_NNIS
+
