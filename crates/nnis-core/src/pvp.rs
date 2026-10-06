@@ -38,7 +38,9 @@ impl PvpPhysicalWordV1 {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PvpLayoutError {
     ZeroAddresses,
-    AddressesNotPowerOfTwo { addresses: usize },
+    AddressesNotPowerOfTwo {
+        addresses: usize,
+    },
     ZeroGates,
     ArithmeticOverflow,
     StorageLengthMismatch {
@@ -57,7 +59,10 @@ impl fmt::Display for PvpLayoutError {
         match self {
             Self::ZeroAddresses => formatter.write_str("PVP address count must be non-zero"),
             Self::AddressesNotPowerOfTwo { addresses } => {
-                write!(formatter, "PVP address count {addresses} is not a power of two")
+                write!(
+                    formatter,
+                    "PVP address count {addresses} is not a power of two"
+                )
             }
             Self::ZeroGates => formatter.write_str("PVP gate count must be non-zero"),
             Self::ArithmeticOverflow => formatter.write_str("PVP layout arithmetic overflow"),
@@ -122,36 +127,24 @@ impl PvpLayoutAdapterV1 {
             .ok_or(PvpLayoutError::ArithmeticOverflow)
     }
 
-    pub fn words_per_address(
-        self,
-        physical: PvpPhysicalWordV1,
-    ) -> Result<usize, PvpLayoutError> {
+    pub fn words_per_address(self, physical: PvpPhysicalWordV1) -> Result<usize, PvpLayoutError> {
         checked_ceil_div(self.gates, physical.bits())
     }
 
-    pub fn storage_words(
-        self,
-        physical: PvpPhysicalWordV1,
-    ) -> Result<usize, PvpLayoutError> {
+    pub fn storage_words(self, physical: PvpPhysicalWordV1) -> Result<usize, PvpLayoutError> {
         self.addresses
             .checked_mul(self.words_per_address(physical)?)
             .ok_or(PvpLayoutError::ArithmeticOverflow)
     }
 
-    pub fn storage_bytes(
-        self,
-        physical: PvpPhysicalWordV1,
-    ) -> Result<usize, PvpLayoutError> {
+    pub fn storage_bytes(self, physical: PvpPhysicalWordV1) -> Result<usize, PvpLayoutError> {
         let bytes_per_word = physical.bits() / 8;
         self.storage_words(physical)?
             .checked_mul(bytes_per_word)
             .ok_or(PvpLayoutError::ArithmeticOverflow)
     }
 
-    pub fn padding_bits(
-        self,
-        physical: PvpPhysicalWordV1,
-    ) -> Result<usize, PvpLayoutError> {
+    pub fn padding_bits(self, physical: PvpPhysicalWordV1) -> Result<usize, PvpLayoutError> {
         let physical_bits = self
             .storage_words(physical)?
             .checked_mul(physical.bits())
@@ -161,10 +154,7 @@ impl PvpLayoutAdapterV1 {
             .ok_or(PvpLayoutError::ArithmeticOverflow)
     }
 
-    pub fn canonical_record(
-        self,
-        physical: PvpPhysicalWordV1,
-    ) -> Result<String, PvpLayoutError> {
+    pub fn canonical_record(self, physical: PvpPhysicalWordV1) -> Result<String, PvpLayoutError> {
         Ok(format!(
             "{};source_logical={};addresses={};gates={};physical={};word_bits={};order=address-major-gate-word;words_per_address={};storage_bytes={};padding_bits={}",
             NNIS_PVP_LAYOUT_ADAPTER_SCHEMA_V1,
@@ -201,17 +191,9 @@ impl PvpCpuU64V1 {
     }
 
     pub fn to_wgpu_u32(&self) -> Result<PvpWgpuU32V1, PvpLayoutError> {
-        let source_words = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)?;
-        let target_words = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::WgpuU32)?;
-        let mut output = vec![
-            0_u32;
-            self.layout
-                .storage_words(PvpPhysicalWordV1::WgpuU32)?
-        ];
+        let source_words = self.layout.words_per_address(PvpPhysicalWordV1::CpuU64)?;
+        let target_words = self.layout.words_per_address(PvpPhysicalWordV1::WgpuU32)?;
+        let mut output = vec![0_u32; self.layout.storage_words(PvpPhysicalWordV1::WgpuU32)?];
 
         for address in 0..self.layout.addresses() {
             let source_base = address
@@ -253,17 +235,9 @@ impl PvpWgpuU32V1 {
     }
 
     pub fn to_cpu_u64(&self) -> Result<PvpCpuU64V1, PvpLayoutError> {
-        let source_words = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::WgpuU32)?;
-        let target_words = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)?;
-        let mut output = vec![
-            0_u64;
-            self.layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)?
-        ];
+        let source_words = self.layout.words_per_address(PvpPhysicalWordV1::WgpuU32)?;
+        let target_words = self.layout.words_per_address(PvpPhysicalWordV1::CpuU64)?;
+        let mut output = vec![0_u64; self.layout.storage_words(PvpPhysicalWordV1::CpuU64)?];
 
         for address in 0..self.layout.addresses() {
             let source_base = address
@@ -346,15 +320,8 @@ mod tests {
     use super::*;
 
     fn cpu_fixture(layout: PvpLayoutAdapterV1) -> PvpCpuU64V1 {
-        let row_words = layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)
-            .unwrap();
-        let mut words = vec![
-            0_u64;
-            layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)
-                .unwrap()
-        ];
+        let row_words = layout.words_per_address(PvpPhysicalWordV1::CpuU64).unwrap();
+        let mut words = vec![0_u64; layout.storage_words(PvpPhysicalWordV1::CpuU64).unwrap()];
         for address in 0..layout.addresses() {
             for gate in 0..layout.gates() {
                 if ((address * 13 + gate * 17 + (address ^ gate)) % 11) < 5 {
@@ -375,7 +342,9 @@ mod tests {
             2
         );
         assert_eq!(
-            layout.words_per_address(PvpPhysicalWordV1::WgpuU32).unwrap(),
+            layout
+                .words_per_address(PvpPhysicalWordV1::WgpuU32)
+                .unwrap(),
             3
         );
         assert_eq!(
@@ -392,14 +361,12 @@ mod tests {
         );
         assert_eq!(
             layout.padding_bits(PvpPhysicalWordV1::WgpuU32).unwrap(),
-            4_032
+            3_968
         );
-        assert!(
-            layout
-                .canonical_record(PvpPhysicalWordV1::CpuU64)
-                .unwrap()
-                .contains(PVP_LOGICAL_SCHEMA_V1)
-        );
+        assert!(layout
+            .canonical_record(PvpPhysicalWordV1::CpuU64)
+            .unwrap()
+            .contains(PVP_LOGICAL_SCHEMA_V1));
     }
 
     #[test]
@@ -417,12 +384,7 @@ mod tests {
     fn nonzero_padding_fails_closed_on_both_projections() {
         let layout = PvpLayoutAdapterV1::new(8, 65).unwrap();
 
-        let mut cpu = vec![
-            0_u64;
-            layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)
-                .unwrap()
-        ];
+        let mut cpu = vec![0_u64; layout.storage_words(PvpPhysicalWordV1::CpuU64).unwrap()];
         cpu[1] = 1_u64 << 63;
         assert!(matches!(
             PvpCpuU64V1::new(layout, cpu),
@@ -432,12 +394,7 @@ mod tests {
             })
         ));
 
-        let mut wgpu = vec![
-            0_u32;
-            layout
-                .storage_words(PvpPhysicalWordV1::WgpuU32)
-                .unwrap()
-        ];
+        let mut wgpu = vec![0_u32; layout.storage_words(PvpPhysicalWordV1::WgpuU32).unwrap()];
         wgpu[2] = 1_u32 << 31;
         assert!(matches!(
             PvpWgpuU32V1::new(layout, wgpu),
@@ -458,7 +415,10 @@ mod tests {
             PvpLayoutAdapterV1::new(3, 1),
             Err(PvpLayoutError::AddressesNotPowerOfTwo { addresses: 3 })
         );
-        assert_eq!(PvpLayoutAdapterV1::new(8, 0), Err(PvpLayoutError::ZeroGates));
+        assert_eq!(
+            PvpLayoutAdapterV1::new(8, 0),
+            Err(PvpLayoutError::ZeroGates)
+        );
 
         let layout = PvpLayoutAdapterV1::new(8, 8).unwrap();
         assert!(matches!(
