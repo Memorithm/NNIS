@@ -1211,9 +1211,10 @@ pascal_vector_projection_program_2026_10_06:
     - end_to_end_runtime_evidence_after_SciRust_and_FLAT_component_qualification
   implementation_state:
     NNIS_PVP0:
-      status: implementation_PR_open_exact_head_CI_pending
+      status: merged_qualified_portable_layout_adapter
       pull_request: 255
       exact_head: 4879bce482fbeb1ff051d592d4a5f241d984eea4
+      merge_sha: 6b67719322d000405b88dda56ebbc2ebd6f92033
       scope:
         - backend_neutral_PVP_layout_adapter_in_nnis_core
         - pvp_bitplanes_v1_logical_identity
@@ -1222,7 +1223,7 @@ pascal_vector_projection_program_2026_10_06:
         - canonical_padding_fail_closed
         - no_compute_kernel
         - no_vendor_API_dependency
-      promotion: blocked_until_exact_head_CI_is_green
+      promotion: qualified_backend_neutral_layout_bridge
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
