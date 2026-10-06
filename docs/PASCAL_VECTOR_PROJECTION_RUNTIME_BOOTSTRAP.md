@@ -2,6 +2,11 @@
 
 Status: portable-runtime research programme.
 
+Explicit synthetic ANF-bank session qualification follows the frozen
+[qualification protocol](PVP_ANF_BANK_QUALIFICATION_PROTOCOL.md). It checks
+CPU and WGPU independently against direct monomial evaluation and does not
+establish model quality or hardware performance.
+
 For this programme, NNIS means **Native Neural Inference Stack**.
 
 ## Role
