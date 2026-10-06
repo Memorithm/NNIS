@@ -1224,6 +1224,23 @@ pascal_vector_projection_program_2026_10_06:
         - no_compute_kernel
         - no_vendor_API_dependency
       promotion: qualified_backend_neutral_layout_bridge
+    NNIS_PVP1:
+      status: implementation_PR_open_exact_head_CI_pending
+      pull_request: 256
+      exact_head: 8b01df18292ab271897f649dfb6a7d8f5f265d57
+      scope:
+        - dedicated_CPU_PVP_runtime_session_in_nnis_cpu
+        - exact_subset_zeta_butterfly_over_CPU_u64_projection
+        - independent_direct_submask_oracle_tests
+        - self_inverse_validation
+        - exact_operation_state_and_scratch_accounting
+        - revalidated_snapshot_and_CPU_to_WGPU_round_trip
+      exclusions:
+        - no_model_PortableSessionV1_change
+        - no_GPU_API
+        - no_vendor_SDK
+        - no_performance_claim
+      promotion: blocked_until_exact_head_CI_is_green
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
