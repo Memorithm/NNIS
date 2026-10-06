@@ -53,10 +53,7 @@ impl CpuPvpSessionV1 {
     }
 
     /// Validate raw CPU-u64 storage and start a session.
-    pub fn from_words(
-        layout: PvpLayoutAdapterV1,
-        words: Vec<u64>,
-    ) -> Result<Self, PvpLayoutError> {
+    pub fn from_words(layout: PvpLayoutAdapterV1, words: Vec<u64>) -> Result<Self, PvpLayoutError> {
         let initial = PvpCpuU64V1::new(layout, words)?;
         Ok(Self {
             layout,
@@ -94,9 +91,7 @@ impl CpuPvpSessionV1 {
     /// is allocated. The resident state itself was allocated when the session
     /// was constructed.
     pub fn execute_subset_zeta(&mut self) -> Result<CpuPvpExecutionStatsV1, PvpLayoutError> {
-        let words_per_address = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)?;
+        let words_per_address = self.layout.words_per_address(PvpPhysicalWordV1::CpuU64)?;
         let mut stride = 1_usize;
 
         while stride < self.layout.addresses() {
@@ -135,18 +130,13 @@ impl CpuPvpSessionV1 {
             .checked_add(1)
             .ok_or(PvpLayoutError::ArithmeticOverflow)?;
 
-        let pairs =
-            (self.layout.addresses() / 2) as u128 * u128::from(self.layout.stages());
+        let pairs = (self.layout.addresses() / 2) as u128 * u128::from(self.layout.stages());
         Ok(CpuPvpExecutionStatsV1 {
             stages: self.layout.stages(),
             logical_gate_xor_ops: pairs * self.layout.gates() as u128,
             packed_u64_updates: pairs * words_per_address as u128,
-            state_words: self
-                .layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)?,
-            state_bytes: self
-                .layout
-                .storage_bytes(PvpPhysicalWordV1::CpuU64)?,
+            state_words: self.layout.storage_words(PvpPhysicalWordV1::CpuU64)?,
+            state_bytes: self.layout.storage_bytes(PvpPhysicalWordV1::CpuU64)?,
             scratch_words: 0,
             execution_index: self.executions,
         })
@@ -159,8 +149,7 @@ impl CpuPvpSessionV1 {
             NNIS_PVP_CPU_EXECUTION_SCHEMA_V1,
             NNIS_PVP_CPU_BACKEND_ID,
             self.executions,
-            self.layout
-                .canonical_record(PvpPhysicalWordV1::CpuU64)?
+            self.layout.canonical_record(PvpPhysicalWordV1::CpuU64)?
         ))
     }
 }
@@ -170,15 +159,8 @@ mod tests {
     use super::*;
 
     fn fixture(layout: PvpLayoutAdapterV1) -> PvpCpuU64V1 {
-        let row_words = layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)
-            .unwrap();
-        let mut words = vec![
-            0_u64;
-            layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)
-                .unwrap()
-        ];
+        let row_words = layout.words_per_address(PvpPhysicalWordV1::CpuU64).unwrap();
+        let mut words = vec![0_u64; layout.storage_words(PvpPhysicalWordV1::CpuU64).unwrap()];
         for address in 0..layout.addresses() {
             for gate in 0..layout.gates() {
                 if ((address * 17 + gate * 13 + (address ^ gate)) % 11) < 5 {
@@ -191,9 +173,7 @@ mod tests {
 
     fn direct_subset_oracle(source: &PvpCpuU64V1) -> Vec<u64> {
         let layout = source.layout();
-        let row_words = layout
-            .words_per_address(PvpPhysicalWordV1::CpuU64)
-            .unwrap();
+        let row_words = layout.words_per_address(PvpPhysicalWordV1::CpuU64).unwrap();
         let mut output = vec![0_u64; source.words().len()];
 
         for address in 0..layout.addresses() {
@@ -278,12 +258,7 @@ mod tests {
     #[test]
     fn raw_constructor_rejects_noncanonical_padding() {
         let layout = PvpLayoutAdapterV1::new(8, 65).unwrap();
-        let mut words = vec![
-            0_u64;
-            layout
-                .storage_words(PvpPhysicalWordV1::CpuU64)
-                .unwrap()
-        ];
+        let mut words = vec![0_u64; layout.storage_words(PvpPhysicalWordV1::CpuU64).unwrap()];
         words[1] = 1_u64 << 63;
         assert!(CpuPvpSessionV1::from_words(layout, words).is_err());
     }
