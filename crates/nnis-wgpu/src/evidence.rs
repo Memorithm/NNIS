@@ -21,7 +21,7 @@ use crate::{WgpuAdapterClassV1, WgpuAdapterReportV1, WgpuDevice};
 ///
 /// Every id must pass for
 /// [`HardwareParityObserved`](nnis_core::adapter_evidence::AdapterEvidenceVerdictV1::HardwareParityObserved).
-pub const WGPU_QUALIFICATION_SUITES_V1: [&str; 7] = [
+pub const WGPU_QUALIFICATION_SUITES_V1: [&str; 8] = [
     "wgpu.add_f32",
     "wgpu.portable_memory",
     "wgpu.f32_kernels",
@@ -29,6 +29,7 @@ pub const WGPU_QUALIFICATION_SUITES_V1: [&str; 7] = [
     "wgpu.dsv41_replay_kv",
     "wgpu.dsv41_fp4_decode",
     "wgpu.dsv41_speculative",
+    "wgpu.pvp_cross_session",
 ];
 
 /// Adapter identity for an evidence record, copied from the driver report.
