@@ -303,3 +303,14 @@ Destructors cannot report errors. They make the owning context current and
 best-effort release the native resource. Applications should explicitly
 synchronize work before teardown so asynchronous failures are observed at an
 operation boundary rather than during cleanup.
+
+
+## Portable SML/PVP runtime role
+
+The SML Pascal Vector Projection programme uses NNIS only as an optional portable runtime carrier and qualification environment. Its canonical bootstrap is `PASCAL_VECTOR_PROJECTION_RUNTIME_BOOTSTRAP.md`.
+
+The shared execution representation is an address-major gate-bitplane layout with contiguous packed gate words. NNIS consumes a versioned layout/kernel contract; it does not own Pascal/ANF model semantics. CPU and WGPU paths must execute the same immutable inputs and expose exact parity and lifecycle/resource evidence.
+
+For this programme the hardware boundary is stricter than historical NNIS CUDA functionality: only the installed GPU driver may be vendor-specific. CUDA, NVRTC, cuDNN, TensorRT/TensorRT-LLM, NVML, CUTLASS and CUBIN-specific runtime contracts are excluded from the target SML/PVP path. Existing NVIDIA-specific crates remain legacy/reference capabilities unless separately migrated; their existence does not authorize their use for PVP.
+
+NNIS must also preserve the SML sovereignty boundary: a successful portable runtime experiment may inform SML internalization, but the final SML model must execute its declared semantics without NNIS as a required runtime. The future SML-HARNESS is separate from both the model and NNIS.
