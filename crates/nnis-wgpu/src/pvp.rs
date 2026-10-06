@@ -142,10 +142,7 @@ impl<'a> WgpuPvpSessionV1<'a> {
     /// Upload one validated NNIS-PVP0 WGPU-u32 state and create the reference
     /// compute pipeline. The state remains resident until the session is
     /// dropped.
-    pub fn new(
-        device: &'a WgpuDevice,
-        initial: &PvpWgpuU32V1,
-    ) -> Result<Self, WgpuPvpErrorV1> {
+    pub fn new(device: &'a WgpuDevice, initial: &PvpWgpuU32V1) -> Result<Self, WgpuPvpErrorV1> {
         let layout = initial.layout();
         let state_bytes = layout.storage_bytes(PvpPhysicalWordV1::WgpuU32)?;
         let state_bytes_u64 = u64::try_from(state_bytes)
@@ -162,13 +159,19 @@ impl<'a> WgpuPvpSessionV1<'a> {
             ));
         }
 
-        device.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
-        device.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        device
+            .device
+            .push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        device
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
 
-        let module = device.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("nnis.pvp-wgpu-session.v1"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(NNIS_PVP_WGPU_WGSL)),
-        });
+        let module = device
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("nnis.pvp-wgpu-session.v1"),
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(NNIS_PVP_WGPU_WGSL)),
+            });
         let pipeline = device
             .device
             .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -223,21 +226,19 @@ impl<'a> WgpuPvpSessionV1<'a> {
 
     /// Execute every PVP subset-zeta stage over the resident state.
     pub fn execute_subset_zeta(&mut self) -> Result<WgpuPvpExecutionStatsV1, WgpuPvpErrorV1> {
-        let addresses = u32::try_from(self.layout.addresses()).map_err(|_| {
-            WgpuPvpErrorV1::Geometry("address count exceeds WGSL u32 index space")
-        })?;
-        let words_per_address_usize = self
-            .layout
-            .words_per_address(PvpPhysicalWordV1::WgpuU32)?;
+        let addresses = u32::try_from(self.layout.addresses())
+            .map_err(|_| WgpuPvpErrorV1::Geometry("address count exceeds WGSL u32 index space"))?;
+        let words_per_address_usize = self.layout.words_per_address(PvpPhysicalWordV1::WgpuU32)?;
         let words_per_address = u32::try_from(words_per_address_usize).map_err(|_| {
             WgpuPvpErrorV1::Geometry("words per address exceed WGSL u32 index space")
         })?;
         let pair_count = addresses / 2;
-        let invocations = pair_count
-            .checked_mul(words_per_address)
-            .ok_or(WgpuPvpErrorV1::Geometry(
-                "dispatch invocation count overflows u32",
-            ))?;
+        let invocations =
+            pair_count
+                .checked_mul(words_per_address)
+                .ok_or(WgpuPvpErrorV1::Geometry(
+                    "dispatch invocation count overflows u32",
+                ))?;
         let workgroups = invocations.div_ceil(NNIS_PVP_WGPU_WORKGROUP_SIZE);
         if workgroups > self.device.limits().max_compute_workgroups_per_dimension {
             return Err(WgpuPvpErrorV1::Geometry(
@@ -271,20 +272,23 @@ impl<'a> WgpuPvpSessionV1<'a> {
             self.device
                 .queue
                 .write_buffer(&uniform, 0, &u32_to_le_bytes(&params));
-            let bind_group = self.device.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("nnis.pvp-wgpu-bind-group"),
-                layout: &self.pipeline.get_bind_group_layout(0),
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.state.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: uniform.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("nnis.pvp-wgpu-bind-group"),
+                    layout: &self.pipeline.get_bind_group_layout(0),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.state.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
             {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("nnis.pvp-wgpu-stage"),
@@ -312,20 +316,15 @@ impl<'a> WgpuPvpSessionV1<'a> {
             .checked_add(1)
             .ok_or(WgpuPvpErrorV1::Geometry("execution counter overflow"))?;
 
-        let pairs =
-            (self.layout.addresses() / 2) as u128 * u128::from(self.layout.stages());
+        let pairs = (self.layout.addresses() / 2) as u128 * u128::from(self.layout.stages());
         Ok(WgpuPvpExecutionStatsV1 {
             stages: self.layout.stages(),
             logical_gate_xor_ops: pairs * self.layout.gates() as u128,
             packed_u32_updates: pairs * words_per_address_usize as u128,
             logical_dispatches: self.layout.stages(),
             workgroups_per_stage: workgroups,
-            state_words: self
-                .layout
-                .storage_words(PvpPhysicalWordV1::WgpuU32)?,
-            state_bytes: self
-                .layout
-                .storage_bytes(PvpPhysicalWordV1::WgpuU32)?,
+            state_words: self.layout.storage_words(PvpPhysicalWordV1::WgpuU32)?,
+            state_bytes: self.layout.storage_bytes(PvpPhysicalWordV1::WgpuU32)?,
             scratch_state_words: 0,
             execution_index: self.executions,
             adapter_class: self.device.adapter().class,
@@ -334,9 +333,7 @@ impl<'a> WgpuPvpSessionV1<'a> {
 
     /// Read back and revalidate the resident state as NNIS-PVP0 WGPU-u32.
     pub fn snapshot(&self) -> Result<PvpWgpuU32V1, WgpuPvpErrorV1> {
-        let bytes = self
-            .layout
-            .storage_bytes(PvpPhysicalWordV1::WgpuU32)?;
+        let bytes = self.layout.storage_bytes(PvpPhysicalWordV1::WgpuU32)?;
         let bytes_u64 = u64::try_from(bytes)
             .map_err(|_| WgpuPvpErrorV1::Geometry("readback size exceeds u64"))?;
         let readback = self.device.device.create_buffer(&wgpu::BufferDescriptor {
@@ -387,8 +384,7 @@ impl<'a> WgpuPvpSessionV1<'a> {
             self.device.backend_id(),
             self.device.adapter().class,
             self.executions,
-            self.layout
-                .canonical_record(PvpPhysicalWordV1::WgpuU32)?
+            self.layout.canonical_record(PvpPhysicalWordV1::WgpuU32)?
         ))
     }
 }
