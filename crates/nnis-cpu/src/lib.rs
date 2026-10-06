@@ -27,6 +27,8 @@ pub mod kv_reuse;
 
 pub mod numerical;
 
+pub mod pvp;
+
 pub mod replay;
 
 pub mod session;
