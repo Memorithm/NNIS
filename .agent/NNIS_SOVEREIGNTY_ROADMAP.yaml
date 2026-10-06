@@ -1263,7 +1263,7 @@ pascal_vector_projection_program_2026_10_06:
     NNIS_PVP3:
       status: implementation_PR_open_exact_head_CI_pending
       pull_request: 258
-      exact_head: d6b9ac30a974d0023514610b5362b1290961aa7e
+      exact_head: 43493c40209b23900d1bea74b6eec5b01bc83b74
       scope:
         - extend_existing_versioned_WGPU_adapter_evidence_harness
         - add_mandatory_wgpu_pvp_cross_session_suite
