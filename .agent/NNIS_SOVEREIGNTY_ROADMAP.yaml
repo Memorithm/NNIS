@@ -1280,13 +1280,13 @@ pascal_vector_projection_program_2026_10_06:
         - no_model_PortableSessionV1_change
       promotion: qualified_CPU_WGPU_cross_session_evidence
     ANF_bank_semantic_qualification:
-      status: locally_qualified_branch_ready_PR_waits_for_SciRust_CI
-      pull_request: null
+      status: PR_open_exact_head_CI_pending
+      pull_request: 259
       branch: research/pvp-anf-bank-qualification
       exact_head: 5308e2f8b82f7c2735f1f6a949c16e229565d89c
       merge_sha: null
       local_validation: {CPU_cases: 24, WGPU_cases: 24, adapter: llvmpipe_software, tests: 5, Clippy: success, formatting: success}
-      blocker: SciRust_PR_1544_global_numeric_a_Miri_pending_without_failure
+      prerequisite_SciRust_merge: 348f9287496153bce0d465199c9d3a385cf6ebd7
       preregistration_commit: d8cf4af7ac0d17d07410fcb9d4f3544861b716fe
       protocol: docs/PVP_ANF_BANK_QUALIFICATION_PROTOCOL.md
       source_FLAT_pull_request: 341
