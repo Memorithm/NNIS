@@ -1202,6 +1202,8 @@ v888_portable_evidence_2026_09_29_portable_kv_fp4_shadow:
   next: caller_driven_speculative_verification_on_PortableSessionV1_optional
 pascal_vector_projection_program_2026_10_06:
   status: active_portable_runtime_research
+  main_contract_pr: 254
+  main_contract_merge: fa4a041e1dc91051f5a51ad5202b27aa7fada84b
   naming_direction: Native_Neural_Inference_Stack_for_this_program
   role:
     - optional_runtime_carrier_for_versioned_PVP_layouts_and_kernels
