@@ -131,3 +131,12 @@ Before work involving autonomous execution, generated or untrusted code, remote 
 `origin/agent/ecosystem-roadmap:.agent/NNIS_ECOSYSTEM_ROADMAP.yaml`
 
 Google AX is an architectural reference only. The Memorithm contract is Rust-native: SciRust Hub owns task lifecycle/identity, RemoteOps owns concrete host enforcement, ElasticXxx owns adaptive resource policy, and this repository retains its domain authority. A supervised process must never be described as a hostile-code sandbox.
+
+
+## Mandatory SML/PVP portable runtime bootstrap
+
+For Pascal/subset-zeta, massive ANF-bank, PVP bitplane, SML Boolean-butterfly or SML hardware-projection runtime work, read [`docs/PASCAL_VECTOR_PROJECTION_RUNTIME_BOOTSTRAP.md`](docs/PASCAL_VECTOR_PROJECTION_RUNTIME_BOOTSTRAP.md) plus the current sovereignty roadmap and ML maturity overlay.
+
+For this programme NNIS means **Native Neural Inference Stack**. New SML/PVP work must use CPU/WGPU/open-GPU paths; the installed GPU driver is the only vendor-specific software layer admitted. Do not use CUDA, NVRTC, cuDNN, TensorRT/TensorRT-LLM, NVML, CUTLASS or CUBIN-specific execution contracts for PVP merely because the physical GPU is NVIDIA. Existing NVIDIA-specific code remains legacy/reference capability outside this programme.
+
+SML-GENIUS owns model semantics and must remain self-sufficient. NNIS is an optional runtime/qualification carrier, not a mandatory SML dependency, and the future SML-HARNESS remains a separate surface.
