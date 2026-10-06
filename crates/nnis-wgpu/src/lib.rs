@@ -51,6 +51,7 @@ pub mod fp4;
 pub mod graph;
 mod memory;
 pub mod numerical;
+pub mod pvp;
 pub mod replay;
 pub mod session;
 pub mod speculative;

@@ -114,3 +114,30 @@ jobs:
 
       - name: cargo check at MSRV
         run: cargo +1.77.0 check --workspace --all-targets
+
+
+  pvp-wgpu:
+    name: PVP WGPU parity (lavapipe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      WGPU_BACKEND: vulkan
+      NNIS_REQUIRE_WGPU_PVP: "1"
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install software Vulkan device
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers libvulkan1 vulkan-tools
+          vulkaninfo --summary
+
+      - name: Execute NNIS PVP CPU-WGPU parity
+        run: cargo +stable test -p nnis-wgpu --test pvp_parity -- --nocapture
