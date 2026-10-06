@@ -1245,7 +1245,7 @@ pascal_vector_projection_program_2026_10_06:
     NNIS_PVP2:
       status: implementation_PR_open_exact_head_CI_pending
       pull_request: 257
-      exact_head: a402feb5c45379e96b7c37cfe7c07c394ec2c7cb
+      exact_head: 0fb9dc5d6b88a2330edadfb364a5283a3b66ecf8
       scope:
         - independent_resident_WGPU_PVP_session_in_nnis_wgpu
         - consumes_NNIS_PVP0_wgpu_u32_projection
