@@ -45,15 +45,8 @@ fn adapter_or_skip() -> Option<&'static WgpuDevice> {
 }
 
 fn fixture(layout: PvpLayoutAdapterV1) -> PvpCpuU64V1 {
-    let row_words = layout
-        .words_per_address(PvpPhysicalWordV1::CpuU64)
-        .unwrap();
-    let mut words = vec![
-        0_u64;
-        layout
-            .storage_words(PvpPhysicalWordV1::CpuU64)
-            .unwrap()
-    ];
+    let row_words = layout.words_per_address(PvpPhysicalWordV1::CpuU64).unwrap();
+    let mut words = vec![0_u64; layout.storage_words(PvpPhysicalWordV1::CpuU64).unwrap()];
     for address in 0..layout.addresses() {
         for gate in 0..layout.gates() {
             if ((address * 43 + gate * 19 + (address ^ gate)) % 37) < 18 {
