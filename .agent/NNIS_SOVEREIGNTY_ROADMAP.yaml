@@ -1213,7 +1213,7 @@ pascal_vector_projection_program_2026_10_06:
     NNIS_PVP0:
       status: implementation_PR_open_exact_head_CI_pending
       pull_request: 255
-      exact_head: b6deb34dc2f0c7a355bc7d5e8ed96fce99c79da1
+      exact_head: 4879bce482fbeb1ff051d592d4a5f241d984eea4
       scope:
         - backend_neutral_PVP_layout_adapter_in_nnis_core
         - pvp_bitplanes_v1_logical_identity
