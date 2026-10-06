@@ -1243,9 +1243,10 @@ pascal_vector_projection_program_2026_10_06:
         - no_performance_claim
       promotion: qualified_CPU_runtime_reference_for_cross_session_parity
     NNIS_PVP2:
-      status: implementation_PR_open_exact_head_CI_pending
+      status: merged_qualified_resident_WGPU_session
       pull_request: 257
       exact_head: 0fb9dc5d6b88a2330edadfb364a5283a3b66ecf8
+      merge_sha: 93cae5a07737b1db97e7f755d5141a2d88fe9583
       scope:
         - independent_resident_WGPU_PVP_session_in_nnis_wgpu
         - consumes_NNIS_PVP0_wgpu_u32_projection
@@ -1258,7 +1259,7 @@ pascal_vector_projection_program_2026_10_06:
         - no_vendor_SDK
         - no_physical_GPU_performance_claim
         - no_model_PortableSessionV1_change
-      promotion: blocked_until_exact_head_CI_and_lavapipe_execution_are_green
+      promotion: qualified_for_CPU_WGPU_cross_session_evidence
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
