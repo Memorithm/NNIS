@@ -33,6 +33,9 @@ fn adapter_or_skip() -> Option<&'static WgpuDevice> {
                 " (correctness only, not hardware performance evidence)"
             }
         ),
+        None if std::env::var_os("NNIS_REQUIRE_WGPU_PVP").is_some() => {
+            panic!("NNIS PVP WGPU execution is mandatory in this qualification gate")
+        }
         None => writeln!(
             std::io::stderr(),
             "SKIP nnis-wgpu PVP: no WGPU adapter available; no PVP WGPU execution occurred"
