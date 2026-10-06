@@ -598,11 +598,7 @@ fn pvp_cross_session(device: &WgpuDevice, tally: &mut Tally) -> SuiteResult {
         let initial_wgpu = source.to_wgpu_u32().map_err(err)?;
         let mut wgpu = WgpuPvpSessionV1::new(device, &initial_wgpu).map_err(err)?;
         let wgpu_stats = wgpu.execute_subset_zeta().map_err(err)?;
-        let observed = wgpu
-            .snapshot()
-            .map_err(err)?
-            .to_cpu_u64()
-            .map_err(err)?;
+        let observed = wgpu.snapshot().map_err(err)?.to_cpu_u64().map_err(err)?;
 
         tally.equal(&expected.words().len(), &observed.words().len());
         for (expected_word, observed_word) in expected.words().iter().zip(observed.words()) {
@@ -618,11 +614,7 @@ fn pvp_cross_session(device: &WgpuDevice, tally: &mut Tally) -> SuiteResult {
         tally.equal(&1_u64, &wgpu_stats.execution_index);
 
         wgpu.execute_subset_zeta().map_err(err)?;
-        let round_trip = wgpu
-            .snapshot()
-            .map_err(err)?
-            .to_cpu_u64()
-            .map_err(err)?;
+        let round_trip = wgpu.snapshot().map_err(err)?.to_cpu_u64().map_err(err)?;
         tally.equal(&source.words().len(), &round_trip.words().len());
         for (source_word, round_trip_word) in source.words().iter().zip(round_trip.words()) {
             tally.equal(source_word, round_trip_word);
