@@ -1225,9 +1225,10 @@ pascal_vector_projection_program_2026_10_06:
         - no_vendor_API_dependency
       promotion: qualified_backend_neutral_layout_bridge
     NNIS_PVP1:
-      status: implementation_PR_open_exact_head_CI_pending
+      status: merged_qualified_CPU_reference_session
       pull_request: 256
       exact_head: dd878083fcfa07be71638c4f83f664f5ccd65d21
+      merge_sha: 01e6c2ec99e99b089b5a98f4ee784a237fe6dc64
       scope:
         - dedicated_CPU_PVP_runtime_session_in_nnis_cpu
         - exact_subset_zeta_butterfly_over_CPU_u64_projection
@@ -1240,7 +1241,7 @@ pascal_vector_projection_program_2026_10_06:
         - no_GPU_API
         - no_vendor_SDK
         - no_performance_claim
-      promotion: blocked_until_exact_head_CI_is_green
+      promotion: qualified_CPU_runtime_reference_for_cross_session_parity
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
