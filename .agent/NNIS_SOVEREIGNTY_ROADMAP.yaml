@@ -1260,6 +1260,24 @@ pascal_vector_projection_program_2026_10_06:
         - no_physical_GPU_performance_claim
         - no_model_PortableSessionV1_change
       promotion: qualified_for_CPU_WGPU_cross_session_evidence
+    NNIS_PVP3:
+      status: implementation_PR_open_exact_head_CI_pending
+      pull_request: 258
+      exact_head: d6b9ac30a974d0023514610b5362b1290961aa7e
+      scope:
+        - extend_existing_versioned_WGPU_adapter_evidence_harness
+        - add_mandatory_wgpu_pvp_cross_session_suite
+        - seven_frozen_K_G_geometries
+        - every_CPU_u64_word_vs_WGPU_to_CPU_word_bit_exact
+        - stage_logical_XOR_dispatch_and_scratch_accounting_checks
+        - WGPU_self_inverse_round_trip
+        - retain_adapter_software_vs_hardware_evidence_classification
+      exclusions:
+        - no_new_evidence_format
+        - no_timing_fields
+        - no_performance_claim
+        - no_model_PortableSessionV1_change
+      promotion: blocked_until_exact_head_CI_and_fail_closed_WGPU_gate_are_green
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
