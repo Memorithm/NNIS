@@ -17,6 +17,7 @@ use crate::numerical::{
     WgpuF32BinaryOp, WgpuF32KernelsV1, WGSL_F32_EXACT_NUMERICAL_POLICY,
     WGSL_F32_PROJECTION_NUMERICAL_POLICY,
 };
+use crate::pvp::WgpuPvpSessionV1;
 use crate::replay::WgpuReplaySourceV1;
 use crate::speculative::{WgpuGreedySpeculativeVerifierV1, WGSL_GREEDY_ARGMAX_NUMERICAL_POLICY};
 use crate::{WgpuBuffer, WgpuDevice};
@@ -26,6 +27,7 @@ use nnis_core::graph::{
     F32_GRAPH_VERSION,
 };
 use nnis_core::kv_fp4::{Fp4E2M1KvLayoutV1, Fp4ScaleEncodingV1, FP4_E2M1_MAGNITUDES};
+use nnis_core::pvp::{PvpCpuU64V1, PvpLayoutAdapterV1, PvpPhysicalWordV1};
 use nnis_core::replay_state::{
     ReplayRepresentationIdentityV1, ReplaySourceIdentityV1, ReplayWindowRequestV1,
 };
@@ -34,6 +36,7 @@ use nnis_core::{BufferDesc, BufferUsages, MemoryClass, PortableDevice, PortableQ
 use nnis_cpu::fp4_kv::CpuFp4E2M1KvBlockV1;
 use nnis_cpu::graph::execute_f32_graph as cpu_graph;
 use nnis_cpu::numerical::{CpuF32BinaryOp, CpuF32KernelsV1};
+use nnis_cpu::pvp::CpuPvpSessionV1;
 use nnis_cpu::replay::CpuReplaySourceV1;
 use nnis_cpu::speculative::CpuGreedySpeculativeVerifierV1;
 use nnis_cpu::{CpuBuffer, CpuDevice};
@@ -101,6 +104,12 @@ pub(crate) fn run_all(device: &WgpuDevice) -> Vec<SuiteResultV1> {
             WGSL_GREEDY_ARGMAX_NUMERICAL_POLICY,
             device,
             speculative,
+        ),
+        run(
+            "wgpu.pvp_cross_session",
+            "bit-exact-pvp-v1",
+            device,
+            pvp_cross_session,
         ),
     ]
 }
@@ -545,6 +554,79 @@ fn fp4_decode(device: &WgpuDevice, tally: &mut Tally) -> SuiteResult {
             &cpu.decode().map_err(err)?,
             &gpu.decode_to_host(device).map_err(err)?,
         );
+    }
+    Ok(())
+}
+
+fn pvp_fixture(layout: PvpLayoutAdapterV1) -> Result<PvpCpuU64V1, String> {
+    let row_words = layout
+        .words_per_address(PvpPhysicalWordV1::CpuU64)
+        .map_err(err)?;
+    let mut words = vec![
+        0_u64;
+        layout
+            .storage_words(PvpPhysicalWordV1::CpuU64)
+            .map_err(err)?
+    ];
+    for address in 0..layout.addresses() {
+        for gate in 0..layout.gates() {
+            if ((address * 43 + gate * 19 + (address ^ gate)) % 37) < 18 {
+                words[address * row_words + gate / 64] |= 1_u64 << (gate % 64);
+            }
+        }
+    }
+    PvpCpuU64V1::new(layout, words).map_err(err)
+}
+
+fn pvp_cross_session(device: &WgpuDevice, tally: &mut Tally) -> SuiteResult {
+    for (addresses, gates) in [
+        (2, 1),
+        (4, 31),
+        (8, 65),
+        (16, 97),
+        (64, 129),
+        (128, 257),
+        (256, 513),
+    ] {
+        let layout = PvpLayoutAdapterV1::new(addresses, gates).map_err(err)?;
+        let source = pvp_fixture(layout)?;
+
+        let mut cpu = CpuPvpSessionV1::new(&source);
+        let cpu_stats = cpu.execute_subset_zeta().map_err(err)?;
+        let expected = cpu.snapshot().map_err(err)?;
+
+        let initial_wgpu = source.to_wgpu_u32().map_err(err)?;
+        let mut wgpu = WgpuPvpSessionV1::new(device, &initial_wgpu).map_err(err)?;
+        let wgpu_stats = wgpu.execute_subset_zeta().map_err(err)?;
+        let observed = wgpu
+            .snapshot()
+            .map_err(err)?
+            .to_cpu_u64()
+            .map_err(err)?;
+
+        tally.equal(&expected.words().len(), &observed.words().len());
+        for (expected_word, observed_word) in expected.words().iter().zip(observed.words()) {
+            tally.equal(expected_word, observed_word);
+        }
+        tally.equal(&cpu_stats.stages, &wgpu_stats.stages);
+        tally.equal(
+            &cpu_stats.logical_gate_xor_ops,
+            &wgpu_stats.logical_gate_xor_ops,
+        );
+        tally.equal(&layout.stages(), &wgpu_stats.logical_dispatches);
+        tally.equal(&0_usize, &wgpu_stats.scratch_state_words);
+        tally.equal(&1_u64, &wgpu_stats.execution_index);
+
+        wgpu.execute_subset_zeta().map_err(err)?;
+        let round_trip = wgpu
+            .snapshot()
+            .map_err(err)?
+            .to_cpu_u64()
+            .map_err(err)?;
+        tally.equal(&source.words().len(), &round_trip.words().len());
+        for (source_word, round_trip_word) in source.words().iter().zip(round_trip.words()) {
+            tally.equal(source_word, round_trip_word);
+        }
     }
     Ok(())
 }
