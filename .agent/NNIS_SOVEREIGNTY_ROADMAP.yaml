@@ -1209,6 +1209,18 @@ pascal_vector_projection_program_2026_10_06:
     - optional_runtime_carrier_for_versioned_PVP_layouts_and_kernels
     - CPU_and_WGPU_session_level_qualification
     - end_to_end_runtime_evidence_after_SciRust_and_FLAT_component_qualification
+  implementation_state:
+    NNIS_PVP0:
+      status: implementation_PR_preparing
+      scope:
+        - backend_neutral_PVP_layout_adapter_in_nnis_core
+        - pvp_bitplanes_v1_logical_identity
+        - exact_CPU_u64_to_WGPU_u32_projection
+        - exact_WGPU_u32_to_CPU_u64_round_trip
+        - canonical_padding_fail_closed
+        - no_compute_kernel
+        - no_vendor_API_dependency
+      promotion: blocked_until_exact_head_CI_is_green
   SML_boundary:
     - SML_GENIUS_owns_model_semantics_and_must_remain_self_sufficient
     - NNIS_is_not_a_mandatory_runtime_dependency_of_the_final_SML_model
