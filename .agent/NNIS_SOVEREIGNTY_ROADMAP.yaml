@@ -1227,7 +1227,7 @@ pascal_vector_projection_program_2026_10_06:
     NNIS_PVP1:
       status: implementation_PR_open_exact_head_CI_pending
       pull_request: 256
-      exact_head: 8b01df18292ab271897f649dfb6a7d8f5f265d57
+      exact_head: dd878083fcfa07be71638c4f83f664f5ccd65d21
       scope:
         - dedicated_CPU_PVP_runtime_session_in_nnis_cpu
         - exact_subset_zeta_butterfly_over_CPU_u64_projection
