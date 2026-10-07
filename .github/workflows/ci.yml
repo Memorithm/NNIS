@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -80,7 +80,7 @@ jobs:
 
       - name: cargo check
         if: always()
-        run: cargo check --workspace --all-targets
+        run: cargo check --locked --workspace --all-targets
 
       - name: Verify portable core dependency boundary
         if: always()
@@ -92,11 +92,11 @@ jobs:
 
       - name: clippy
         if: always()
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: tests without GPU requirement
         if: always()
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
 
   msrv:
     name: Rust 1.77 check
@@ -104,7 +104,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -113,7 +113,7 @@ jobs:
         run: rustup toolchain install 1.77.0 --profile minimal
 
       - name: cargo check at MSRV
-        run: cargo +1.77.0 check --workspace --all-targets
+        run: cargo +1.77.0 check --locked --workspace --all-targets
 
 
   pvp-wgpu:
@@ -125,7 +125,7 @@ jobs:
       NNIS_REQUIRE_WGPU_PVP: "1"
     steps:
       - name: Checkout exact source
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
@@ -140,4 +140,4 @@ jobs:
           vulkaninfo --summary
 
       - name: Execute NNIS PVP CPU-WGPU parity
-        run: cargo +stable test -p nnis-wgpu --test pvp_parity -- --nocapture
+        run: cargo +stable test --locked -p nnis-wgpu --test pvp_parity -- --nocapture
