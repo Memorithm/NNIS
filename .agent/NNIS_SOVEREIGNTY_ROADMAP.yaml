@@ -1355,7 +1355,7 @@ audit_global_remediation_2026_09_30:
     status: PR_open_exact_head_CI_pending
     pull_request: https://github.com/Memorithm/NNIS/pull/261
     base_revision: ee48a8caf89fce43307ab4b9798becc0eda9ea01
-    candidate_revision: 8fe4d374e0eac99c2878d056501cfe896028a5a8
+    candidate_revision: d523495cbcc20c61aaf79544c811f8e9592230e9
     contract:
       - one_shot_fail_closed_rebuild_transaction
       - quiesce_and_require_zero_active_sessions
@@ -1365,8 +1365,10 @@ audit_global_remediation_2026_09_30:
       - rollback_on_quiesce_rebuild_verify_reset_or_commit_failure
       - strict_receipt_forbids_live_transition_claim
     qualification:
+      - Rust_1_77_cargo_fmt_check_passed
+      - Rust_1_77_targeted_execution_transition_tests_8_of_8_passed
       - git_diff_check_passed
-      - exact_head_Rust_1_77_and_workspace_CI_pending
+      - exact_head_workspace_CI_pending
       - integrated_main_validation_required_before_closure
     limits:
       - no_session_or_KV_migration_claim
