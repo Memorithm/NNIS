@@ -1349,3 +1349,27 @@ pascal_vector_projection_program_2026_10_06:
     - treating_legacy_NVIDIA_microbenchmarks_as_portable_PVP_evidence
     - moving_SML_model_semantics_into_NNIS
 
+
+audit_global_remediation_2026_09_30:
+  rt_nnis_01_rebuild_transaction_2026_10_11:
+    status: PR_open_exact_head_CI_pending
+    pull_request: https://github.com/Memorithm/NNIS/pull/261
+    base_revision: ee48a8caf89fce43307ab4b9798becc0eda9ea01
+    candidate_revision: 8fe4d374e0eac99c2878d056501cfe896028a5a8
+    contract:
+      - one_shot_fail_closed_rebuild_transaction
+      - quiesce_and_require_zero_active_sessions
+      - require_source_weights_and_retain_source_until_commit
+      - admit_owned_double_residency_before_runtime_mutation
+      - verify_candidate_before_session_KV_invalidation_and_commit
+      - rollback_on_quiesce_rebuild_verify_reset_or_commit_failure
+      - strict_receipt_forbids_live_transition_claim
+    qualification:
+      - git_diff_check_passed
+      - exact_head_Rust_1_77_and_workspace_CI_pending
+      - integrated_main_validation_required_before_closure
+    limits:
+      - no_session_or_KV_migration_claim
+      - no_zero_downtime_or_hot_switch_claim
+      - owned_allocation_budget_is_not_physical_VRAM_residency
+      - no_latency_availability_quality_or_hardware_claim
