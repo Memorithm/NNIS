@@ -14,6 +14,7 @@ import collections
 import hashlib
 import json
 import pathlib
+import posixpath
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,7 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 LICENSE_NAMES = {"license", "copying", "notice", "authors"}
+LICENSE_DIRECTORY_NAMES = {"license", "licenses", "notice", "notices", "copying"}
 AUDIT_METADATA_PATHS = {
     "docs/memory/license-provenance-audit-v1.md",
     "policy/license-provenance-v1.json",
@@ -115,9 +117,12 @@ def _contributors(root: pathlib.Path) -> list[dict[str, object]]:
 
 
 def _is_license_like(path: str) -> bool:
-    if pathlib.PurePosixPath(path).as_posix() in AUDIT_METADATA_PATHS:
+    pure_path = pathlib.PurePosixPath(path)
+    if pure_path.as_posix() in AUDIT_METADATA_PATHS:
         return False
-    name = pathlib.PurePosixPath(path).name.lower()
+    if any(part.lower() in LICENSE_DIRECTORY_NAMES for part in pure_path.parts[:-1]):
+        return True
+    name = pure_path.name.lower()
     return any(
         name == base
         or name.startswith(f"{base}.")
@@ -125,6 +130,56 @@ def _is_license_like(path: str) -> bool:
         or name.startswith(f"{base}_")
         for base in LICENSE_NAMES
     )
+
+
+def _license_file_references(
+    root: pathlib.Path,
+    tracked: set[str],
+    manifests: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    references: list[dict[str, object]] = []
+    for manifest in manifests:
+        manifest_path = str(manifest["path"])
+        manifest_parent = pathlib.PurePosixPath(manifest_path).parent
+        declarations: list[tuple[str, str]] = []
+        declarations.extend(
+            ("package.license-file", str(value))
+            for value in manifest.get("license_files", [])
+        )
+        workspace_value = manifest.get("workspace_package_license_file")
+        if isinstance(workspace_value, str):
+            declarations.append(("workspace.package.license-file", workspace_value))
+
+        for metadata, declared in declarations:
+            declared_path = pathlib.PurePosixPath(declared)
+            unsafe = declared_path.is_absolute()
+            resolved = posixpath.normpath(
+                (manifest_parent / declared_path).as_posix()
+            )
+            if resolved == ".." or resolved.startswith("../"):
+                unsafe = True
+            resolved_path = None if unsafe else resolved
+            tracked_file = resolved_path in tracked if resolved_path else False
+            regular_file = (
+                (root / resolved_path).is_file() if resolved_path else False
+            )
+            sha256 = (
+                _sha256(root / resolved_path)
+                if resolved_path and tracked_file and regular_file
+                else None
+            )
+            references.append(
+                {
+                    "manifest": manifest_path,
+                    "metadata": metadata,
+                    "declared": declared,
+                    "resolved": resolved_path,
+                    "tracked": tracked_file,
+                    "regular_file": regular_file,
+                    "sha256": sha256,
+                }
+            )
+    return references
 
 
 def _manifest_license_metadata(text: str) -> dict[str, object]:
@@ -252,6 +307,7 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         raise AuditError(f"{root} is not a Git working tree root")
 
     tracked = _tracked_files(root)
+    tracked_set = set(tracked)
     head = _git(root, "rev-parse", "HEAD").strip()
     status = _git(root, "status", "--porcelain=v1")
     license_like = sorted(path for path in tracked if _is_license_like(path))
@@ -281,6 +337,12 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         )
 
     markers = _source_markers(root, tracked)
+    license_file_references = _license_file_references(root, tracked_set, manifests)
+    license_file_reference_sha256 = {
+        str(reference["resolved"]): str(reference["sha256"])
+        for reference in license_file_references
+        if reference.get("resolved") and reference.get("sha256")
+    }
     report = {
         "schema_version": SCHEMA_VERSION,
         "repository_root": str(root),
@@ -290,6 +352,8 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         "contributors": _contributors(root),
         "license_notice_files": license_like,
         "license_notice_sha256": license_notice_sha256,
+        "license_file_references": license_file_references,
+        "license_file_reference_sha256": license_file_reference_sha256,
         "root_license_notice_files": root_license_like,
         "root_license_notice_sha256": root_license_notice_sha256,
         "cargo_manifests": manifests,
@@ -435,6 +499,27 @@ def validate_policy(
             "license/notice file contents differ from the reviewed policy"
         )
 
+    references = report.get("license_file_references")
+    if not isinstance(references, list):
+        errors.append("audit report license_file_references must be a list")
+        references = []
+    for reference in references:
+        if not isinstance(reference, dict) or not reference.get("sha256"):
+            errors.append(
+                "every Cargo license-file reference must resolve to a tracked regular file"
+            )
+            break
+    expected_reference_sha256 = expected.get("license_file_reference_sha256")
+    if not isinstance(expected_reference_sha256, dict):
+        errors.append(
+            "expected_repository_state.license_file_reference_sha256 must be an object"
+        )
+        expected_reference_sha256 = {}
+    if report.get("license_file_reference_sha256") != expected_reference_sha256:
+        errors.append(
+            "Cargo license-file referenced contents differ from the reviewed policy"
+        )
+
     expected_root_notices = expected.get("root_license_notice_files")
     if report.get("root_license_notice_files") != expected_root_notices:
         errors.append("root license/notice file state differs from the reviewed policy")
@@ -498,7 +583,7 @@ def _self_test() -> None:
         (root / "crate").mkdir()
         (root / "crate" / "Cargo.toml").write_text(
             '[package]\nname = "fixture"\nversion = "0.1.0"\n'
-            "license.workspace = true\nlicense-file = 'COPYING'\n",
+            "license.workspace = true\nlicense-file = '../legal/terms.txt'\n",
             encoding="utf-8",
         )
         (root / "Cargo.lock").write_text(
@@ -511,6 +596,17 @@ def _self_test() -> None:
         (root / "third_party" / "example").mkdir(parents=True)
         (root / "third_party" / "example" / "LICENSE").write_text(
             "Nested fixture license v1\n", encoding="utf-8"
+        )
+        (root / "LICENSES").mkdir()
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v1\n", encoding="utf-8"
+        )
+        (root / "WORKSPACE-COPYING").write_text(
+            "Workspace license fixture v1\n", encoding="utf-8"
+        )
+        (root / "legal").mkdir()
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
         )
         evidence_files = {
             ".github/workflows/ci.yml": "name: fixture\n",
@@ -544,13 +640,15 @@ def _self_test() -> None:
         )
         report = build_report(root)
         assert report["schema_version"] == 2
-        assert report["tracked_file_count"] == 9
+        assert report["tracked_file_count"] == 12
         assert report["automatic_relicensing_ready"] is False
         assert report["license_notice_files"] == [
+            "LICENSES/MIT.txt",
             "NOTICE-THIRDPARTY",
             "third_party/example/LICENSE",
         ]
         assert report["license_notice_sha256"] == {
+            "LICENSES/MIT.txt": _sha256(root / "LICENSES" / "MIT.txt"),
             "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
             "third_party/example/LICENSE": _sha256(
                 root / "third_party" / "example" / "LICENSE"
@@ -560,6 +658,10 @@ def _self_test() -> None:
         assert report["root_license_notice_sha256"] == {
             "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY")
         }
+        assert report["license_file_reference_sha256"] == {
+            "WORKSPACE-COPYING": _sha256(root / "WORKSPACE-COPYING"),
+            "legal/terms.txt": _sha256(root / "legal" / "terms.txt"),
+        }
         manifests = {item["path"]: item for item in report["cargo_manifests"]}
         assert manifests["Cargo.toml"]["workspace_package_license"] == "MIT"
         assert (
@@ -568,7 +670,9 @@ def _self_test() -> None:
         )
         assert manifests["Cargo.toml"]["license_values"] == []
         assert manifests["crate/Cargo.toml"]["license_workspace_inherited"] is True
-        assert manifests["crate/Cargo.toml"]["license_files"] == ["COPYING"]
+        assert manifests["crate/Cargo.toml"]["license_files"] == [
+            "../legal/terms.txt"
+        ]
         assert report["cargo_lock"]["package_count"] == 1
         assert report["spdx_files"] == ["src/lib.rs"]
         assert report["copyright_files"] == ["src/lib.rs"]
@@ -587,14 +691,20 @@ def _self_test() -> None:
                 "workspace_package_license": "MIT",
                 "workspace_package_license_file": "WORKSPACE-COPYING",
                 "license_notice_files": [
+                    "LICENSES/MIT.txt",
                     "NOTICE-THIRDPARTY",
                     "third_party/example/LICENSE",
                 ],
                 "license_notice_sha256": {
+                    "LICENSES/MIT.txt": _sha256(root / "LICENSES" / "MIT.txt"),
                     "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
                     "third_party/example/LICENSE": _sha256(
                         root / "third_party" / "example" / "LICENSE"
                     ),
+                },
+                "license_file_reference_sha256": {
+                    "WORKSPACE-COPYING": _sha256(root / "WORKSPACE-COPYING"),
+                    "legal/terms.txt": _sha256(root / "legal" / "terms.txt"),
                 },
                 "root_license_notice_files": ["NOTICE-THIRDPARTY"],
                 "root_license_notice_sha256": {
@@ -604,7 +714,9 @@ def _self_test() -> None:
                 "workspace_license_inheritors": ["crate/Cargo.toml"],
                 "workspace_license_file_inheritors": [],
                 "manifest_license_values": {},
-                "manifest_license_files": {"crate/Cargo.toml": ["COPYING"]},
+                "manifest_license_files": {
+                    "crate/Cargo.toml": ["../legal/terms.txt"]
+                },
                 "cargo_lock_sha256": report["cargo_lock"]["sha256"],
                 "required_evidence_sha256": {
                     path: _sha256(root / path) for path in evidence_files
@@ -631,7 +743,7 @@ def _self_test() -> None:
             "manifest license-file metadata differ from the reviewed policy"
         ]
         policy["expected_repository_state"]["manifest_license_files"] = {
-            "crate/Cargo.toml": ["COPYING"]
+            "crate/Cargo.toml": ["../legal/terms.txt"]
         }
         policy["expected_repository_state"]["required_evidence_sha256"][
             "tools/audit_license_provenance.py"
@@ -643,6 +755,26 @@ def _self_test() -> None:
         policy["expected_repository_state"]["required_evidence_sha256"][
             "tools/audit_license_provenance.py"
         ] = _sha256(root / "tools/audit_license_provenance.py")
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "Cargo license-file referenced contents differ from the reviewed policy"
+        ]
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
+        )
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v1\n", encoding="utf-8"
+        )
         (root / "third_party" / "example" / "LICENSE").write_text(
             "Nested fixture license v2\n", encoding="utf-8"
         )
