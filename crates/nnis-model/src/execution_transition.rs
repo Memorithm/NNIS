@@ -327,9 +327,7 @@ impl F16RebuildTransitionV1 {
         if !runtime.source_weights_available() {
             return self.rollback(
                 runtime,
-                NnisError::invalid_input(
-                    "F16 rebuild requires source weights after quiescence",
-                ),
+                NnisError::invalid_input("F16 rebuild requires source weights after quiescence"),
             );
         }
 
@@ -526,9 +524,7 @@ mod tests {
 
     fn rebuild_transaction() -> F16RebuildTransitionV1 {
         F16RebuildTransitionV1::new(
-            F16ReferenceExecutionPlan::reference(
-                F16ReferencePlan::edge_llm_v0_10_0_alignment(),
-            ),
+            F16ReferenceExecutionPlan::reference(F16ReferencePlan::edge_llm_v0_10_0_alignment()),
             F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate(),
             F16RebuildMemoryBudgetV1::new(100, 140, 256).unwrap(),
         )
@@ -557,11 +553,9 @@ mod tests {
 
     #[test]
     fn memory_admission_fails_before_quiescence() {
-        let source = F16ReferenceExecutionPlan::reference(
-            F16ReferencePlan::edge_llm_v0_10_0_alignment(),
-        );
-        let target =
-            F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
+        let source =
+            F16ReferenceExecutionPlan::reference(F16ReferencePlan::edge_llm_v0_10_0_alignment());
+        let target = F16ReferenceExecutionPlan::edge_llm_v0_10_0_transposed_projection_candidate();
         assert!(F16RebuildMemoryBudgetV1::new(100, 140, 239).is_err());
         assert!(F16RebuildTransitionV1::new(
             source,
