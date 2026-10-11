@@ -1352,10 +1352,11 @@ pascal_vector_projection_program_2026_10_06:
 
 audit_global_remediation_2026_09_30:
   rt_nnis_01_rebuild_transaction_2026_10_11:
-    status: PR_open_exact_head_CI_pending
+    status: merged_target_validated
     pull_request: https://github.com/Memorithm/NNIS/pull/261
     base_revision: ee48a8caf89fce43307ab4b9798becc0eda9ea01
     candidate_revision: 373fb0889f6aa9745528ad0d28c4de7380739915
+    merge_revision: 6aa70523d5026c80021943aee38d5f1391a46664
     contract:
       - one_shot_fail_closed_rebuild_transaction
       - quiesce_and_require_zero_active_sessions
@@ -1370,8 +1371,12 @@ audit_global_remediation_2026_09_30:
       - Rust_1_77_nnis_model_all_targets_check_passed
       - P1_public_field_deserialization_bypass_fixed_and_review_thread_resolved
       - git_diff_check_passed
-      - exact_head_workspace_CI_pending
-      - integrated_main_validation_required_before_closure
+      - exact_head_CI_38142284585_3_of_3_passed
+      - exact_head_SmolLM2_harness_38142284556_1_of_1_passed
+      - exact_head_review_1_of_1_thread_resolved
+      - merge_gate_4_of_4_checks_no_conflicts_expected_head_guard
+      - integrated_main_CI_38142506246_3_of_3_passed
+      - integrated_main_revision_6aa70523d5026c80021943aee38d5f1391a46664
     limits:
       - no_session_or_KV_migration_claim
       - no_zero_downtime_or_hot_switch_claim
