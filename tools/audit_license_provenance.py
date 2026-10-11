@@ -335,6 +335,25 @@ def validate_policy(
     if actual_inherited != sorted(str(path) for path in expected_inherited):
         errors.append("workspace license inheritance differs from the reviewed policy")
 
+    for field, metadata_key, description in (
+        ("manifest_license_values", "license_values", "manifest license values"),
+        ("manifest_license_files", "license_files", "manifest license-file metadata"),
+    ):
+        expected_metadata = expected.get(field)
+        if not isinstance(expected_metadata, dict):
+            errors.append(f"expected_repository_state.{field} must be an object")
+            expected_metadata = {}
+        actual_metadata = {
+            path: metadata[metadata_key]
+            for path, metadata in manifest_by_path.items()
+            if metadata.get(metadata_key)
+        }
+        normalized_expected = {
+            str(path): values for path, values in expected_metadata.items()
+        }
+        if actual_metadata != normalized_expected:
+            errors.append(f"{description} differ from the reviewed policy")
+
     expected_root_notices = expected.get("root_license_notice_files")
     if report.get("root_license_notice_files") != expected_root_notices:
         errors.append("root license/notice file state differs from the reviewed policy")
@@ -345,13 +364,18 @@ def validate_policy(
     elif cargo_lock.get("sha256") != expected.get("cargo_lock_sha256"):
         errors.append("Cargo.lock differs from the reviewed provenance baseline")
 
-    required_files = expected.get("required_evidence_files")
-    if not isinstance(required_files, list):
-        errors.append("expected_repository_state.required_evidence_files must be a list")
-        required_files = []
-    for relative in required_files:
-        if not isinstance(relative, str) or not (root / relative).is_file():
+    required_evidence = expected.get("required_evidence_sha256")
+    if not isinstance(required_evidence, dict):
+        errors.append("expected_repository_state.required_evidence_sha256 must be an object")
+        required_evidence = {}
+    for relative, expected_sha256 in required_evidence.items():
+        path = root / str(relative)
+        if not path.is_file():
             errors.append(f"required provenance evidence file is missing: {relative}")
+        elif _sha256(path) != expected_sha256:
+            errors.append(
+                f"required provenance evidence file differs from policy: {relative}"
+            )
 
     if report.get("automatic_relicensing_ready") is not False:
         errors.append("audit report must keep automatic_relicensing_ready=false")
@@ -426,14 +450,32 @@ def _self_test() -> None:
                 "root_license_notice_files": [],
                 "cargo_manifests": ["Cargo.toml", "crate/Cargo.toml"],
                 "workspace_license_inheritors": ["crate/Cargo.toml"],
+                "manifest_license_values": {"Cargo.toml": ["MIT"]},
+                "manifest_license_files": {},
                 "cargo_lock_sha256": report["cargo_lock"]["sha256"],
-                "required_evidence_files": ["Cargo.lock"],
+                "required_evidence_sha256": {
+                    "Cargo.lock": report["cargo_lock"]["sha256"]
+                },
             },
         }
         assert validate_policy(report, policy, root) == []
         policy["expected_repository_state"]["workspace_package_license"] = "Apache-2.0"
         assert validate_policy(report, policy, root) == [
             "workspace package license metadata differs from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["workspace_package_license"] = "MIT"
+        policy["expected_repository_state"]["manifest_license_files"] = {
+            "crate/Cargo.toml": ["COPYING"]
+        }
+        assert validate_policy(report, policy, root) == [
+            "manifest license-file metadata differ from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["manifest_license_files"] = {}
+        policy["expected_repository_state"]["required_evidence_sha256"][
+            "Cargo.lock"
+        ] = "0" * 64
+        assert validate_policy(report, policy, root) == [
+            "required provenance evidence file differs from policy: Cargo.lock"
         ]
 
 

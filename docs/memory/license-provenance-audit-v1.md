@@ -23,6 +23,9 @@ It detects unreviewed changes to Cargo manifests, workspace license metadata,
 root license/notice files, workspace inheritance, required evidence files, and
 the exact `Cargo.lock` dependency baseline. An intentional dependency or
 licensing-metadata change must update the policy in the same reviewed change.
+All manifest `license` and `license-file` values are compared exactly. Required
+evidence files are pinned by SHA-256, so changing the audit implementation,
+workflow, or documentation also requires an explicit baseline update.
 The policy is evidence about repository state; it does not grant, revoke, or
 change any copyright or license right.
 
