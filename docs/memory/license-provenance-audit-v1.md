@@ -20,7 +20,7 @@ need review.
 
 The versioned policy makes the reviewed repository state fail closed in CI.
 It detects unreviewed changes to Cargo manifests, workspace license metadata,
-root license/notice files, workspace inheritance, required evidence files, and
+license/notice files anywhere in the tracked tree, workspace inheritance, required evidence files, and
 the exact `Cargo.lock` dependency baseline. An intentional dependency or
 licensing-metadata change must update the policy in the same reviewed change.
 All package and workspace-package `license` and `license-file` values, plus
@@ -30,10 +30,16 @@ Required evidence files are pinned by SHA-256, so changing the audit
 implementation, workflow, or documentation also requires an explicit baseline
 update.
 
-Root license/notice families include `LICENSE`, `NOTICE`, `COPYING`, and
-`AUTHORS`, with common extension, hyphen, and underscore suffixes. Their paths
-and SHA-256 content identities are policy-checked, so adding or editing a root
-notice cannot pass as unreviewed drift.
+License/notice families include `LICENSE`, `NOTICE`, `COPYING`, and `AUTHORS`,
+with common extension, hyphen, and underscore suffixes. Every matching tracked
+path and SHA-256 content identity is policy-checked, including nested third-party
+files; the root-only fields remain as an explicit summary. Adding or editing any
+detected notice therefore cannot pass as unreviewed drift.
+The two named audit-control artifacts under `docs/memory/` and `policy/` are
+excluded from notice discovery to avoid treating this evidence and the
+self-referential policy file as third-party notices. The documentation is
+independently content-pinned as required evidence; policy changes remain an
+explicit reviewed diff.
 The policy is evidence about repository state; it does not grant, revoke, or
 change any copyright or license right.
 
