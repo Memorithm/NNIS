@@ -38,7 +38,8 @@ files and every tracked child of `LICENSE`/`LICENSES`, `NOTICE`/`NOTICES`, or
 Adding or editing any detected notice therefore cannot pass as unreviewed drift.
 Every Cargo package or workspace `license-file` declaration is also resolved
 relative to its declaring manifest. The referenced file must remain a tracked,
-regular file inside the repository and its SHA-256 identity is policy-pinned,
+regular non-symlink Git blob (`100644` or `100755`) inside the repository and
+its SHA-256 identity is policy-pinned,
 even when its basename is neutral (for example `legal/terms.txt`).
 The two named audit-control artifacts under `docs/memory/` and `policy/` are
 excluded from notice discovery to avoid treating this evidence and the
