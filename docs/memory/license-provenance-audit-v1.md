@@ -23,8 +23,9 @@ It detects unreviewed changes to Cargo manifests, workspace license metadata,
 root license/notice files, workspace inheritance, required evidence files, and
 the exact `Cargo.lock` dependency baseline. An intentional dependency or
 licensing-metadata change must update the policy in the same reviewed change.
-All manifest `license` and `license-file` values and inheritance flags are
-parsed as TOML and compared exactly, including valid single-quoted values.
+All package and workspace-package `license` and `license-file` values, plus
+inheritance flags, are parsed as TOML and compared exactly, including valid
+single-quoted values.
 Required evidence files are pinned by SHA-256, so changing the audit
 implementation, workflow, or documentation also requires an explicit baseline
 update.

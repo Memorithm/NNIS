@@ -119,7 +119,9 @@ def _manifest_license_metadata(text: str) -> dict[str, object]:
         isinstance(package_license_file, dict)
         and package_license_file.get("workspace") is True
     )
-    workspace_license = parsed.get("workspace", {}).get("package", {}).get("license")
+    workspace_package = parsed.get("workspace", {}).get("package", {})
+    workspace_license = workspace_package.get("license")
+    workspace_license_file = workspace_package.get("license-file")
     return {
         "license_values": (
             [package_license] if isinstance(package_license, str) else []
@@ -130,6 +132,7 @@ def _manifest_license_metadata(text: str) -> dict[str, object]:
         "license_workspace_inherited": license_inherited,
         "license_file_workspace_inherited": license_file_inherited,
         "workspace_package_license": workspace_license,
+        "workspace_package_license_file": workspace_license_file,
     }
 
 
@@ -323,6 +326,14 @@ def validate_policy(
         errors.append(
             "workspace package license metadata differs from the reviewed policy"
         )
+    expected_workspace_license_file = expected.get("workspace_package_license_file")
+    if (
+        root_manifest.get("workspace_package_license_file")
+        != expected_workspace_license_file
+    ):
+        errors.append(
+            "workspace package license-file metadata differs from the reviewed policy"
+        )
 
     expected_inherited = expected.get("workspace_license_inheritors")
     if not isinstance(expected_inherited, list):
@@ -412,7 +423,8 @@ def _self_test() -> None:
         (root / "src").mkdir()
         (root / "Cargo.toml").write_text(
             '[workspace]\nmembers = ["crate"]\n'
-            '[workspace.package]\nlicense = "MIT"\n',
+            "[workspace.package]\nlicense = \"MIT\"\n"
+            "license-file = 'WORKSPACE-COPYING'\n",
             encoding="utf-8",
         )
         (root / "crate").mkdir()
@@ -455,6 +467,10 @@ def _self_test() -> None:
         assert report["root_license_notice_files"] == []
         manifests = {item["path"]: item for item in report["cargo_manifests"]}
         assert manifests["Cargo.toml"]["workspace_package_license"] == "MIT"
+        assert (
+            manifests["Cargo.toml"]["workspace_package_license_file"]
+            == "WORKSPACE-COPYING"
+        )
         assert manifests["Cargo.toml"]["license_values"] == []
         assert manifests["crate/Cargo.toml"]["license_workspace_inherited"] is True
         assert manifests["crate/Cargo.toml"]["license_files"] == ["COPYING"]
@@ -472,6 +488,7 @@ def _self_test() -> None:
             "automatic_relicensing_ready": False,
             "expected_repository_state": {
                 "workspace_package_license": "MIT",
+                "workspace_package_license_file": "WORKSPACE-COPYING",
                 "root_license_notice_files": [],
                 "cargo_manifests": ["Cargo.toml", "crate/Cargo.toml"],
                 "workspace_license_inheritors": ["crate/Cargo.toml"],
@@ -490,6 +507,15 @@ def _self_test() -> None:
             "workspace package license metadata differs from the reviewed policy"
         ]
         policy["expected_repository_state"]["workspace_package_license"] = "MIT"
+        policy["expected_repository_state"]["workspace_package_license_file"] = (
+            "OTHER-COPYING"
+        )
+        assert validate_policy(report, policy, root) == [
+            "workspace package license-file metadata differs from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["workspace_package_license_file"] = (
+            "WORKSPACE-COPYING"
+        )
         policy["expected_repository_state"]["manifest_license_files"] = {}
         assert validate_policy(report, policy, root) == [
             "manifest license-file metadata differ from the reviewed policy"

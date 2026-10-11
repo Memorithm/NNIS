@@ -22,8 +22,8 @@
     "manifest_license_values": {},
     "required_evidence_sha256": {
       ".github/workflows/ci.yml": "1b3f15a341f073df6d007307e01cd5ccc477d674b3687e01ab84069aa203fc5e",
-      "docs/memory/license-provenance-audit-v1.md": "ce62dd326592c75779ad7c206f76908fd71d03d2b0e655561cf233d55a93f19e",
-      "tools/audit_license_provenance.py": "f6cb51f3618bbdba365d3335bd233eb9daec34c3335eebe40ebbfe7e8e3af497"
+      "docs/memory/license-provenance-audit-v1.md": "b9885fc503f8d0f5955ce0d3266124bb7aee159b3a3578a73c5b17cbe4101b39",
+      "tools/audit_license_provenance.py": "de25a6c5bee1e694741ef2c20f4b3e77d63f4f0629b5aac6e5c7751d46728cb2"
     },
     "root_license_notice_files": [],
     "workspace_license_inheritors": [
@@ -40,7 +40,8 @@
       "crates/nnis/Cargo.toml"
     ],
     "workspace_license_file_inheritors": [],
-    "workspace_package_license": "MIT"
+    "workspace_package_license": "MIT",
+    "workspace_package_license_file": null
   },
   "legal_effect": "This policy records reviewed repository facts only. It does not grant, revoke, replace, or reinterpret any copyright or license right.",
   "repository": "Memorithm/NNIS",
