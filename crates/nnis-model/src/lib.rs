@@ -98,7 +98,9 @@ pub use exact_checkpoint_spec::{
 };
 pub use execution_transition::{
     F16ExecutionTransitionMode, F16ExecutionTransitionRequirementsV1,
-    NNIS_F16_EXECUTION_TRANSITION_REQUIREMENTS_VERSION,
+    F16RebuildMemoryBudgetV1, F16RebuildTransitionPhase, F16RebuildTransitionReceiptV1,
+    F16RebuildTransitionRuntime, F16RebuildTransitionV1,
+    NNIS_F16_EXECUTION_TRANSITION_REQUIREMENTS_VERSION, NNIS_F16_REBUILD_TRANSITION_VERSION,
 };
 pub use f16_attention_plan::{
     F16AttentionPlan, F16CachedAttentionKernel, F16ParallelScorePolicy, F16_ATTENTION_PLAN_VERSION,
