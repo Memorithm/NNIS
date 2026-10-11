@@ -51,6 +51,10 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 LICENSE_NAMES = {"license", "copying", "notice", "authors"}
+AUDIT_METADATA_PATHS = {
+    "docs/memory/license-provenance-audit-v1.md",
+    "policy/license-provenance-v1.json",
+}
 REVIEW_PATH_COMPONENTS = {
     "vendor",
     "vendors",
@@ -111,6 +115,8 @@ def _contributors(root: pathlib.Path) -> list[dict[str, object]]:
 
 
 def _is_license_like(path: str) -> bool:
+    if pathlib.PurePosixPath(path).as_posix() in AUDIT_METADATA_PATHS:
+        return False
     name = pathlib.PurePosixPath(path).name.lower()
     return any(
         name == base
@@ -249,6 +255,9 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
     head = _git(root, "rev-parse", "HEAD").strip()
     status = _git(root, "status", "--porcelain=v1")
     license_like = sorted(path for path in tracked if _is_license_like(path))
+    license_notice_sha256 = {
+        path: _sha256(root / path) for path in license_like
+    }
     root_license_like = [
         path for path in license_like if "/" not in pathlib.PurePosixPath(path).as_posix()
     ]
@@ -280,6 +289,7 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         "tracked_file_count": len(tracked),
         "contributors": _contributors(root),
         "license_notice_files": license_like,
+        "license_notice_sha256": license_notice_sha256,
         "root_license_notice_files": root_license_like,
         "root_license_notice_sha256": root_license_notice_sha256,
         "cargo_manifests": manifests,
@@ -411,6 +421,20 @@ def validate_policy(
         if actual_metadata != normalized_expected:
             errors.append(f"{description} differ from the reviewed policy")
 
+    expected_notices = expected.get("license_notice_files")
+    if report.get("license_notice_files") != expected_notices:
+        errors.append("license/notice file state differs from the reviewed policy")
+    expected_notice_sha256 = expected.get("license_notice_sha256")
+    if not isinstance(expected_notice_sha256, dict):
+        errors.append(
+            "expected_repository_state.license_notice_sha256 must be an object"
+        )
+        expected_notice_sha256 = {}
+    if report.get("license_notice_sha256") != expected_notice_sha256:
+        errors.append(
+            "license/notice file contents differ from the reviewed policy"
+        )
+
     expected_root_notices = expected.get("root_license_notice_files")
     if report.get("root_license_notice_files") != expected_root_notices:
         errors.append("root license/notice file state differs from the reviewed policy")
@@ -484,6 +508,10 @@ def _self_test() -> None:
         (root / "NOTICE-THIRDPARTY").write_text(
             "Fixture third-party notice v1\n", encoding="utf-8"
         )
+        (root / "third_party" / "example").mkdir(parents=True)
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v1\n", encoding="utf-8"
+        )
         evidence_files = {
             ".github/workflows/ci.yml": "name: fixture\n",
             "docs/memory/license-provenance-audit-v1.md": "fixture docs\n",
@@ -516,8 +544,18 @@ def _self_test() -> None:
         )
         report = build_report(root)
         assert report["schema_version"] == 2
-        assert report["tracked_file_count"] == 8
+        assert report["tracked_file_count"] == 9
         assert report["automatic_relicensing_ready"] is False
+        assert report["license_notice_files"] == [
+            "NOTICE-THIRDPARTY",
+            "third_party/example/LICENSE",
+        ]
+        assert report["license_notice_sha256"] == {
+            "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
+            "third_party/example/LICENSE": _sha256(
+                root / "third_party" / "example" / "LICENSE"
+            ),
+        }
         assert report["root_license_notice_files"] == ["NOTICE-THIRDPARTY"]
         assert report["root_license_notice_sha256"] == {
             "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY")
@@ -548,6 +586,16 @@ def _self_test() -> None:
             "expected_repository_state": {
                 "workspace_package_license": "MIT",
                 "workspace_package_license_file": "WORKSPACE-COPYING",
+                "license_notice_files": [
+                    "NOTICE-THIRDPARTY",
+                    "third_party/example/LICENSE",
+                ],
+                "license_notice_sha256": {
+                    "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
+                    "third_party/example/LICENSE": _sha256(
+                        root / "third_party" / "example" / "LICENSE"
+                    ),
+                },
                 "root_license_notice_files": ["NOTICE-THIRDPARTY"],
                 "root_license_notice_sha256": {
                     "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY")
@@ -595,11 +643,22 @@ def _self_test() -> None:
         policy["expected_repository_state"]["required_evidence_sha256"][
             "tools/audit_license_provenance.py"
         ] = _sha256(root / "tools/audit_license_provenance.py")
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v1\n", encoding="utf-8"
+        )
         (root / "NOTICE-THIRDPARTY").write_text(
             "Fixture third-party notice v2\n", encoding="utf-8"
         )
         changed_report = build_report(root)
         assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy",
             "root license/notice file contents differ from the reviewed policy"
         ]
 
