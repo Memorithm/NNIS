@@ -14,7 +14,6 @@ import collections
 import hashlib
 import json
 import pathlib
-import re
 import subprocess
 import sys
 import tempfile
@@ -108,24 +107,28 @@ def _is_license_like(path: str) -> bool:
 
 
 def _manifest_license_metadata(text: str) -> dict[str, object]:
-    license_values = re.findall(
-        r'(?m)^\s*license\s*=\s*"([^"]+)"\s*(?:#.*)?$', text
-    )
-    license_files = re.findall(
-        r'(?m)^\s*license-file\s*=\s*"([^"]+)"\s*(?:#.*)?$', text
-    )
     parsed = tomllib.loads(text)
     package = parsed.get("package", {})
     package_license = package.get("license")
-    inherited = (
+    package_license_file = package.get("license-file")
+    license_inherited = (
         isinstance(package_license, dict)
         and package_license.get("workspace") is True
     )
+    license_file_inherited = (
+        isinstance(package_license_file, dict)
+        and package_license_file.get("workspace") is True
+    )
     workspace_license = parsed.get("workspace", {}).get("package", {}).get("license")
     return {
-        "license_values": license_values,
-        "license_files": license_files,
-        "license_workspace_inherited": inherited,
+        "license_values": (
+            [package_license] if isinstance(package_license, str) else []
+        ),
+        "license_files": (
+            [package_license_file] if isinstance(package_license_file, str) else []
+        ),
+        "license_workspace_inherited": license_inherited,
+        "license_file_workspace_inherited": license_file_inherited,
         "workspace_package_license": workspace_license,
     }
 
@@ -335,6 +338,26 @@ def validate_policy(
     if actual_inherited != sorted(str(path) for path in expected_inherited):
         errors.append("workspace license inheritance differs from the reviewed policy")
 
+    expected_license_file_inherited = expected.get(
+        "workspace_license_file_inheritors"
+    )
+    if not isinstance(expected_license_file_inherited, list):
+        errors.append(
+            "expected_repository_state.workspace_license_file_inheritors must be a list"
+        )
+        expected_license_file_inherited = []
+    actual_license_file_inherited = sorted(
+        path
+        for path, metadata in manifest_by_path.items()
+        if metadata.get("license_file_workspace_inherited") is True
+    )
+    if actual_license_file_inherited != sorted(
+        str(path) for path in expected_license_file_inherited
+    ):
+        errors.append(
+            "workspace license-file inheritance differs from the reviewed policy"
+        )
+
     for field, metadata_key, description in (
         ("manifest_license_values", "license_values", "manifest license values"),
         ("manifest_license_files", "license_files", "manifest license-file metadata"),
@@ -395,7 +418,7 @@ def _self_test() -> None:
         (root / "crate").mkdir()
         (root / "crate" / "Cargo.toml").write_text(
             '[package]\nname = "fixture"\nversion = "0.1.0"\n'
-            'license.workspace = true\n',
+            "license.workspace = true\nlicense-file = 'COPYING'\n",
             encoding="utf-8",
         )
         (root / "Cargo.lock").write_text(
@@ -432,7 +455,9 @@ def _self_test() -> None:
         assert report["root_license_notice_files"] == []
         manifests = {item["path"]: item for item in report["cargo_manifests"]}
         assert manifests["Cargo.toml"]["workspace_package_license"] == "MIT"
+        assert manifests["Cargo.toml"]["license_values"] == []
         assert manifests["crate/Cargo.toml"]["license_workspace_inherited"] is True
+        assert manifests["crate/Cargo.toml"]["license_files"] == ["COPYING"]
         assert report["cargo_lock"]["package_count"] == 1
         assert report["spdx_files"] == ["src/lib.rs"]
         assert report["copyright_files"] == ["src/lib.rs"]
@@ -450,8 +475,9 @@ def _self_test() -> None:
                 "root_license_notice_files": [],
                 "cargo_manifests": ["Cargo.toml", "crate/Cargo.toml"],
                 "workspace_license_inheritors": ["crate/Cargo.toml"],
-                "manifest_license_values": {"Cargo.toml": ["MIT"]},
-                "manifest_license_files": {},
+                "workspace_license_file_inheritors": [],
+                "manifest_license_values": {},
+                "manifest_license_files": {"crate/Cargo.toml": ["COPYING"]},
                 "cargo_lock_sha256": report["cargo_lock"]["sha256"],
                 "required_evidence_sha256": {
                     "Cargo.lock": report["cargo_lock"]["sha256"]
@@ -464,13 +490,13 @@ def _self_test() -> None:
             "workspace package license metadata differs from the reviewed policy"
         ]
         policy["expected_repository_state"]["workspace_package_license"] = "MIT"
-        policy["expected_repository_state"]["manifest_license_files"] = {
-            "crate/Cargo.toml": ["COPYING"]
-        }
+        policy["expected_repository_state"]["manifest_license_files"] = {}
         assert validate_policy(report, policy, root) == [
             "manifest license-file metadata differ from the reviewed policy"
         ]
-        policy["expected_repository_state"]["manifest_license_files"] = {}
+        policy["expected_repository_state"]["manifest_license_files"] = {
+            "crate/Cargo.toml": ["COPYING"]
+        }
         policy["expected_repository_state"]["required_evidence_sha256"][
             "Cargo.lock"
         ] = "0" * 64

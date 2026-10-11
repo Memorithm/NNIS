@@ -19,15 +19,11 @@
       "crates/nnis/Cargo.toml"
     ],
     "manifest_license_files": {},
-    "manifest_license_values": {
-      "Cargo.toml": [
-        "MIT"
-      ]
-    },
+    "manifest_license_values": {},
     "required_evidence_sha256": {
       ".github/workflows/ci.yml": "1b3f15a341f073df6d007307e01cd5ccc477d674b3687e01ab84069aa203fc5e",
-      "docs/memory/license-provenance-audit-v1.md": "56e6c5f726534c865e4cb3830a1c19b2cf802e2717b6dd854d971fe2cc7a3940",
-      "tools/audit_license_provenance.py": "d7bf7f815229dfa1a138a2819e2ced4b59f5fe6fae8b73b0fce93e51f2c74f46"
+      "docs/memory/license-provenance-audit-v1.md": "ce62dd326592c75779ad7c206f76908fd71d03d2b0e655561cf233d55a93f19e",
+      "tools/audit_license_provenance.py": "f6cb51f3618bbdba365d3335bd233eb9daec34c3335eebe40ebbfe7e8e3af497"
     },
     "root_license_notice_files": [],
     "workspace_license_inheritors": [
@@ -43,6 +39,7 @@
       "crates/nnis-wgpu/Cargo.toml",
       "crates/nnis/Cargo.toml"
     ],
+    "workspace_license_file_inheritors": [],
     "workspace_package_license": "MIT"
   },
   "legal_effect": "This policy records reviewed repository facts only. It does not grant, revoke, replace, or reinterpret any copyright or license right.",
