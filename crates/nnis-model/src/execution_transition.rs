@@ -258,27 +258,47 @@ impl F16RebuildTransitionV1 {
         target_plan: F16ReferenceExecutionPlan,
         memory_budget: F16RebuildMemoryBudgetV1,
     ) -> Result<Self> {
-        if source_plan.schema_version != F16_REFERENCE_EXECUTION_PLAN_VERSION
-            || target_plan.schema_version != F16_REFERENCE_EXECUTION_PLAN_VERSION
-        {
-            return Err(NnisError::unsupported(
-                "F16 rebuild requires supported source and target execution-plan schemas",
-            ));
-        }
-        if source_plan == target_plan {
-            return Err(NnisError::invalid_input(
-                "F16 rebuild source and target execution plans must differ",
-            ));
-        }
-        target_plan.transition_requirements().validate()?;
-        memory_budget.validate()?;
-        Ok(Self {
+        let transaction = Self {
             schema_version: NNIS_F16_REBUILD_TRANSITION_VERSION,
             source_plan,
             target_plan,
             memory_budget,
             phase: F16RebuildTransitionPhase::Prepared,
-        })
+        };
+        transaction.validate_preconditions()?;
+        Ok(transaction)
+    }
+
+    /// Revalidate every public/wire field before the runtime can be mutated.
+    ///
+    /// This is intentionally separate from `new`: serde and public-field users
+    /// can construct values without calling the constructor.
+    fn validate_preconditions(&self) -> Result<()> {
+        if self.schema_version != NNIS_F16_REBUILD_TRANSITION_VERSION {
+            return Err(NnisError::unsupported(format!(
+                "unsupported F16 rebuild transaction schema {}; expected {}",
+                self.schema_version, NNIS_F16_REBUILD_TRANSITION_VERSION
+            )));
+        }
+        if self.phase != F16RebuildTransitionPhase::Prepared {
+            return Err(NnisError::invalid_input(
+                "F16 rebuild transaction must be in prepared state",
+            ));
+        }
+        if self.source_plan.schema_version != F16_REFERENCE_EXECUTION_PLAN_VERSION
+            || self.target_plan.schema_version != F16_REFERENCE_EXECUTION_PLAN_VERSION
+        {
+            return Err(NnisError::unsupported(
+                "F16 rebuild requires supported source and target execution-plan schemas",
+            ));
+        }
+        if self.source_plan == self.target_plan {
+            return Err(NnisError::invalid_input(
+                "F16 rebuild source and target execution plans must differ",
+            ));
+        }
+        self.target_plan.transition_requirements().validate()?;
+        self.memory_budget.validate()
     }
 
     fn rollback<R: F16RebuildTransitionRuntime>(
@@ -301,15 +321,7 @@ impl F16RebuildTransitionV1 {
         &mut self,
         runtime: &mut R,
     ) -> Result<F16RebuildTransitionReceiptV1> {
-        if self.schema_version != NNIS_F16_REBUILD_TRANSITION_VERSION
-            || self.phase != F16RebuildTransitionPhase::Prepared
-        {
-            return Err(NnisError::invalid_input(
-                "F16 rebuild transaction must be supported and in prepared state",
-            ));
-        }
-        self.memory_budget.validate()?;
-        self.target_plan.transition_requirements().validate()?;
+        self.validate_preconditions()?;
 
         self.phase = F16RebuildTransitionPhase::Quiescing;
         if let Err(error) = runtime.begin_quiescence() {
@@ -619,5 +631,29 @@ mod tests {
             "\"phase\":\"prepared\",\"unknown\":true",
         );
         assert!(serde_json::from_str::<F16RebuildTransitionV1>(&unknown).is_err());
+    }
+
+    #[test]
+    fn deserialized_or_public_field_drift_is_rejected_before_quiescence() {
+        let source =
+            F16ReferenceExecutionPlan::reference(F16ReferencePlan::edge_llm_v0_10_0_alignment());
+
+        let mut equal_plans = rebuild_transaction();
+        equal_plans.target_plan = source;
+        let mut runtime = FakeTransitionRuntime::admitted();
+        assert!(equal_plans.execute(&mut runtime).is_err());
+        assert!(runtime.events.is_empty());
+
+        let mut unsupported_source = rebuild_transaction();
+        unsupported_source.source_plan.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
+        let mut runtime = FakeTransitionRuntime::admitted();
+        assert!(unsupported_source.execute(&mut runtime).is_err());
+        assert!(runtime.events.is_empty());
+
+        let mut unsupported_target = rebuild_transaction();
+        unsupported_target.target_plan.schema_version = F16_REFERENCE_EXECUTION_PLAN_VERSION + 1;
+        let mut runtime = FakeTransitionRuntime::admitted();
+        assert!(unsupported_target.execute(&mut runtime).is_err());
+        assert!(runtime.events.is_empty());
     }
 }
