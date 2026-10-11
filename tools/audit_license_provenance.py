@@ -174,13 +174,14 @@ def _license_file_references(
             git_mode = tracked_modes.get(resolved_path) if resolved_path else None
             candidate = root / resolved_path if resolved_path else None
             symlink = candidate.is_symlink() if candidate else False
-            try:
-                within_repository = bool(
-                    candidate
-                    and candidate.resolve(strict=True).is_relative_to(root.resolve())
-                )
-            except OSError:
-                within_repository = False
+            within_repository = False
+            if candidate and not symlink and git_mode in {"100644", "100755"}:
+                try:
+                    within_repository = candidate.resolve(strict=True).is_relative_to(
+                        root.resolve()
+                    )
+                except (OSError, RuntimeError):
+                    within_repository = False
             regular_file = bool(
                 candidate
                 and git_mode in {"100644", "100755"}
@@ -850,6 +851,27 @@ def _self_test() -> None:
         assert symlink_reference["symlink"] is True
         assert symlink_reference["regular_file"] is False
         assert validate_policy(symlink_report, policy, root) == [
+            "every Cargo license-file reference must resolve to a tracked regular file",
+            "Cargo license-file referenced contents differ from the reviewed policy",
+        ]
+
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").symlink_to("terms.txt")
+        subprocess.run(
+            ["git", "-C", str(root), "add", "legal/terms.txt"],
+            check=True,
+        )
+        loop_report = build_report(root)
+        loop_reference = next(
+            reference
+            for reference in loop_report["license_file_references"]
+            if reference["resolved"] == "legal/terms.txt"
+        )
+        assert loop_reference["git_mode"] == "120000"
+        assert loop_reference["symlink"] is True
+        assert loop_reference["within_repository"] is False
+        assert loop_reference["regular_file"] is False
+        assert validate_policy(loop_report, policy, root) == [
             "every Cargo license-file reference must resolve to a tracked regular file",
             "Cargo license-file referenced contents differ from the reviewed policy",
         ]
