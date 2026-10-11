@@ -11,14 +11,28 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import pathlib
-import re
+import posixpath
 import subprocess
+import sys
 import tempfile
+import tomllib
 from typing import Iterable
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+POLICY_SCHEMA_VERSION = 1
+POLICY_REPOSITORY = "Memorithm/NNIS"
+POLICY_LEGAL_EFFECT = (
+    "This policy records reviewed repository facts only. It does not grant, "
+    "revoke, replace, or reinterpret any copyright or license right."
+)
+REQUIRED_EVIDENCE_PATHS = {
+    ".github/workflows/ci.yml",
+    "docs/memory/license-provenance-audit-v1.md",
+    "tools/audit_license_provenance.py",
+}
 TEXT_SUFFIXES = {
     ".c",
     ".cc",
@@ -38,6 +52,11 @@ TEXT_SUFFIXES = {
     ".yml",
 }
 LICENSE_NAMES = {"license", "copying", "notice", "authors"}
+LICENSE_DIRECTORY_NAMES = {"license", "licenses", "notice", "notices", "copying"}
+AUDIT_METADATA_PATHS = {
+    "docs/memory/license-provenance-audit-v1.md",
+    "policy/license-provenance-v1.json",
+}
 REVIEW_PATH_COMPONENTS = {
     "vendor",
     "vendors",
@@ -81,6 +100,17 @@ def _tracked_files(root: pathlib.Path) -> list[str]:
     return sorted(path for path in raw.split("\0") if path)
 
 
+def _tracked_file_modes(root: pathlib.Path) -> dict[str, str]:
+    raw = _git(root, "ls-files", "--stage", "-z")
+    modes: dict[str, str] = {}
+    for record in raw.split("\0"):
+        if not record or "\t" not in record:
+            continue
+        metadata, path = record.split("\t", 1)
+        modes[path] = metadata.split(" ", 1)[0]
+    return modes
+
+
 def _contributors(root: pathlib.Path) -> list[dict[str, object]]:
     raw = _git(root, "log", "--format=%aN%x1f%aE")
     counts: collections.Counter[tuple[str, str]] = collections.Counter()
@@ -98,21 +128,116 @@ def _contributors(root: pathlib.Path) -> list[dict[str, object]]:
 
 
 def _is_license_like(path: str) -> bool:
-    name = pathlib.PurePosixPath(path).name.lower()
-    stem = name.split(".", 1)[0]
-    return stem in LICENSE_NAMES or name.startswith("license-")
+    pure_path = pathlib.PurePosixPath(path)
+    if pure_path.as_posix() in AUDIT_METADATA_PATHS:
+        return False
+    if any(part.lower() in LICENSE_DIRECTORY_NAMES for part in pure_path.parts[:-1]):
+        return True
+    name = pure_path.name.lower()
+    return any(
+        name == base
+        or name.startswith(f"{base}.")
+        or name.startswith(f"{base}-")
+        or name.startswith(f"{base}_")
+        for base in LICENSE_NAMES
+    )
 
 
-def _manifest_license_metadata(text: str) -> dict[str, list[str]]:
-    license_values = re.findall(
-        r'(?m)^\s*license\s*=\s*"([^"]+)"\s*(?:#.*)?$', text
+def _license_file_references(
+    root: pathlib.Path,
+    tracked_modes: dict[str, str],
+    manifests: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    references: list[dict[str, object]] = []
+    for manifest in manifests:
+        manifest_path = str(manifest["path"])
+        manifest_parent = pathlib.PurePosixPath(manifest_path).parent
+        declarations: list[tuple[str, str]] = []
+        declarations.extend(
+            ("package.license-file", str(value))
+            for value in manifest.get("license_files", [])
+        )
+        workspace_value = manifest.get("workspace_package_license_file")
+        if isinstance(workspace_value, str):
+            declarations.append(("workspace.package.license-file", workspace_value))
+
+        for metadata, declared in declarations:
+            declared_path = pathlib.PurePosixPath(declared)
+            unsafe = declared_path.is_absolute()
+            resolved = posixpath.normpath(
+                (manifest_parent / declared_path).as_posix()
+            )
+            if resolved == ".." or resolved.startswith("../"):
+                unsafe = True
+            resolved_path = None if unsafe else resolved
+            tracked_file = resolved_path in tracked_modes if resolved_path else False
+            git_mode = tracked_modes.get(resolved_path) if resolved_path else None
+            candidate = root / resolved_path if resolved_path else None
+            symlink = candidate.is_symlink() if candidate else False
+            within_repository = False
+            if candidate and not symlink and git_mode in {"100644", "100755"}:
+                try:
+                    within_repository = candidate.resolve(strict=True).is_relative_to(
+                        root.resolve()
+                    )
+                except (OSError, RuntimeError):
+                    within_repository = False
+            regular_file = bool(
+                candidate
+                and git_mode in {"100644", "100755"}
+                and not symlink
+                and candidate.is_file()
+                and within_repository
+            )
+            sha256 = (
+                _sha256(root / resolved_path)
+                if resolved_path and tracked_file and regular_file
+                else None
+            )
+            references.append(
+                {
+                    "manifest": manifest_path,
+                    "metadata": metadata,
+                    "declared": declared,
+                    "resolved": resolved_path,
+                    "tracked": tracked_file,
+                    "git_mode": git_mode,
+                    "symlink": symlink,
+                    "within_repository": within_repository,
+                    "regular_file": regular_file,
+                    "sha256": sha256,
+                }
+            )
+    return references
+
+
+def _manifest_license_metadata(text: str) -> dict[str, object]:
+    parsed = tomllib.loads(text)
+    package = parsed.get("package", {})
+    package_license = package.get("license")
+    package_license_file = package.get("license-file")
+    license_inherited = (
+        isinstance(package_license, dict)
+        and package_license.get("workspace") is True
     )
-    license_files = re.findall(
-        r'(?m)^\s*license-file\s*=\s*"([^"]+)"\s*(?:#.*)?$', text
+    license_file_inherited = (
+        isinstance(package_license_file, dict)
+        and package_license_file.get("workspace") is True
     )
+    workspace_package = parsed.get("workspace", {}).get("package", {})
+    workspace_license = workspace_package.get("license")
+    workspace_license_file = workspace_package.get("license-file")
     return {
-        "license_values": license_values,
-        "license_files": license_files,
+        "license_values": (
+            [package_license] if isinstance(package_license, str) else []
+        ),
+        "license_files": (
+            [package_license_file] if isinstance(package_license_file, str) else []
+        ),
+        "license_workspace_inherited": license_inherited,
+        "license_file_workspace_inherited": license_file_inherited,
+        "workspace_package_license": workspace_license,
+        "workspace_package_license_file": workspace_license_file,
     }
 
 
@@ -166,18 +291,85 @@ def _review_paths(tracked: Iterable[str]) -> list[str]:
     return sorted(result)
 
 
+def _sha256(path: pathlib.Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _tracked_regular_sha256(
+    root: pathlib.Path, paths: Iterable[str], tracked_modes: dict[str, str]
+) -> dict[str, str]:
+    identities: dict[str, str] = {}
+    for relative in paths:
+        candidate = root / relative
+        if (
+            tracked_modes.get(relative) not in {"100644", "100755"}
+            or candidate.is_symlink()
+            or not candidate.is_file()
+        ):
+            continue
+        try:
+            identities[relative] = _sha256(candidate)
+        except OSError:
+            continue
+    return identities
+
+
+def _locked_dependencies(root: pathlib.Path) -> dict[str, object]:
+    lock_path = root / "Cargo.lock"
+    if not lock_path.is_file():
+        return {
+            "present": False,
+            "sha256": None,
+            "package_count": 0,
+            "external_package_count": 0,
+            "packages": [],
+        }
+
+    parsed = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    packages: list[dict[str, object]] = []
+    for package in parsed.get("package", []):
+        packages.append(
+            {
+                key: package[key]
+                for key in ("name", "version", "source", "checksum")
+                if key in package
+            }
+        )
+    external = [package for package in packages if "source" in package]
+    return {
+        "present": True,
+        "sha256": _sha256(lock_path),
+        "package_count": len(packages),
+        "external_package_count": len(external),
+        "packages": packages,
+    }
+
+
 def build_report(root: pathlib.Path) -> dict[str, object]:
     root = root.resolve()
     if not (root / ".git").exists():
         raise AuditError(f"{root} is not a Git working tree root")
 
     tracked = _tracked_files(root)
+    tracked_modes = _tracked_file_modes(root)
     head = _git(root, "rev-parse", "HEAD").strip()
     status = _git(root, "status", "--porcelain=v1")
     license_like = sorted(path for path in tracked if _is_license_like(path))
+    license_notice_sha256 = _tracked_regular_sha256(
+        root, license_like, tracked_modes
+    )
     root_license_like = [
         path for path in license_like if "/" not in pathlib.PurePosixPath(path).as_posix()
     ]
+    root_license_notice_sha256 = {
+        path: license_notice_sha256[path]
+        for path in root_license_like
+        if path in license_notice_sha256
+    }
 
     manifests: list[dict[str, object]] = []
     for relative in tracked:
@@ -195,6 +387,12 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         )
 
     markers = _source_markers(root, tracked)
+    license_file_references = _license_file_references(root, tracked_modes, manifests)
+    license_file_reference_sha256 = {
+        str(reference["resolved"]): str(reference["sha256"])
+        for reference in license_file_references
+        if reference.get("resolved") and reference.get("sha256")
+    }
     report = {
         "schema_version": SCHEMA_VERSION,
         "repository_root": str(root),
@@ -203,8 +401,13 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         "tracked_file_count": len(tracked),
         "contributors": _contributors(root),
         "license_notice_files": license_like,
+        "license_notice_sha256": license_notice_sha256,
+        "license_file_references": license_file_references,
+        "license_file_reference_sha256": license_file_reference_sha256,
         "root_license_notice_files": root_license_like,
+        "root_license_notice_sha256": root_license_notice_sha256,
         "cargo_manifests": manifests,
+        "cargo_lock": _locked_dependencies(root),
         "vendored_generated_review_paths": _review_paths(tracked),
         **markers,
         "automatic_relicensing_ready": False,
@@ -222,15 +425,256 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
     return report
 
 
+def validate_policy(
+    report: dict[str, object], policy: dict[str, object], root: pathlib.Path
+) -> list[str]:
+    """Validate repository facts against a versioned, non-relicensing policy."""
+    errors: list[str] = []
+    if policy.get("schema_version") != POLICY_SCHEMA_VERSION:
+        errors.append(
+            f"policy schema_version must be {POLICY_SCHEMA_VERSION}"
+        )
+    if policy.get("automatic_relicensing_ready") is not False:
+        errors.append("policy must keep automatic_relicensing_ready=false")
+    if policy.get("repository") != POLICY_REPOSITORY:
+        errors.append(f"policy repository must be {POLICY_REPOSITORY}")
+    if policy.get("legal_effect") != POLICY_LEGAL_EFFECT:
+        errors.append("policy legal_effect must retain the non-relicensing boundary")
+    if policy.get("decision") != "deferred_pending_documented_rights_review":
+        errors.append("policy must defer relicensing pending documented rights review")
+    if (
+        policy.get("dependency_license_obligations_status")
+        != "unresolved_manual_review_required"
+    ):
+        errors.append(
+            "policy must keep dependency license obligations under manual review"
+        )
+
+    expected = policy.get("expected_repository_state")
+    if not isinstance(expected, dict):
+        return errors + ["expected_repository_state must be an object"]
+
+    manifests = report.get("cargo_manifests", [])
+    manifest_by_path = {
+        str(item.get("path")): item
+        for item in manifests
+        if isinstance(item, dict)
+    }
+    expected_manifests = expected.get("cargo_manifests")
+    if not isinstance(expected_manifests, list):
+        errors.append("expected_repository_state.cargo_manifests must be a list")
+        expected_manifests = []
+    if sorted(manifest_by_path) != sorted(str(path) for path in expected_manifests):
+        errors.append("Cargo manifest inventory differs from the reviewed policy")
+
+    root_manifest = manifest_by_path.get("Cargo.toml", {})
+    expected_workspace_license = expected.get("workspace_package_license")
+    if root_manifest.get("workspace_package_license") != expected_workspace_license:
+        errors.append(
+            "workspace package license metadata differs from the reviewed policy"
+        )
+    expected_workspace_license_file = expected.get("workspace_package_license_file")
+    if (
+        root_manifest.get("workspace_package_license_file")
+        != expected_workspace_license_file
+    ):
+        errors.append(
+            "workspace package license-file metadata differs from the reviewed policy"
+        )
+
+    expected_inherited = expected.get("workspace_license_inheritors")
+    if not isinstance(expected_inherited, list):
+        errors.append(
+            "expected_repository_state.workspace_license_inheritors must be a list"
+        )
+        expected_inherited = []
+    actual_inherited = sorted(
+        path
+        for path, metadata in manifest_by_path.items()
+        if metadata.get("license_workspace_inherited") is True
+    )
+    if actual_inherited != sorted(str(path) for path in expected_inherited):
+        errors.append("workspace license inheritance differs from the reviewed policy")
+
+    expected_license_file_inherited = expected.get(
+        "workspace_license_file_inheritors"
+    )
+    if not isinstance(expected_license_file_inherited, list):
+        errors.append(
+            "expected_repository_state.workspace_license_file_inheritors must be a list"
+        )
+        expected_license_file_inherited = []
+    actual_license_file_inherited = sorted(
+        path
+        for path, metadata in manifest_by_path.items()
+        if metadata.get("license_file_workspace_inherited") is True
+    )
+    if actual_license_file_inherited != sorted(
+        str(path) for path in expected_license_file_inherited
+    ):
+        errors.append(
+            "workspace license-file inheritance differs from the reviewed policy"
+        )
+
+    for field, metadata_key, description in (
+        ("manifest_license_values", "license_values", "manifest license values"),
+        ("manifest_license_files", "license_files", "manifest license-file metadata"),
+    ):
+        expected_metadata = expected.get(field)
+        if not isinstance(expected_metadata, dict):
+            errors.append(f"expected_repository_state.{field} must be an object")
+            expected_metadata = {}
+        actual_metadata = {
+            path: metadata[metadata_key]
+            for path, metadata in manifest_by_path.items()
+            if metadata.get(metadata_key)
+        }
+        normalized_expected = {
+            str(path): values for path, values in expected_metadata.items()
+        }
+        if actual_metadata != normalized_expected:
+            errors.append(f"{description} differ from the reviewed policy")
+
+    expected_notices = expected.get("license_notice_files")
+    if report.get("license_notice_files") != expected_notices:
+        errors.append("license/notice file state differs from the reviewed policy")
+    expected_notice_sha256 = expected.get("license_notice_sha256")
+    if not isinstance(expected_notice_sha256, dict):
+        errors.append(
+            "expected_repository_state.license_notice_sha256 must be an object"
+        )
+        expected_notice_sha256 = {}
+    if report.get("license_notice_sha256") != expected_notice_sha256:
+        errors.append(
+            "license/notice file contents differ from the reviewed policy"
+        )
+    actual_notice_paths = report.get("license_notice_files")
+    actual_notice_sha256 = report.get("license_notice_sha256")
+    if (
+        not isinstance(actual_notice_paths, list)
+        or not isinstance(actual_notice_sha256, dict)
+        or set(actual_notice_paths) != set(actual_notice_sha256)
+    ):
+        errors.append(
+            "every license/notice path must resolve to a tracked regular file"
+        )
+
+    references = report.get("license_file_references")
+    if not isinstance(references, list):
+        errors.append("audit report license_file_references must be a list")
+        references = []
+    for reference in references:
+        if not isinstance(reference, dict) or not reference.get("sha256"):
+            errors.append(
+                "every Cargo license-file reference must resolve to a tracked regular file"
+            )
+            break
+    expected_reference_sha256 = expected.get("license_file_reference_sha256")
+    if not isinstance(expected_reference_sha256, dict):
+        errors.append(
+            "expected_repository_state.license_file_reference_sha256 must be an object"
+        )
+        expected_reference_sha256 = {}
+    if report.get("license_file_reference_sha256") != expected_reference_sha256:
+        errors.append(
+            "Cargo license-file referenced contents differ from the reviewed policy"
+        )
+
+    expected_root_notices = expected.get("root_license_notice_files")
+    if report.get("root_license_notice_files") != expected_root_notices:
+        errors.append("root license/notice file state differs from the reviewed policy")
+    expected_root_notice_sha256 = expected.get("root_license_notice_sha256")
+    if not isinstance(expected_root_notice_sha256, dict):
+        errors.append(
+            "expected_repository_state.root_license_notice_sha256 must be an object"
+        )
+        expected_root_notice_sha256 = {}
+    if report.get("root_license_notice_sha256") != expected_root_notice_sha256:
+        errors.append(
+            "root license/notice file contents differ from the reviewed policy"
+        )
+
+    cargo_lock = report.get("cargo_lock", {})
+    if not isinstance(cargo_lock, dict) or not cargo_lock.get("present"):
+        errors.append("Cargo.lock is required for dependency provenance inventory")
+    elif cargo_lock.get("sha256") != expected.get("cargo_lock_sha256"):
+        errors.append("Cargo.lock differs from the reviewed provenance baseline")
+
+    required_evidence = expected.get("required_evidence_sha256")
+    if not isinstance(required_evidence, dict):
+        errors.append("expected_repository_state.required_evidence_sha256 must be an object")
+        required_evidence = {}
+    if set(required_evidence) != REQUIRED_EVIDENCE_PATHS:
+        errors.append(
+            "required provenance evidence paths differ from the mandatory set"
+        )
+    for relative, expected_sha256 in required_evidence.items():
+        relative_path = pathlib.PurePosixPath(str(relative))
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            errors.append(f"required provenance evidence path is unsafe: {relative}")
+            continue
+        path = root / relative_path
+        if not path.is_file():
+            errors.append(f"required provenance evidence file is missing: {relative}")
+        elif _sha256(path) != expected_sha256:
+            errors.append(
+                f"required provenance evidence file differs from policy: {relative}"
+            )
+
+    if report.get("automatic_relicensing_ready") is not False:
+        errors.append("audit report must keep automatic_relicensing_ready=false")
+    return errors
+
+
 def _self_test() -> None:
     with tempfile.TemporaryDirectory(prefix="nnis-license-audit-") as raw:
         root = pathlib.Path(raw)
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         (root / "src").mkdir()
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / "docs" / "memory").mkdir(parents=True)
+        (root / "tools").mkdir()
         (root / "Cargo.toml").write_text(
-            '[package]\nname = "fixture"\nversion = "0.1.0"\nlicense = "MIT"\n',
+            '[workspace]\nmembers = ["crate"]\n'
+            "[workspace.package]\nlicense = \"MIT\"\n"
+            "license-file = 'WORKSPACE-COPYING'\n",
             encoding="utf-8",
         )
+        (root / "crate").mkdir()
+        (root / "crate" / "Cargo.toml").write_text(
+            '[package]\nname = "fixture"\nversion = "0.1.0"\n'
+            "license.workspace = true\nlicense-file = '../legal/terms.txt'\n",
+            encoding="utf-8",
+        )
+        (root / "Cargo.lock").write_text(
+            'version = 3\n\n[[package]]\nname = "fixture"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        (root / "NOTICE-THIRDPARTY").write_text(
+            "Fixture third-party notice v1\n", encoding="utf-8"
+        )
+        (root / "third_party" / "example").mkdir(parents=True)
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v1\n", encoding="utf-8"
+        )
+        (root / "LICENSES").mkdir()
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v1\n", encoding="utf-8"
+        )
+        (root / "WORKSPACE-COPYING").write_text(
+            "Workspace license fixture v1\n", encoding="utf-8"
+        )
+        (root / "legal").mkdir()
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
+        )
+        evidence_files = {
+            ".github/workflows/ci.yml": "name: fixture\n",
+            "docs/memory/license-provenance-audit-v1.md": "fixture docs\n",
+            "tools/audit_license_provenance.py": "# fixture tool\n",
+        }
+        for relative, content in evidence_files.items():
+            (root / relative).write_text(content, encoding="utf-8")
         (root / "src" / "lib.rs").write_text(
             "// Copyright 2026 Example\n"
             "// SPDX-License-Identifier: MIT\n"
@@ -255,20 +699,246 @@ def _self_test() -> None:
             check=True,
         )
         report = build_report(root)
-        assert report["schema_version"] == 1
-        assert report["tracked_file_count"] == 2
+        assert report["schema_version"] == 2
+        assert report["tracked_file_count"] == 12
         assert report["automatic_relicensing_ready"] is False
-        assert report["root_license_notice_files"] == []
-        assert report["cargo_manifests"][0]["license_values"] == ["MIT"]
+        assert report["license_notice_files"] == [
+            "LICENSES/MIT.txt",
+            "NOTICE-THIRDPARTY",
+            "third_party/example/LICENSE",
+        ]
+        assert report["license_notice_sha256"] == {
+            "LICENSES/MIT.txt": _sha256(root / "LICENSES" / "MIT.txt"),
+            "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
+            "third_party/example/LICENSE": _sha256(
+                root / "third_party" / "example" / "LICENSE"
+            ),
+        }
+        assert report["root_license_notice_files"] == ["NOTICE-THIRDPARTY"]
+        assert report["root_license_notice_sha256"] == {
+            "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY")
+        }
+        assert report["license_file_reference_sha256"] == {
+            "WORKSPACE-COPYING": _sha256(root / "WORKSPACE-COPYING"),
+            "legal/terms.txt": _sha256(root / "legal" / "terms.txt"),
+        }
+        manifests = {item["path"]: item for item in report["cargo_manifests"]}
+        assert manifests["Cargo.toml"]["workspace_package_license"] == "MIT"
+        assert (
+            manifests["Cargo.toml"]["workspace_package_license_file"]
+            == "WORKSPACE-COPYING"
+        )
+        assert manifests["Cargo.toml"]["license_values"] == []
+        assert manifests["crate/Cargo.toml"]["license_workspace_inherited"] is True
+        assert manifests["crate/Cargo.toml"]["license_files"] == [
+            "../legal/terms.txt"
+        ]
+        assert report["cargo_lock"]["package_count"] == 1
         assert report["spdx_files"] == ["src/lib.rs"]
         assert report["copyright_files"] == ["src/lib.rs"]
         assert report["contributors"][0]["name"] == "Audit Fixture"
+
+        policy = {
+            "schema_version": 1,
+            "repository": POLICY_REPOSITORY,
+            "legal_effect": POLICY_LEGAL_EFFECT,
+            "decision": "deferred_pending_documented_rights_review",
+            "dependency_license_obligations_status": (
+                "unresolved_manual_review_required"
+            ),
+            "automatic_relicensing_ready": False,
+            "expected_repository_state": {
+                "workspace_package_license": "MIT",
+                "workspace_package_license_file": "WORKSPACE-COPYING",
+                "license_notice_files": [
+                    "LICENSES/MIT.txt",
+                    "NOTICE-THIRDPARTY",
+                    "third_party/example/LICENSE",
+                ],
+                "license_notice_sha256": {
+                    "LICENSES/MIT.txt": _sha256(root / "LICENSES" / "MIT.txt"),
+                    "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY"),
+                    "third_party/example/LICENSE": _sha256(
+                        root / "third_party" / "example" / "LICENSE"
+                    ),
+                },
+                "license_file_reference_sha256": {
+                    "WORKSPACE-COPYING": _sha256(root / "WORKSPACE-COPYING"),
+                    "legal/terms.txt": _sha256(root / "legal" / "terms.txt"),
+                },
+                "root_license_notice_files": ["NOTICE-THIRDPARTY"],
+                "root_license_notice_sha256": {
+                    "NOTICE-THIRDPARTY": _sha256(root / "NOTICE-THIRDPARTY")
+                },
+                "cargo_manifests": ["Cargo.toml", "crate/Cargo.toml"],
+                "workspace_license_inheritors": ["crate/Cargo.toml"],
+                "workspace_license_file_inheritors": [],
+                "manifest_license_values": {},
+                "manifest_license_files": {
+                    "crate/Cargo.toml": ["../legal/terms.txt"]
+                },
+                "cargo_lock_sha256": report["cargo_lock"]["sha256"],
+                "required_evidence_sha256": {
+                    path: _sha256(root / path) for path in evidence_files
+                },
+            },
+        }
+        assert validate_policy(report, policy, root) == []
+        policy["expected_repository_state"]["workspace_package_license"] = "Apache-2.0"
+        assert validate_policy(report, policy, root) == [
+            "workspace package license metadata differs from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["workspace_package_license"] = "MIT"
+        policy["expected_repository_state"]["workspace_package_license_file"] = (
+            "OTHER-COPYING"
+        )
+        assert validate_policy(report, policy, root) == [
+            "workspace package license-file metadata differs from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["workspace_package_license_file"] = (
+            "WORKSPACE-COPYING"
+        )
+        policy["expected_repository_state"]["manifest_license_files"] = {}
+        assert validate_policy(report, policy, root) == [
+            "manifest license-file metadata differ from the reviewed policy"
+        ]
+        policy["expected_repository_state"]["manifest_license_files"] = {
+            "crate/Cargo.toml": ["../legal/terms.txt"]
+        }
+        policy["expected_repository_state"]["required_evidence_sha256"][
+            "tools/audit_license_provenance.py"
+        ] = "0" * 64
+        assert validate_policy(report, policy, root) == [
+            "required provenance evidence file differs from policy: "
+            "tools/audit_license_provenance.py"
+        ]
+        policy["expected_repository_state"]["required_evidence_sha256"][
+            "tools/audit_license_provenance.py"
+        ] = _sha256(root / "tools/audit_license_provenance.py")
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "Cargo license-file referenced contents differ from the reviewed policy"
+        ]
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
+        )
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "LICENSES" / "MIT.txt").write_text(
+            "MIT bundle fixture v1\n", encoding="utf-8"
+        )
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "third_party" / "example" / "LICENSE").write_text(
+            "Nested fixture license v1\n", encoding="utf-8"
+        )
+        (root / "NOTICE-THIRDPARTY").write_text(
+            "Fixture third-party notice v2\n", encoding="utf-8"
+        )
+        changed_report = build_report(root)
+        assert validate_policy(changed_report, policy, root) == [
+            "license/notice file contents differ from the reviewed policy",
+            "root license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "NOTICE-THIRDPARTY").write_text(
+            "Fixture third-party notice v1\n", encoding="utf-8"
+        )
+        (root / "actual-license.txt").write_text(
+            "Symlink target fixture\n", encoding="utf-8"
+        )
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").symlink_to("../actual-license.txt")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "add",
+                "actual-license.txt",
+                "legal/terms.txt",
+            ],
+            check=True,
+        )
+        symlink_report = build_report(root)
+        symlink_reference = next(
+            reference
+            for reference in symlink_report["license_file_references"]
+            if reference["resolved"] == "legal/terms.txt"
+        )
+        assert symlink_reference["git_mode"] == "120000"
+        assert symlink_reference["symlink"] is True
+        assert symlink_reference["regular_file"] is False
+        assert validate_policy(symlink_report, policy, root) == [
+            "every Cargo license-file reference must resolve to a tracked regular file",
+            "Cargo license-file referenced contents differ from the reviewed policy",
+        ]
+
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").symlink_to("terms.txt")
+        subprocess.run(
+            ["git", "-C", str(root), "add", "legal/terms.txt"],
+            check=True,
+        )
+        loop_report = build_report(root)
+        loop_reference = next(
+            reference
+            for reference in loop_report["license_file_references"]
+            if reference["resolved"] == "legal/terms.txt"
+        )
+        assert loop_reference["git_mode"] == "120000"
+        assert loop_reference["symlink"] is True
+        assert loop_reference["within_repository"] is False
+        assert loop_reference["regular_file"] is False
+        assert validate_policy(loop_report, policy, root) == [
+            "every Cargo license-file reference must resolve to a tracked regular file",
+            "Cargo license-file referenced contents differ from the reviewed policy",
+        ]
+
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "add", "legal/terms.txt"],
+            check=True,
+        )
+        (root / "LICENSE").symlink_to("LICENSE")
+        subprocess.run(
+            ["git", "-C", str(root), "add", "LICENSE"],
+            check=True,
+        )
+        notice_loop_report = build_report(root)
+        assert "LICENSE" in notice_loop_report["license_notice_files"]
+        assert "LICENSE" not in notice_loop_report["license_notice_sha256"]
+        notice_loop_errors = validate_policy(notice_loop_report, policy, root)
+        assert notice_loop_errors == [
+            "license/notice file state differs from the reviewed policy",
+            "every license/notice path must resolve to a tracked regular file",
+            "root license/notice file state differs from the reviewed policy",
+        ], notice_loop_errors
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".", help="Git working tree root")
     parser.add_argument("--output", help="Write JSON report to this path")
+    parser.add_argument(
+        "--policy",
+        help="Validate repository facts against a versioned JSON policy",
+    )
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
 
@@ -278,11 +948,27 @@ def main() -> int:
         return 0
 
     report = build_report(pathlib.Path(args.root))
+    policy_errors: list[str] = []
+    if args.policy:
+        policy_path = pathlib.Path(args.policy)
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        policy_errors = validate_policy(
+            report, policy, pathlib.Path(args.root).resolve()
+        )
+        report["policy_validation"] = {
+            "policy": str(policy_path),
+            "valid": not policy_errors,
+            "errors": policy_errors,
+        }
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         pathlib.Path(args.output).write_text(rendered, encoding="utf-8")
     else:
         print(rendered, end="")
+    if policy_errors:
+        for error in policy_errors:
+            print(f"license provenance policy violation: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

@@ -1,0 +1,53 @@
+{
+  "automatic_relicensing_ready": false,
+  "decision": "deferred_pending_documented_rights_review",
+  "dependency_license_obligations_status": "unresolved_manual_review_required",
+  "expected_repository_state": {
+    "cargo_lock_sha256": "db495b06ff6bf05c2232992ed5071493ae2a61eaf4dbe718d96bcf40ac53edcc",
+    "cargo_manifests": [
+      "Cargo.toml",
+      "crates/nnis-bench/Cargo.toml",
+      "crates/nnis-cli/Cargo.toml",
+      "crates/nnis-core/Cargo.toml",
+      "crates/nnis-cpu/Cargo.toml",
+      "crates/nnis-jit/Cargo.toml",
+      "crates/nnis-kernels/Cargo.toml",
+      "crates/nnis-model/Cargo.toml",
+      "crates/nnis-rt/Cargo.toml",
+      "crates/nnis-sys/Cargo.toml",
+      "crates/nnis-wgpu/Cargo.toml",
+      "crates/nnis/Cargo.toml"
+    ],
+    "manifest_license_files": {},
+    "manifest_license_values": {},
+    "license_notice_files": [],
+    "license_notice_sha256": {},
+    "license_file_reference_sha256": {},
+    "required_evidence_sha256": {
+      ".github/workflows/ci.yml": "1b3f15a341f073df6d007307e01cd5ccc477d674b3687e01ab84069aa203fc5e",
+      "docs/memory/license-provenance-audit-v1.md": "ea87c1b9f633391ee56c71c30634b9104c71163a02c11e33543f89ed28a668e2",
+      "tools/audit_license_provenance.py": "66c1a45638c741be025aeade6f2c9ed3d47cd781af842739170f5e79ec99186f"
+    },
+    "root_license_notice_files": [],
+    "root_license_notice_sha256": {},
+    "workspace_license_inheritors": [
+      "crates/nnis-bench/Cargo.toml",
+      "crates/nnis-cli/Cargo.toml",
+      "crates/nnis-core/Cargo.toml",
+      "crates/nnis-cpu/Cargo.toml",
+      "crates/nnis-jit/Cargo.toml",
+      "crates/nnis-kernels/Cargo.toml",
+      "crates/nnis-model/Cargo.toml",
+      "crates/nnis-rt/Cargo.toml",
+      "crates/nnis-sys/Cargo.toml",
+      "crates/nnis-wgpu/Cargo.toml",
+      "crates/nnis/Cargo.toml"
+    ],
+    "workspace_license_file_inheritors": [],
+    "workspace_package_license": "MIT",
+    "workspace_package_license_file": null
+  },
+  "legal_effect": "This policy records reviewed repository facts only. It does not grant, revoke, replace, or reinterpret any copyright or license right.",
+  "repository": "Memorithm/NNIS",
+  "schema_version": 1
+}
