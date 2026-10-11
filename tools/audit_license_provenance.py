@@ -100,6 +100,17 @@ def _tracked_files(root: pathlib.Path) -> list[str]:
     return sorted(path for path in raw.split("\0") if path)
 
 
+def _tracked_file_modes(root: pathlib.Path) -> dict[str, str]:
+    raw = _git(root, "ls-files", "--stage", "-z")
+    modes: dict[str, str] = {}
+    for record in raw.split("\0"):
+        if not record or "\t" not in record:
+            continue
+        metadata, path = record.split("\t", 1)
+        modes[path] = metadata.split(" ", 1)[0]
+    return modes
+
+
 def _contributors(root: pathlib.Path) -> list[dict[str, object]]:
     raw = _git(root, "log", "--format=%aN%x1f%aE")
     counts: collections.Counter[tuple[str, str]] = collections.Counter()
@@ -134,7 +145,7 @@ def _is_license_like(path: str) -> bool:
 
 def _license_file_references(
     root: pathlib.Path,
-    tracked: set[str],
+    tracked_modes: dict[str, str],
     manifests: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     references: list[dict[str, object]] = []
@@ -159,9 +170,23 @@ def _license_file_references(
             if resolved == ".." or resolved.startswith("../"):
                 unsafe = True
             resolved_path = None if unsafe else resolved
-            tracked_file = resolved_path in tracked if resolved_path else False
-            regular_file = (
-                (root / resolved_path).is_file() if resolved_path else False
+            tracked_file = resolved_path in tracked_modes if resolved_path else False
+            git_mode = tracked_modes.get(resolved_path) if resolved_path else None
+            candidate = root / resolved_path if resolved_path else None
+            symlink = candidate.is_symlink() if candidate else False
+            try:
+                within_repository = bool(
+                    candidate
+                    and candidate.resolve(strict=True).is_relative_to(root.resolve())
+                )
+            except OSError:
+                within_repository = False
+            regular_file = bool(
+                candidate
+                and git_mode in {"100644", "100755"}
+                and not symlink
+                and candidate.is_file()
+                and within_repository
             )
             sha256 = (
                 _sha256(root / resolved_path)
@@ -175,6 +200,9 @@ def _license_file_references(
                     "declared": declared,
                     "resolved": resolved_path,
                     "tracked": tracked_file,
+                    "git_mode": git_mode,
+                    "symlink": symlink,
+                    "within_repository": within_repository,
                     "regular_file": regular_file,
                     "sha256": sha256,
                 }
@@ -307,7 +335,7 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         raise AuditError(f"{root} is not a Git working tree root")
 
     tracked = _tracked_files(root)
-    tracked_set = set(tracked)
+    tracked_modes = _tracked_file_modes(root)
     head = _git(root, "rev-parse", "HEAD").strip()
     status = _git(root, "status", "--porcelain=v1")
     license_like = sorted(path for path in tracked if _is_license_like(path))
@@ -337,7 +365,7 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
         )
 
     markers = _source_markers(root, tracked)
-    license_file_references = _license_file_references(root, tracked_set, manifests)
+    license_file_references = _license_file_references(root, tracked_modes, manifests)
     license_file_reference_sha256 = {
         str(reference["resolved"]): str(reference["sha256"])
         for reference in license_file_references
@@ -792,6 +820,38 @@ def _self_test() -> None:
         assert validate_policy(changed_report, policy, root) == [
             "license/notice file contents differ from the reviewed policy",
             "root license/notice file contents differ from the reviewed policy"
+        ]
+        (root / "NOTICE-THIRDPARTY").write_text(
+            "Fixture third-party notice v1\n", encoding="utf-8"
+        )
+        (root / "actual-license.txt").write_text(
+            "Symlink target fixture\n", encoding="utf-8"
+        )
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").symlink_to("../actual-license.txt")
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "add",
+                "actual-license.txt",
+                "legal/terms.txt",
+            ],
+            check=True,
+        )
+        symlink_report = build_report(root)
+        symlink_reference = next(
+            reference
+            for reference in symlink_report["license_file_references"]
+            if reference["resolved"] == "legal/terms.txt"
+        )
+        assert symlink_reference["git_mode"] == "120000"
+        assert symlink_reference["symlink"] is True
+        assert symlink_reference["regular_file"] is False
+        assert validate_policy(symlink_report, policy, root) == [
+            "every Cargo license-file reference must resolve to a tracked regular file",
+            "Cargo license-file referenced contents differ from the reviewed policy",
         ]
 
 
