@@ -299,6 +299,25 @@ def _sha256(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def _tracked_regular_sha256(
+    root: pathlib.Path, paths: Iterable[str], tracked_modes: dict[str, str]
+) -> dict[str, str]:
+    identities: dict[str, str] = {}
+    for relative in paths:
+        candidate = root / relative
+        if (
+            tracked_modes.get(relative) not in {"100644", "100755"}
+            or candidate.is_symlink()
+            or not candidate.is_file()
+        ):
+            continue
+        try:
+            identities[relative] = _sha256(candidate)
+        except OSError:
+            continue
+    return identities
+
+
 def _locked_dependencies(root: pathlib.Path) -> dict[str, object]:
     lock_path = root / "Cargo.lock"
     if not lock_path.is_file():
@@ -340,14 +359,16 @@ def build_report(root: pathlib.Path) -> dict[str, object]:
     head = _git(root, "rev-parse", "HEAD").strip()
     status = _git(root, "status", "--porcelain=v1")
     license_like = sorted(path for path in tracked if _is_license_like(path))
-    license_notice_sha256 = {
-        path: _sha256(root / path) for path in license_like
-    }
+    license_notice_sha256 = _tracked_regular_sha256(
+        root, license_like, tracked_modes
+    )
     root_license_like = [
         path for path in license_like if "/" not in pathlib.PurePosixPath(path).as_posix()
     ]
     root_license_notice_sha256 = {
-        path: _sha256(root / path) for path in root_license_like
+        path: license_notice_sha256[path]
+        for path in root_license_like
+        if path in license_notice_sha256
     }
 
     manifests: list[dict[str, object]] = []
@@ -526,6 +547,16 @@ def validate_policy(
     if report.get("license_notice_sha256") != expected_notice_sha256:
         errors.append(
             "license/notice file contents differ from the reviewed policy"
+        )
+    actual_notice_paths = report.get("license_notice_files")
+    actual_notice_sha256 = report.get("license_notice_sha256")
+    if (
+        not isinstance(actual_notice_paths, list)
+        or not isinstance(actual_notice_sha256, dict)
+        or set(actual_notice_paths) != set(actual_notice_sha256)
+    ):
+        errors.append(
+            "every license/notice path must resolve to a tracked regular file"
         )
 
     references = report.get("license_file_references")
@@ -875,6 +906,29 @@ def _self_test() -> None:
             "every Cargo license-file reference must resolve to a tracked regular file",
             "Cargo license-file referenced contents differ from the reviewed policy",
         ]
+
+        (root / "legal" / "terms.txt").unlink()
+        (root / "legal" / "terms.txt").write_text(
+            "Package license fixture v1\n", encoding="utf-8"
+        )
+        subprocess.run(
+            ["git", "-C", str(root), "add", "legal/terms.txt"],
+            check=True,
+        )
+        (root / "LICENSE").symlink_to("LICENSE")
+        subprocess.run(
+            ["git", "-C", str(root), "add", "LICENSE"],
+            check=True,
+        )
+        notice_loop_report = build_report(root)
+        assert "LICENSE" in notice_loop_report["license_notice_files"]
+        assert "LICENSE" not in notice_loop_report["license_notice_sha256"]
+        notice_loop_errors = validate_policy(notice_loop_report, policy, root)
+        assert notice_loop_errors == [
+            "license/notice file state differs from the reviewed policy",
+            "every license/notice path must resolve to a tracked regular file",
+            "root license/notice file state differs from the reviewed policy",
+        ], notice_loop_errors
 
 
 def main() -> int:

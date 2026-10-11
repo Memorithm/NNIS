@@ -26,7 +26,7 @@
     "required_evidence_sha256": {
       ".github/workflows/ci.yml": "1b3f15a341f073df6d007307e01cd5ccc477d674b3687e01ab84069aa203fc5e",
       "docs/memory/license-provenance-audit-v1.md": "ea87c1b9f633391ee56c71c30634b9104c71163a02c11e33543f89ed28a668e2",
-      "tools/audit_license_provenance.py": "e82f36fdc44d2ae8a361100cf381a60baf8533f00de4e0e38f6a451af1764664"
+      "tools/audit_license_provenance.py": "66c1a45638c741be025aeade6f2c9ed3d47cd781af842739170f5e79ec99186f"
     },
     "root_license_notice_files": [],
     "root_license_notice_sha256": {},
