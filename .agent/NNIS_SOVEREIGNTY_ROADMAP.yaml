@@ -1383,29 +1383,34 @@ audit_global_remediation_2026_09_30:
       - owned_allocation_budget_is_not_physical_VRAM_residency
       - no_latency_availability_quality_or_hardware_claim
   rt_nnis_03_license_provenance_policy_2026_10_11:
-    status: pull_request_open_waiting_exact_head_CI
+    status: merged_target_validated_technical_gate_external_rights_review_open
     pull_request: https://github.com/Memorithm/NNIS/pull/262
     issue: https://github.com/Memorithm/NNIS/issues/150
     base_revision: 6aa70523d5026c80021943aee38d5f1391a46664
-    candidate_revision: 5950b8a3125a7e1917a0ed7fd28661f80ed768a6
+    candidate_revision: 83d19a736b191ea2b253d461c280e4a99c149c3a
+    merge_revision: 1c1e5b54a782fabed6f0f92b2d34c252236d1ce2
     contract:
       - inventory_workspace_license_inheritance_for_all_12_Cargo_manifests
       - inventory_187_locked_package_identities_and_176_external_sources
       - version_reviewed_Cargo_lock_digest
-      - fail_closed_on_unreviewed_manifest_license_notice_inheritance_or_lockfile_drift
+      - fail_closed_on_unreviewed_manifest_license_notice_inheritance_evidence_or_lockfile_drift
+      - pin_all_detected_license_notice_and_declared_license_file_contents
+      - reject_symlink_nonregular_outside_repository_and_resolution_loop_license_paths
       - retain_automatic_relicensing_ready_false
       - retain_dependency_obligations_as_unresolved_manual_review
-    local_qualification:
-      - provenance_self_test_passed
+    qualification:
+      - provenance_self_test_passed_with_symlink_and_resolution_loop_regressions
       - repository_policy_validation_passed
-      - intentional_workspace_license_drift_rejected
+      - intentional_workspace_license_evidence_notice_and_lock_drift_rejected
       - Python_compile_passed
       - policy_JSON_and_workflow_YAML_parse_passed
       - git_diff_check_passed
-    pending:
-      - exact_head_CI
-      - exact_head_review
-      - merge_and_integrated_main_validation
+      - twelve_review_findings_corrected_and_threads_resolved
+      - exact_head_review_83d19a736b_no_major_issues
+      - exact_head_CI_38149387485_3_of_3_passed
+      - merge_gate_no_conflicts_exact_head_guard
+      - integrated_main_CI_38149749875_3_of_3_passed
+      - integrated_main_revision_1c1e5b54a782fabed6f0f92b2d34c252236d1ce2
     external_limits:
       - contributor_rights_and_consent_not_established_by_source_scan
       - imported_material_and_third_party_notices_require_manual_review
