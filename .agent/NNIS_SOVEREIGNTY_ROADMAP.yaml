@@ -1382,3 +1382,32 @@ audit_global_remediation_2026_09_30:
       - no_zero_downtime_or_hot_switch_claim
       - owned_allocation_budget_is_not_physical_VRAM_residency
       - no_latency_availability_quality_or_hardware_claim
+  rt_nnis_03_license_provenance_policy_2026_10_11:
+    status: pull_request_open_waiting_exact_head_CI
+    pull_request: https://github.com/Memorithm/NNIS/pull/262
+    issue: https://github.com/Memorithm/NNIS/issues/150
+    base_revision: 6aa70523d5026c80021943aee38d5f1391a46664
+    candidate_revision: 5950b8a3125a7e1917a0ed7fd28661f80ed768a6
+    contract:
+      - inventory_workspace_license_inheritance_for_all_12_Cargo_manifests
+      - inventory_187_locked_package_identities_and_176_external_sources
+      - version_reviewed_Cargo_lock_digest
+      - fail_closed_on_unreviewed_manifest_license_notice_inheritance_or_lockfile_drift
+      - retain_automatic_relicensing_ready_false
+      - retain_dependency_obligations_as_unresolved_manual_review
+    local_qualification:
+      - provenance_self_test_passed
+      - repository_policy_validation_passed
+      - intentional_workspace_license_drift_rejected
+      - Python_compile_passed
+      - policy_JSON_and_workflow_YAML_parse_passed
+      - git_diff_check_passed
+    pending:
+      - exact_head_CI
+      - exact_head_review
+      - merge_and_integrated_main_validation
+    external_limits:
+      - contributor_rights_and_consent_not_established_by_source_scan
+      - imported_material_and_third_party_notices_require_manual_review
+      - dependency_license_terms_are_not_contained_in_Cargo_lock
+      - no_relicensing_or_legal_clearance_claim
