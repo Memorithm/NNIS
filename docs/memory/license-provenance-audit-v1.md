@@ -29,6 +29,11 @@ single-quoted values.
 Required evidence files are pinned by SHA-256, so changing the audit
 implementation, workflow, or documentation also requires an explicit baseline
 update.
+
+Root license/notice families include `LICENSE`, `NOTICE`, `COPYING`, and
+`AUTHORS`, with common extension, hyphen, and underscore suffixes. Their paths
+and SHA-256 content identities are policy-checked, so adding or editing a root
+notice cannot pass as unreviewed drift.
 The policy is evidence about repository state; it does not grant, revoke, or
 change any copyright or license right.
 
