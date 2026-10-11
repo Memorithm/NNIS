@@ -33,8 +33,13 @@ update.
 License/notice families include `LICENSE`, `NOTICE`, `COPYING`, and `AUTHORS`,
 with common extension, hyphen, and underscore suffixes. Every matching tracked
 path and SHA-256 content identity is policy-checked, including nested third-party
-files; the root-only fields remain as an explicit summary. Adding or editing any
-detected notice therefore cannot pass as unreviewed drift.
+files and every tracked child of `LICENSE`/`LICENSES`, `NOTICE`/`NOTICES`, or
+`COPYING` directories; the root-only fields remain as an explicit summary.
+Adding or editing any detected notice therefore cannot pass as unreviewed drift.
+Every Cargo package or workspace `license-file` declaration is also resolved
+relative to its declaring manifest. The referenced file must remain a tracked,
+regular file inside the repository and its SHA-256 identity is policy-pinned,
+even when its basename is neutral (for example `legal/terms.txt`).
 The two named audit-control artifacts under `docs/memory/` and `policy/` are
 excluded from notice discovery to avoid treating this evidence and the
 self-referential policy file as third-party notices. The documentation is
