@@ -1,0 +1,45 @@
+{
+  "automatic_relicensing_ready": false,
+  "decision": "deferred_pending_documented_rights_review",
+  "dependency_license_obligations_status": "unresolved_manual_review_required",
+  "expected_repository_state": {
+    "cargo_lock_sha256": "db495b06ff6bf05c2232992ed5071493ae2a61eaf4dbe718d96bcf40ac53edcc",
+    "cargo_manifests": [
+      "Cargo.toml",
+      "crates/nnis-bench/Cargo.toml",
+      "crates/nnis-cli/Cargo.toml",
+      "crates/nnis-core/Cargo.toml",
+      "crates/nnis-cpu/Cargo.toml",
+      "crates/nnis-jit/Cargo.toml",
+      "crates/nnis-kernels/Cargo.toml",
+      "crates/nnis-model/Cargo.toml",
+      "crates/nnis-rt/Cargo.toml",
+      "crates/nnis-sys/Cargo.toml",
+      "crates/nnis-wgpu/Cargo.toml",
+      "crates/nnis/Cargo.toml"
+    ],
+    "required_evidence_files": [
+      "Cargo.lock",
+      "docs/memory/license-provenance-audit-v1.md",
+      "tools/audit_license_provenance.py"
+    ],
+    "root_license_notice_files": [],
+    "workspace_license_inheritors": [
+      "crates/nnis-bench/Cargo.toml",
+      "crates/nnis-cli/Cargo.toml",
+      "crates/nnis-core/Cargo.toml",
+      "crates/nnis-cpu/Cargo.toml",
+      "crates/nnis-jit/Cargo.toml",
+      "crates/nnis-kernels/Cargo.toml",
+      "crates/nnis-model/Cargo.toml",
+      "crates/nnis-rt/Cargo.toml",
+      "crates/nnis-sys/Cargo.toml",
+      "crates/nnis-wgpu/Cargo.toml",
+      "crates/nnis/Cargo.toml"
+    ],
+    "workspace_package_license": "MIT"
+  },
+  "legal_effect": "This policy records reviewed repository facts only. It does not grant, revoke, replace, or reinterpret any copyright or license right.",
+  "repository": "Memorithm/NNIS",
+  "schema_version": 1
+}

@@ -69,7 +69,10 @@ jobs:
       - name: Validate license provenance audit tooling
         run: |
           python3 tools/audit_license_provenance.py --self-test
-          python3 tools/audit_license_provenance.py --root . --output /tmp/nnis-license-provenance.json
+          python3 tools/audit_license_provenance.py \
+            --root . \
+            --policy policy/license-provenance-v1.json \
+            --output /tmp/nnis-license-provenance.json
           python3 -m py_compile tools/audit_license_provenance.py
 
       - name: Install stable Rust components
