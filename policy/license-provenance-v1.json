@@ -22,10 +22,11 @@
     "manifest_license_values": {},
     "license_notice_files": [],
     "license_notice_sha256": {},
+    "license_file_reference_sha256": {},
     "required_evidence_sha256": {
       ".github/workflows/ci.yml": "1b3f15a341f073df6d007307e01cd5ccc477d674b3687e01ab84069aa203fc5e",
-      "docs/memory/license-provenance-audit-v1.md": "373133eb23e34630e0b61217449e5f21c43ca871c60c6b8bbf35329efa2ec805",
-      "tools/audit_license_provenance.py": "2591968fb1ed28a933ab9bc0c0ef7f35f1097d03e4c4cefd744efc8fc559c2bf"
+      "docs/memory/license-provenance-audit-v1.md": "dae038611bb8472bc29f167ae4b763334b4389f8869094f572a74793b6042eca",
+      "tools/audit_license_provenance.py": "7f41514e6656b348dc534f8b4e3c19d023642d1511407e0d7675c2554406bd60"
     },
     "root_license_notice_files": [],
     "root_license_notice_sha256": {},
